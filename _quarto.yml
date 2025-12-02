@@ -1,0 +1,52 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - "*.qmd"       # Include all .qmd files by default
+    - "!*.ipynb"    # Exclude jupyter notebooks
+
+website:
+  title: "Analytics"
+  description: The Wasatch Front Regional Council builds consensus and enhances quality of life by developing and implementing visions and plans for a well-functioning multi-modal transportation system, livable communities, a strong economy, and a healthy environment.The Wasatch Front Regional Council builds consensus and enhances quality of life by developing and implementing visions and plans for a well-functioning multi-modal transportation system, livable communities, a strong economy, and a healthy environment.
+  favicon: "https://raw.githubusercontent.com/WFRCAnalytics/wfrcanalytics.github.io/main/assets/logo/abbreviated/WFRC_logo_abbreviated_white_transparent.png"
+  site-url: 'https://wfrcanalytics.github.io'
+
+  navbar:
+    logo: "https://raw.githubusercontent.com/WFRCAnalytics/wfrcanalytics.github.io/main/assets/logo/abbreviated/WFRC_logo_abbreviated_white_transparent.png"
+    logo-alt: 'WFRC site theme-based logo'
+
+execute:
+   eval: true
+jupyter: python3
+
+format:
+  html:
+    theme:
+        light: flatly
+        dark: darkly
+    respect-user-color-scheme: true
+
+    fig-width: 8.4
+    fig-height: 5.44
+    fig-responsive: true
+
+    toc: true
+    number-sections: true
+    number-depth: 2
+    html-math-method: katex
+    code-link: true
+    code-tools: true
+    code-fold: true
+    code-summary: "Show the code"
+    # fig-width: 8
+    # fig-height: 5
+    # out-width: "100%"
+    # fig-align: center
+    resources:
+        - "_output/*.csv"
+
+title-block-banner: true
+
+# freeze computational output
+# (see https://quarto.org/docs/projects/code-execution.html#freeze)
+freeze: auto

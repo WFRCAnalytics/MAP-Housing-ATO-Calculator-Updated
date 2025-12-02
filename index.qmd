@@ -1,0 +1,14 @@
+---
+title: Housing Access-to-Opportunity Calculator
+subtitle: using R, DuckDB, and GeoParquet
+description: Lorem Ipsum
+author:
+ - name: Pukar Bhandari
+   email: pukar.bhandari@wfrc.utah.gov
+   affiliation:
+     - name: Wasatch Front Regional Council
+       url: "https://wfrc.utah.gov/"
+date: "2025-12-02"
+---
+
+# [Step 1: Download Data](1-download-data.qmd)
