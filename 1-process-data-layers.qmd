@@ -13,6 +13,8 @@ date: "2025-12-02"
 
 # Environment Setup
 
+## Install and Load Libraries
+
 ```r
 install.packages("pak") # https://github.com/r-lib/pak
 
@@ -20,11 +22,13 @@ pak::pak(
   c(
     "tidyverse",   # https://github.com/tidyverse/tidyverse
     "duckdb",      # https://github.com/duckdb/duckdb-r
-    "nanoparquet", # https://github.com/r-lib/nanoparquet/
     "duckplyr",    # https://github.com/tidyverse/duckplyr/
     "duckspatial", # https://github.com/Cidree/duckspatial
+    "arrow",       # https://github.com/apache/arrow/tree/main/r
+    "geoarrow",    # https://github.com/geoarrow/geoarrow-r
     "mapgl",       # https://github.com/walkerke/mapgl/
-    "arcgis"       # https://github.com/R-ArcGIS/arcgis
+    "arcgis",      # https://github.com/R-ArcGIS/arcgis
+    "here"         # https://github.com/r-lib/here/
     ),
     dependencies = TRUE
   )
@@ -32,9 +36,67 @@ pak::pak(
 
 ```{r}
 library(duckdb)
-library(nanoparquet)
 library(duckplyr)
 library(duckspatial)
 library(arcgislayers)
+library(geoarrow)
 library(mapgl)
+library(here)
+```
+
+## Project Constants
+
+```{r}
+PROJECT_CRS <- "EPSG:3566"
+```
+
+# Load Data
+
+## Wasatch Choice Vision Centers
+
+```{r}
+fp_wcv_centers <- here::here("_data/raw/WCV/WCV_Centers_and_Regional_Land_Uses.parquet")
+
+if (file.exists(fp_wcv_centers)) {
+  # Load existing file
+  sf_wcv_centers <- arrow::read_parquet(fp_wcv_centers) |>
+    sf::st_set_geometry(sf::st_as_sfc(sf_wcv_centers[["geometry"]]))
+} else {
+  # Download, Save, and Assign
+  sf_wcv_centers <- arcgislayers::arc_read(
+    "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
+    crs = PROJECT_CRS
+  )
+
+  arrow::write_parquet(sf_wcv_centers, fp_wcv_centers)
+}
+```
+
+```{r}
+mapgl::maplibre_view(sf_wcv_centers, column = "CenterType")
+```
+
+## Regional Boundary
+
+```{r}
+fp_regional_bound <- here::here("_data/raw/WCV/RegionalBoundaryComponents.parquet")
+
+if (file.exists(fp_regional_bound)) {
+  # Load existing file
+  sf_regional_bound <- arrow::read_parquet(fp_regional_bound) |>
+    sf::st_set_geometry(sf::st_as_sfc(sf_regional_bound[["geometry"]]))
+} else {
+  # Download, Save, and Assign
+  sf_regional_bound <- arcgislayers::arc_read(
+    "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/RegionalBoundaryComponents/FeatureServer/0",
+    where = "PlanOrg IN ('MAG MPO', 'WFRC MPO')",
+    crs = PROJECT_CRS
+  )
+
+  arrow::write_parquet(sf_regional_bound, fp_regional_bound)
+}
+```
+
+```{r}
+mapgl::maplibre_view(sf_regional_bound)
 ```
