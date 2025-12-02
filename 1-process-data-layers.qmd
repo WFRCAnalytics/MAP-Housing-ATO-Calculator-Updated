@@ -1,0 +1,40 @@
+---
+title: Process Data Layers
+subtitle: Load, and Prepare Data Layers for Spatial Union
+description: Lorem Ipsum
+author:
+ - name: Pukar Bhandari
+   email: pukar.bhandari@wfrc.utah.gov
+   affiliation:
+     - name: Wasatch Front Regional Council
+       url: "https://wfrc.utah.gov/"
+date: "2025-12-02"
+---
+
+# Environment Setup
+
+```r
+install.packages("pak") # https://github.com/r-lib/pak
+
+pak::pak(
+  c(
+    "tidyverse",   # https://github.com/tidyverse/tidyverse
+    "duckdb",      # https://github.com/duckdb/duckdb-r
+    "nanoparquet", # https://github.com/r-lib/nanoparquet/
+    "duckplyr",    # https://github.com/tidyverse/duckplyr/
+    "duckspatial", # https://github.com/Cidree/duckspatial
+    "mapgl",       # https://github.com/walkerke/mapgl/
+    "arcgis"       # https://github.com/R-ArcGIS/arcgis
+    ),
+    dependencies = TRUE
+  )
+```
+
+```{r}
+library(duckdb)
+library(nanoparquet)
+library(duckplyr)
+library(duckspatial)
+library(arcgislayers)
+library(mapgl)
+```
