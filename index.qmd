@@ -11,4 +11,8 @@ author:
 date: "2025-12-02"
 ---
 
-# [Step 1: Process Data Layers](1-process-data-layers.qmd)
+# [Step 1: Process Data Layers](1-prepare-data-layers.qmd)
+
+# [Step 2: Generate Isochrones](2-isochrone-generation.qmd)
+
+# [Step 3: Spatial Operations](3-spatial-operations.qmd)

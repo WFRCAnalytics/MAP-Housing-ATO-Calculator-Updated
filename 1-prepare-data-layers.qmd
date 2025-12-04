@@ -1,0 +1,523 @@
+---
+title: Prepare Data Layers
+subtitle: Lorem Ipsum
+description: Convert the needed data to parquet format by either downloading them from online or from loca data.
+author:
+ - name: Pukar Bhandari
+   email: pukar.bhandari@wfrc.utah.gov
+   affiliation:
+     - name: Wasatch Front Regional Council
+       url: "https://wfrc.utah.gov/"
+date: "2025-12-02"
+---
+
+# Environment Setup
+
+## Install and Load Libraries
+
+```r
+install.packages("pak") # https://github.com/r-lib/pak
+
+pak::pak(
+  c(
+    "tidyverse",   # https://github.com/tidyverse/tidyverse/
+    "sf",          # https://github.com/r-spatial/sf/
+    "DBI",         # https://github.com/r-dbi/DBI/
+    "duckdb",      # https://github.com/duckdb/duckdb-r/
+    "duckplyr",    # https://github.com/tidyverse/duckplyr/
+    "duckspatial", # https://github.com/Cidree/duckspatial/
+    "arrow",       # https://github.com/apache/arrow/tree/main/r
+    "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
+    "mapgl",       # https://github.com/walkerke/mapgl/
+    "arcgis",      # https://github.com/R-ArcGIS/arcgis/
+    "here"         # https://github.com/r-lib/here/
+    ),
+    dependencies = TRUE
+  )
+```
+
+```{r}
+#| label: setup-libraries
+#| message: false
+#| warning: false
+
+library(sf)
+library(DBI)
+library(duckdb)
+library(duckplyr)
+library(duckspatial)
+library(arcgislayers)
+library(arrow)
+library(geoarrow)
+library(mapgl)
+library(here)
+```
+
+## Project Configurations
+
+### Database Setup/Initialization
+
+```r
+# Only run if this is the first time using `arrow` package on this device
+arrow::install_arrow()
+```
+
+```{r}
+#| label: setup-db-init
+
+# Initialize In-memory database
+conn <- DBI::dbConnect(duckdb::duckdb())
+
+# install and load spatial extension
+DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+```
+
+### Path Configuration
+
+```{r}
+#| label: setup-dirs
+
+# Setup Paths & Params
+dirs <- list(
+  raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets & Buffers
+  results = here::here("_output") # Final Output: Analysis Results
+)
+
+purrr::walk(dirs, ~dir.create(., recursive = TRUE, showWarnings = FALSE))
+```
+
+```{r}
+#| label: setup-subdirs
+
+# Define Sub-directories (To match your existing structure)
+sub_dirs <- list(
+  base   = file.path(dirs$processed, "base_layers"),
+  parcels = file.path(dirs$processed, "parcels_taz"),
+  landuse = file.path(dirs$processed, "landuse_zones"),
+  transport = file.path(dirs$processed, "transportation"),
+  amenities = file.path(dirs$processed, "amenities")
+)
+```
+
+### Projection Constants
+
+```{r}
+#| label: setup-crs
+
+# Projection Constants
+CRS_PROJ <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
+CRS_VIEW <- "EPSG:3857" # WGS 84 / Pseudo-Mercator (Projected - Meters)
+CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
+```
+
+
+## Helper Functions
+
+```{r}
+#| label: load-helpers
+
+source(here::here("_src/download_layer.R"))
+source(here::here("_src/process_local_layer.R"))
+source(here::here("_src/preview_layer.R"))
+```
+
+# Base Layers (The Canvas)
+
+## Administrative Boundaries
+
+### Municipal Boundaries
+
+```{r}
+#| label: muni-bounds
+fp_municipal_bound <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0",
+  name = "UtahMunicipalBoundaries",
+  save_dir = sub_dirs$base, # Saves to _data/processed/base_layers/
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Municipal Boundaries
+preview_layer(fp_municipal_bound, color = "purple")
+```
+
+### County Boundaries
+
+```{r}
+#| label: county-bounds
+fp_county_bound <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahCountyBoundaries/FeatureServer/0",
+  name = "UtahCountyBoundaries",
+  save_dir = sub_dirs$base,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check County Boundaries
+preview_layer(fp_county_bound, color = "purple")
+```
+
+### Regional Boundaries (WFRC/MAG)
+
+```{r}
+#| label: region-bounds
+fp_regional_bound <- download_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/RegionalBoundaryComponents/FeatureServer/0",
+  name = "RegionalBoundaryComponents",
+  query = "PlanOrg IN ('MAG MPO', 'WFRC MPO')",
+  save_dir = sub_dirs$base,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Regional Boundaries
+preview_layer(fp_regional_bound, color = "purple")
+```
+
+## The "Target" Universe: Parcels
+
+* Note: This is likely your largest file.
+* Download/Load Parcels.
+* Standardize Column Names (clean for SQL).
+* Save parcels.parquet.
+
+### Land Parcels
+
+```{r}
+# Parcels (from GDB)
+fp_parcels <- process_local_layer(
+  relative_path = "remm_base_year_20221003/remm_base_year.gdb",
+  output_name   = "parcels",
+  layer_name    = "Buildings" # Verify this layer name in your GDB
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Parcels (Limit to 1000 so browser doesn't crash)
+preview_layer(fp_parcels, color = "orange", limit = 1000)
+```
+
+### Traffic Analysis Zones (TAZ).
+
+```{r}
+fp_wf_taz <- here::here("_data/processed/parcels_taz/WFv920_TAZ.parquet")
+
+if (file.exists(fp_wf_taz)) {
+  # Load existing file
+  sf_wf_taz <- arrow::open_dataset(fp_wf_taz) |>
+    sf::st_as_sf(sf_column_name = "geometry", crs = CRS_PROJ)
+} else {
+  # Download, Save, and Assign
+  sf_wf_taz <- sf::st_read(
+    paste0("/vsizip/", "_data/raw/WFv920_TAZ.zip")
+  ) |>
+    sf::st_transform(CRS_PROJ)
+
+  arrow::write_parquet(sf_wf_taz, fp_wf_taz)
+}
+```
+
+```{r}
+#| eval: false
+mapgl::maplibre_view(sf_wf_taz)
+```
+
+## Land Use & Zones
+
+### Wasatch Choice Vision Centers
+
+```{r}
+#| label: wcv-centers
+fp_wcv_centers <- download_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
+  name = "WCV_Centers_and_Regional_Land_Uses",
+  save_dir = sub_dirs$landuse,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Wasatch Choice Vision Centers
+preview_layer(fp_wcv_centers, color = "purple")
+```
+
+### Utah Qualified Opportunity Zones (QOZ).
+
+```{r}
+#| label: qoz
+fp_utah_qoz <- download_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Qualified_Opportunity_Zones/FeatureServer/0",
+  name = "Utah_Qualified_Opportunity_Zones",
+  save_dir = sub_dirs$landuse,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Utah Qualified Opportunity Zones
+preview_layer(fp_utah_qoz, color = "purple")
+```
+
+# Transportation Network (Data & Buffers)
+
+## Transit Network
+
+### Transit Routes
+
+```{r}
+#| label: transit-routes
+fp_transit_routes <- download_layer(
+  url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Routes_and_Most_Recent_Ridership/FeatureServer/0",
+  name = "UTA_Routes_and_Most_Recent_Ridership",
+  save_dir = sub_dirs$transport,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Transit Routes
+preview_layer(fp_transit_routes, color = "red")
+```
+
+### Transit Stops
+
+```{r}
+#| label: transit-stops
+fp_transit_stops <- download_layer(
+  url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0",
+  name = "UTA_Stops_and_Most_Recent_Ridership",
+  save_dir = sub_dirs$transport,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Transit Stops
+preview_layer(fp_transit_stops, color = "red")
+```
+
+## Active Transportation
+
+```{r}
+#| label: bikeways
+fp_bikeways <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
+  name = "Bikeways",
+  save_dir = sub_dirs$transport,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Utah Bikeways
+preview_layer(fp_bikeways, color = "red")
+```
+
+## Roadway Network
+
+* Download: Highway Interchanges.
+* Processing: Generate Interchange buffers.
+
+# Community Amenities (Data & Buffers)
+
+## Education
+
+### K-12 Schools (Public/Charter)
+
+```{r}
+#| label: schools-k12
+fp_edu_k12 <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0",
+  name = "Schools_PreKto12",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check K-12 Schools
+preview_layer(fp_edu_k12, color = "red")
+```
+
+### Higher Education
+
+```{r}
+#| label: schools-higher
+fp_edu_higher <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0",
+  name = "Schools_HigherEducation",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Higher Education
+preview_layer(fp_edu_higher, color = "red")
+```
+
+## Public Health & Safety
+
+### Healthcare Facilities, Hospitals.
+
+```{r}
+#| label: health-facilities
+fp_health_fac <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0",
+  name = "LicensedHealthCareFacilities",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Healthcare Facilities
+preview_layer(fp_health_fac, color = "red")
+```
+
+### Childcare Centers
+
+```{r}
+#| label: health-facilities
+fp_child_care <- download_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/5",
+  name = "ChildCareFacilities",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Childcare Facilities
+preview_layer(fp_child_care, color = "red")
+```
+
+## Lifestyle & Services
+
+### Groceries Stores
+
+```{r}
+#| label: grocery-store
+fp_grocery_store <- download_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/374",
+  name = "Grocery_Stores",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Grocery Stores
+preview_layer(fp_grocery_store, color = "red")
+```
+
+### Community Centers
+
+```{r}
+#| label: community-center
+fp_community_center <- download_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412",
+  name = "Community_Centers",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Community Centers
+preview_layer(fp_community_center, color = "red")
+```
+
+### Parks and Open Spaces
+
+```{r}
+#| label: open-spaces
+fp_open_spaces <- download_layer(
+  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahParksLocal/FeatureServer/0",
+  name = "UtahParksLocal",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Parks and Open Spaces
+preview_layer(fp_open_spaces, color = "red")
+```
+
+# Quality Control & Manifest
+
+## File Verification
+
+* List all files in `_data/raw` and `_data/processed`.
+* Quick sanity check on file sizes (ensure non-zero bytes).
+
+```{r}
+#| label: verify
+#| eval: false
+
+# List processed files to ensure structure is correct
+list.files(dirs$processed, recursive = TRUE)
+```
+
+## Visual Sample
+
+* Use `mapgl` or `tmap` to visualize one buffer layer over the parcel centroids to ensure projections align.
+
+
+```{r}
+#| label: dis-conn
+DBI::dbDisconnect(conn)
+```

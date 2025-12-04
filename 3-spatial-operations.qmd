@@ -1,0 +1,12 @@
+---
+title: Spatial Operations
+subtitle: Lorem Ipsum
+description: Conduct Spatial Operations to calculate the final results.
+author:
+ - name: Pukar Bhandari
+   email: pukar.bhandari@wfrc.utah.gov
+   affiliation:
+     - name: Wasatch Front Regional Council
+       url: "https://wfrc.utah.gov/"
+date: "2025-12-02"
+---
