@@ -1,61 +1,119 @@
-#' Process Local Vector File (GDB/SHP) to Parquet
+#' Process Vector File to Parquet
 #'
-#' Reads a raw vector file from the RAW directory, cleans it, projects it,
-#' and saves it as a Parquet file in the PROCESSED directory.
+#' Reads a vector file from the RAW directory (or a remote URL), cleans it,
+#' projects it, and saves it as a Parquet file in the PROCESSED directory.
 #'
-#' @param relative_path Path relative to `dirs$raw` (e.g., "Folder/file.shp").
-#' @param output_name Desired output filename (without extension).
-#' @param layer_name (Optional) Layer name if reading from GDB.
-#' @param target_crs Target EPSG code (default `CRS_PROJ`).
+#' @param path Path relative to `dirs$raw` OR a full URL.
+#' @param name Desired output filename (without extension).
+#' @param save_dir Directory to save the Parquet file. Defaults to `dirs$processed`.
+#' @param layer (Optional) Layer name if reading from a multi-layer source (e.g. GDB).
+#' @param crs Target EPSG code (default: `CRS_PROJ`).
+#' @param read_mode How to read the file. Options:
+#'   - "auto": (Default) Tries to guess based on extension/prefix.
+#'   - "standard": Standard local file read (e.g. .shp, .gdb).
+#'   - "zip": Local zip file (/vsizip/).
+#'   - "url": Remote file (/vsicurl/).
+#'   - "remote_zip": Remote zip file (/vsizip//vsicurl/).
 #' @export
 process_local_layer <- function(
-  relative_path,
-  output_name,
-  layer_name = NULL,
-  target_crs = CRS_PROJ
+  path,
+  name,
+  save_dir = dirs$processed,
+  layer = NULL,
+  crs = CRS_PROJ,
+  read_mode = "auto"
 ) {
-  # 1. Define Paths
-  input_path <- file.path(dirs$raw, relative_path)
-  out_fp <- file.path(dirs$processed, paste0(output_name, ".parquet"))
+  # 1. Dependency Check
+  required_pkgs <- c("sf", "janitor", "arrow")
+  missing_pkgs <- required_pkgs[
+    !sapply(required_pkgs, requireNamespace, quietly = TRUE)
+  ]
+  if (length(missing_pkgs) > 0) {
+    stop("Missing packages: ", paste(missing_pkgs, collapse = ", "))
+  }
 
-  # 2. Cache Check
+  # 2. Path Setup
+  if (!dir.exists(save_dir)) {
+    dir.create(save_dir, recursive = TRUE)
+  }
+  out_fp <- file.path(save_dir, paste0(name, ".parquet"))
+
+  # 3. Cache Check
   if (file.exists(out_fp)) {
-    message(paste("✅ Exists:", output_name))
+    message(paste("✅ Exists:", name))
     return(out_fp)
   }
 
-  if (!file.exists(input_path)) {
-    warning(paste("⚠️ Input file not found in raw:", relative_path))
-    return(NULL)
+  # 4. Resolve Mode & DSN
+  dsn_path <- NULL
+
+  # Helper booleans
+  is_url_str <- grepl("^(http|ftp)s?://", path)
+  is_zip_str <- grepl("\\.zip$", path, ignore.case = TRUE)
+
+  # Auto-detect mode if not specified
+  if (read_mode == "auto") {
+    if (is_url_str && is_zip_str) {
+      read_mode <- "remote_zip"
+    } else if (is_url_str) {
+      read_mode <- "url"
+    } else if (is_zip_str) {
+      read_mode <- "zip"
+    } else {
+      read_mode <- "standard"
+    }
   }
 
-  message(paste("⚙️ Processing local file:", output_name))
+  # Construct DSN based on Mode
+  if (read_mode == "remote_zip") {
+    message(paste("🌐 Reading Remote Zip:", path))
+    dsn_path <- paste0("/vsizip//vsicurl/", path)
+  } else if (read_mode == "url") {
+    message(paste("🌐 Reading Remote URL:", path))
+    dsn_path <- paste0("/vsicurl/", path)
+  } else if (read_mode == "zip") {
+    # Local Zip: Prepend Raw Directory + vsizip
+    input_path <- file.path(dirs$raw, path)
+    if (!file.exists(input_path)) {
+      warning("Input not found:", input_path)
+      return(NULL)
+    }
 
-  # 3. Execution
+    message(paste("📦 Reading Local Zip:", path))
+    dsn_path <- paste0("/vsizip/", input_path)
+  } else {
+    # Standard: Prepend Raw Directory
+    input_path <- file.path(dirs$raw, path)
+    if (!file.exists(input_path)) {
+      warning("Input not found:", input_path)
+      return(NULL)
+    }
+
+    message(paste("⚙️ Processing:", name))
+    dsn_path <- input_path
+  }
+
+  # 5. Execution
   tryCatch(
     {
-      # Read GDB vs Shapefile
-      if (!is.null(layer_name)) {
-        sf_obj <- sf::st_read(
-          dsn = input_path,
-          layer = layer_name,
-          quiet = TRUE
-        )
+      # Read
+      if (!is.null(layer)) {
+        sf_obj <- sf::st_read(dsn = dsn_path, layer = layer, quiet = TRUE)
       } else {
-        sf_obj <- sf::st_read(input_path, quiet = TRUE)
+        sf_obj <- sf::st_read(dsn = dsn_path, quiet = TRUE)
       }
 
-      # Clean, Transform, Save
+      # Transform & Save
       sf_obj <- sf_obj |>
         janitor::clean_names() |>
-        sf::st_transform(target_crs)
+        sf::st_transform(crs)
 
       arrow::write_parquet(sf_obj, out_fp)
       message(paste("💾 Saved to processed:", out_fp))
       return(out_fp)
     },
     error = function(e) {
-      warning(paste("❌ Error processing", output_name, ":", e$message))
+      warning(paste("❌ Error processing", name, ":", e$message))
       return(NULL)
     }
   )

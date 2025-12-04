@@ -26,10 +26,11 @@ pak::pak(
     "duckdb",      # https://github.com/duckdb/duckdb-r/
     "duckplyr",    # https://github.com/tidyverse/duckplyr/
     "duckspatial", # https://github.com/Cidree/duckspatial/
+    "arcgis",      # https://github.com/R-ArcGIS/arcgis/
     "arrow",       # https://github.com/apache/arrow/tree/main/r
     "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
+    "janitor",     # https://github.com/sfirke/janitor/
     "mapgl",       # https://github.com/walkerke/mapgl/
-    "arcgis",      # https://github.com/R-ArcGIS/arcgis/
     "here"         # https://github.com/r-lib/here/
     ),
     dependencies = TRUE
@@ -49,6 +50,7 @@ library(duckspatial)
 library(arcgislayers)
 library(arrow)
 library(geoarrow)
+library(janitor)
 library(mapgl)
 library(here)
 ```
@@ -98,6 +100,8 @@ sub_dirs <- list(
   transport = file.path(dirs$processed, "transportation"),
   amenities = file.path(dirs$processed, "amenities")
 )
+
+purrr::walk(sub_dirs, ~dir.create(., recursive = TRUE, showWarnings = FALSE))
 ```
 
 ### Projection Constants
@@ -117,9 +121,9 @@ CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
-source(here::here("_src/download_layer.R"))
-source(here::here("_src/process_local_layer.R"))
-source(here::here("_src/preview_layer.R"))
+source(here::here("_src/download_feature_layer.R")) # Download ArcGIS Feature Layers
+source(here::here("_src/process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
+source(here::here("_src/preview_layer.R")) # Preview (geo)parquet files using mapgl
 ```
 
 # Base Layers (The Canvas)
@@ -130,7 +134,7 @@ source(here::here("_src/preview_layer.R"))
 
 ```{r}
 #| label: muni-bounds
-fp_municipal_bound <- download_layer(
+fp_municipal_bound <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0",
   name = "UtahMunicipalBoundaries",
   save_dir = sub_dirs$base, # Saves to _data/processed/base_layers/
@@ -150,7 +154,7 @@ preview_layer(fp_municipal_bound, color = "purple")
 
 ```{r}
 #| label: county-bounds
-fp_county_bound <- download_layer(
+fp_county_bound <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahCountyBoundaries/FeatureServer/0",
   name = "UtahCountyBoundaries",
   save_dir = sub_dirs$base,
@@ -170,10 +174,10 @@ preview_layer(fp_county_bound, color = "purple")
 
 ```{r}
 #| label: region-bounds
-fp_regional_bound <- download_layer(
+fp_regional_bound <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/RegionalBoundaryComponents/FeatureServer/0",
   name = "RegionalBoundaryComponents",
-  query = "PlanOrg IN ('MAG MPO', 'WFRC MPO')",
+  # query = "PlanOrg IN ('MAG MPO', 'WFRC MPO')",
   save_dir = sub_dirs$base,
   crs = CRS_PROJ
 )
@@ -216,26 +220,21 @@ preview_layer(fp_parcels, color = "orange", limit = 1000)
 ### Traffic Analysis Zones (TAZ).
 
 ```{r}
-fp_wf_taz <- here::here("_data/processed/parcels_taz/WFv920_TAZ.parquet")
-
-if (file.exists(fp_wf_taz)) {
-  # Load existing file
-  sf_wf_taz <- arrow::open_dataset(fp_wf_taz) |>
-    sf::st_as_sf(sf_column_name = "geometry", crs = CRS_PROJ)
-} else {
-  # Download, Save, and Assign
-  sf_wf_taz <- sf::st_read(
-    paste0("/vsizip/", "_data/raw/WFv920_TAZ.zip")
-  ) |>
-    sf::st_transform(CRS_PROJ)
-
-  arrow::write_parquet(sf_wf_taz, fp_wf_taz)
-}
+#| label: taz-zones
+fp_wf_taz <- process_local_layer(
+  path = "WFv920_TAZ.zip",
+  name = "WFv920_TAZ",
+  save_dir = sub_dirs$parcels,
+  crs  = CRS_PROJ
+)
 ```
 
 ```{r}
+#| label: verify
 #| eval: false
-mapgl::maplibre_view(sf_wf_taz)
+
+# Check WF-TDM TAZs
+preview_layer(fp_wf_taz, color = "orange", limit = 999)
 ```
 
 ## Land Use & Zones
@@ -244,7 +243,7 @@ mapgl::maplibre_view(sf_wf_taz)
 
 ```{r}
 #| label: wcv-centers
-fp_wcv_centers <- download_layer(
+fp_wcv_centers <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
   name = "WCV_Centers_and_Regional_Land_Uses",
   save_dir = sub_dirs$landuse,
@@ -264,7 +263,7 @@ preview_layer(fp_wcv_centers, color = "purple")
 
 ```{r}
 #| label: qoz
-fp_utah_qoz <- download_layer(
+fp_utah_qoz <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Qualified_Opportunity_Zones/FeatureServer/0",
   name = "Utah_Qualified_Opportunity_Zones",
   save_dir = sub_dirs$landuse,
@@ -288,7 +287,7 @@ preview_layer(fp_utah_qoz, color = "purple")
 
 ```{r}
 #| label: transit-routes
-fp_transit_routes <- download_layer(
+fp_transit_routes <- download_feature_layer(
   url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Routes_and_Most_Recent_Ridership/FeatureServer/0",
   name = "UTA_Routes_and_Most_Recent_Ridership",
   save_dir = sub_dirs$transport,
@@ -301,14 +300,14 @@ fp_transit_routes <- download_layer(
 #| eval: false
 
 # Check Transit Routes
-preview_layer(fp_transit_routes, color = "red")
+preview_layer(fp_transit_routes, color = "red") # TODO: missing crs
 ```
 
 ### Transit Stops
 
 ```{r}
 #| label: transit-stops
-fp_transit_stops <- download_layer(
+fp_transit_stops <- download_feature_layer(
   url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0",
   name = "UTA_Stops_and_Most_Recent_Ridership",
   save_dir = sub_dirs$transport,
@@ -328,7 +327,7 @@ preview_layer(fp_transit_stops, color = "red")
 
 ```{r}
 #| label: bikeways
-fp_bikeways <- download_layer(
+fp_bikeways <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
   name = "Bikeways",
   save_dir = sub_dirs$transport,
@@ -341,7 +340,7 @@ fp_bikeways <- download_layer(
 #| eval: false
 
 # Check Utah Bikeways
-preview_layer(fp_bikeways, color = "red")
+preview_layer(fp_bikeways, color = "red") # TODO: mising CRS
 ```
 
 ## Roadway Network
@@ -357,7 +356,7 @@ preview_layer(fp_bikeways, color = "red")
 
 ```{r}
 #| label: schools-k12
-fp_edu_k12 <- download_layer(
+fp_edu_k12 <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0",
   name = "Schools_PreKto12",
   save_dir = sub_dirs$amenities,
@@ -377,7 +376,7 @@ preview_layer(fp_edu_k12, color = "red")
 
 ```{r}
 #| label: schools-higher
-fp_edu_higher <- download_layer(
+fp_edu_higher <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0",
   name = "Schools_HigherEducation",
   save_dir = sub_dirs$amenities,
@@ -399,7 +398,7 @@ preview_layer(fp_edu_higher, color = "red")
 
 ```{r}
 #| label: health-facilities
-fp_health_fac <- download_layer(
+fp_health_fac <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0",
   name = "LicensedHealthCareFacilities",
   save_dir = sub_dirs$amenities,
@@ -419,8 +418,8 @@ preview_layer(fp_health_fac, color = "red")
 
 ```{r}
 #| label: health-facilities
-fp_child_care <- download_layer(
-  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/5",
+fp_child_care <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/5", # TODO: use UGRC
   name = "ChildCareFacilities",
   save_dir = sub_dirs$amenities,
   crs = CRS_PROJ
@@ -441,8 +440,8 @@ preview_layer(fp_child_care, color = "red")
 
 ```{r}
 #| label: grocery-store
-fp_grocery_store <- download_layer(
-  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/374",
+fp_grocery_store <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/374", # TODO: use UGRC
   name = "Grocery_Stores",
   save_dir = sub_dirs$amenities,
   crs = CRS_PROJ
@@ -461,8 +460,8 @@ preview_layer(fp_grocery_store, color = "red")
 
 ```{r}
 #| label: community-center
-fp_community_center <- download_layer(
-  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412",
+fp_community_center <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412", # TODO: use UGRC
   name = "Community_Centers",
   save_dir = sub_dirs$amenities,
   crs = CRS_PROJ
@@ -481,7 +480,7 @@ preview_layer(fp_community_center, color = "red")
 
 ```{r}
 #| label: open-spaces
-fp_open_spaces <- download_layer(
+fp_open_spaces <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahParksLocal/FeatureServer/0",
   name = "UtahParksLocal",
   save_dir = sub_dirs$amenities,

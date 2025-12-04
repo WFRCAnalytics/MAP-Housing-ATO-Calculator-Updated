@@ -9,7 +9,7 @@
 #' @param query SQL-style WHERE clause (default "1=1").
 #' @param crs Target EPSG code (default `CRS_PROJ`).
 #' @export
-download_layer <- function(
+download_feature_layer <- function(
   url,
   name,
   save_dir = dirs$processed,
