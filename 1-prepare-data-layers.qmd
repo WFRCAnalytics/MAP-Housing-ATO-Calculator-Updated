@@ -67,7 +67,9 @@ arrow::install_arrow()
 dirs <- list(
   source = here::here("_src"), # Source custom functions
   raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
-  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets & Buffers
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
+  buffered = here::here("_data/buffered"), # Intermediate Output: Buffered layers
+  isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
   results = here::here("_output") # Final Output: Analysis Results
 )
 
@@ -579,10 +581,7 @@ preview_layer(fp_park_access)
 list.files(dirs$processed, recursive = TRUE)
 ```
 
-## Visual Sample
-
-* Use `mapgl` or `tmap` to visualize one buffer layer over the parcel centroids to ensure projections align.
-
+## Disconnect Database
 
 ```{r}
 #| label: dis-conn

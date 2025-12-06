@@ -55,3 +55,6 @@ rsconnect/
 
 **/REMM_BY_parcels/*
 **/REMM_BY_buildings/*
+
+# Environment Variiables
+_environment

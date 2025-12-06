@@ -77,7 +77,9 @@ DBI::dbExecute(conn, "CALL register_geoarrow_extension()")
 dirs <- list(
   source = here::here("_src"), # Source custom functions
   raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
-  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets & Buffers
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
+  buffered = here::here("_data/buffered"), # Intermediate Output: Buffered layers
+  isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
   results = here::here("_output") # Final Output: Analysis Results
 )
 ```
