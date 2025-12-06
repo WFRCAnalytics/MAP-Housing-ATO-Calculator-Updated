@@ -8,13 +8,20 @@
 #' @param save_dir Directory to save the Parquet file. Defaults to `dirs$processed`.
 #' @param query SQL-style WHERE clause (default "1=1").
 #' @param crs Target EPSG code (default `CRS_PROJ`).
+#' @param partitioning Character vector of columns to partition by (e.g. "co_name").
+#' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}
+#'   (e.g., \code{compression = "snappy"}, \code{hive_style = FALSE}).
+#'
+#' @return A string containing the full path to the saved file or directory.
 #' @export
 download_feature_layer <- function(
   url,
   name,
   save_dir = dirs$processed,
   query = "1=1",
-  crs = CRS_PROJ
+  crs = CRS_PROJ,
+  partitioning = NULL,
+  ...
 ) {
   # 1. Dependency Check
   required_pkgs <- c("arcgislayers", "janitor", "arrow", "sf", "dplyr")
@@ -29,12 +36,17 @@ download_feature_layer <- function(
   if (!dir.exists(save_dir)) {
     dir.create(save_dir, recursive = TRUE)
   }
-  fp <- file.path(save_dir, paste0(name, ".parquet"))
+
+  if (!is.null(partitioning)) {
+    out_fp <- file.path(save_dir, name)
+  } else {
+    out_fp <- file.path(save_dir, paste0(name, ".parquet"))
+  }
 
   # 3. Cache Check
-  if (file.exists(fp)) {
+  if (file.exists(out_fp)) {
     message(paste("✅ Exists:", name))
-    return(fp)
+    return(out_fp)
   }
 
   message(paste("⬇️ Downloading:", name))
@@ -51,11 +63,27 @@ download_feature_layer <- function(
       # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.
       sf::st_geometry(sf_obj) <- "geometry"
 
-      # Write to Parquet (Geometry becomes WKB binary)
-      arrow::write_parquet(sf_obj, fp)
+      # 6. Write (Conditional with Ellipsis)
+      if (!is.null(partitioning)) {
+        arrow::write_dataset(
+          dataset = sf_obj,
+          path = out_fp,
+          format = "parquet",
+          partitioning = partitioning,
+          existing_data_behavior = "overwrite",
+          ...
+        )
+        message(paste("💾 Saved Partitioned Dataset:", out_fp))
+      } else {
+        arrow::write_parquet(
+          x = sf_obj,
+          sink = out_fp,
+          ...
+        )
+        message(paste("💾 Saved Parquet File:", out_fp))
+      }
 
-      message(paste("💾 Saved GeoParquet to processed:", fp))
-      return(fp)
+      return(out_fp)
     },
     error = function(e) {
       stop(paste("❌ Error downloading:", name, "\nReason:", e$message))

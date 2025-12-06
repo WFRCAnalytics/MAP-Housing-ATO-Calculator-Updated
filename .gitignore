@@ -52,3 +52,6 @@ rsconnect/
 **/remm_base_year.gdb.zip
 **/REMM_BY_parcels.parquet
 **/REMM_BY_buildings.parquet
+
+**/REMM_BY_parcels/*
+**/REMM_BY_buildings/*

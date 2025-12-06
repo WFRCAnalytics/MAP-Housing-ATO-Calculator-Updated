@@ -14,6 +14,11 @@
 #'   - "zip": Local zip file (/vsizip/).
 #'   - "url": Remote file (/vsicurl/).
 #'   - "remote_zip": Remote zip file (/vsizip//vsicurl/).
+#' @param partitioning Character vector of columns to partition by (e.g. "co_name").
+#' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}
+#'   (e.g., \code{compression = "snappy"}, \code{hive_style = FALSE}).
+#'
+#' @return A string containing the full path to the saved file or directory.
 #' @export
 process_local_layer <- function(
   path,
@@ -21,7 +26,9 @@ process_local_layer <- function(
   save_dir = dirs$processed,
   layer = NULL,
   crs = CRS_PROJ,
-  read_mode = "auto"
+  read_mode = "auto",
+  partitioning = NULL,
+  ...
 ) {
   # 1. Dependency Check
   required_pkgs <- c("sf", "janitor", "arrow")
@@ -36,7 +43,13 @@ process_local_layer <- function(
   if (!dir.exists(save_dir)) {
     dir.create(save_dir, recursive = TRUE)
   }
-  out_fp <- file.path(save_dir, paste0(name, ".parquet"))
+
+  # 2. Path Setup
+  if (!is.null(partitioning)) {
+    out_fp <- file.path(save_dir, name)
+  } else {
+    out_fp <- file.path(save_dir, paste0(name, ".parquet"))
+  }
 
   # 3. Cache Check
   if (file.exists(out_fp)) {
@@ -97,10 +110,19 @@ process_local_layer <- function(
   tryCatch(
     {
       # Read
+      # We add options to ignore the expensive hole-sorting check
+      # This makes reading massive/complex polygons much faster
       if (!is.null(layer)) {
-        sf_obj <- sf::st_read(dsn = dsn_path, layer = layer, quiet = TRUE)
+        sf_obj <- sf::st_read(
+          dsn = dsn_path,
+          layer = layer,
+          quiet = TRUE
+        )
       } else {
-        sf_obj <- sf::st_read(dsn = dsn_path, quiet = TRUE)
+        sf_obj <- sf::st_read(
+          dsn = dsn_path,
+          quiet = TRUE
+        )
       }
 
       # 1. Standardize Names & Drop Z/M
@@ -144,9 +166,26 @@ process_local_layer <- function(
       # 4. Standardize Geometry Name
       sf::st_geometry(sf_obj) <- "geometry"
 
-      # 5. Write to parquet file using Arrow
-      arrow::write_parquet(sf_obj, out_fp)
-      message(paste("💾 Saved to processed:", out_fp))
+      # Write (Conditional with Ellipsis)
+      if (!is.null(partitioning)) {
+        arrow::write_dataset(
+          dataset = sf_obj,
+          path = out_fp,
+          format = "parquet",
+          partitioning = partitioning,
+          existing_data_behavior = "overwrite",
+          ...
+        )
+        message(paste("💾 Saved Partitioned Dataset:", out_fp))
+      } else {
+        arrow::write_parquet(
+          x = sf_obj,
+          sink = out_fp,
+          ...
+        )
+        message(paste("💾 Saved Parquet File:", out_fp))
+      }
+
       return(out_fp)
     },
     error = function(e) {
