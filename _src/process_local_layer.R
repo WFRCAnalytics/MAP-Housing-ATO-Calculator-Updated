@@ -103,11 +103,48 @@ process_local_layer <- function(
         sf_obj <- sf::st_read(dsn = dsn_path, quiet = TRUE)
       }
 
-      # Transform & Save
+      # 1. Standardize Names & Drop Z/M
       sf_obj <- sf_obj |>
         janitor::clean_names() |>
+        sf::st_zm(drop = TRUE)
+
+      # 2. Linearize Curved Geometries ONLY
+      # We check specific types present, not the summary "GEOMETRY"
+      present_types <- sf::st_geometry_type(sf_obj) |>
+        unique() |>
+        as.character()
+
+      # Check if any "bad" types (Curves/Surfaces) exist
+      has_curves <- any(grepl("CURVE|SURFACE|ARC", present_types))
+
+      if (has_curves) {
+        target_cast <- NULL
+
+        # If it's a Polygon-type curve (CURVEPOLYGON, MULTISURFACE)
+        if (any(grepl("POLYGON|SURFACE", present_types))) {
+          target_cast <- "MULTIPOLYGON"
+          # If it's a Line-type curve (MULTICURVE, CIRCULARSTRING, COMPOUNDCURVE)
+          # We check for CURVE here specifically for lines if it wasn't a polygon
+        } else if (any(grepl("LINE|STRING|ARC|CURVE", present_types))) {
+          target_cast <- "MULTILINESTRING"
+        }
+
+        if (!is.null(target_cast)) {
+          message(paste("   ⚠️ Linearizing curved geometry to:", target_cast))
+          sf_obj <- sf::st_cast(sf_obj, target_cast)
+        }
+      }
+
+      # 3. Final Fixes & Project
+
+      sf_obj <- sf_obj |>
+        sf::st_make_valid() |>
         sf::st_transform(crs)
 
+      # 4. Standardize Geometry Name
+      sf::st_geometry(sf_obj) <- "geometry"
+
+      # 5. Write to parquet file using Arrow
       arrow::write_parquet(sf_obj, out_fp)
       message(paste("💾 Saved to processed:", out_fp))
       return(out_fp)

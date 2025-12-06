@@ -47,3 +47,8 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Large files > 100MB
+**/remm_base_year.gdb.zip
+**/REMM_BY_parcels.parquet
+**/REMM_BY_buildings.parquet

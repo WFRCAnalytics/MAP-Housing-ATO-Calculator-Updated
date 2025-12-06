@@ -10,3 +10,109 @@ author:
        url: "https://wfrc.utah.gov/"
 date: "2025-12-02"
 ---
+
+# Environment Setup
+
+## Install and Load Libraries
+
+```r
+install.packages("pak") # https://github.com/r-lib/pak
+
+pak::pak(
+  c(
+    "tidyverse",   # https://github.com/tidyverse/tidyverse/
+    "sf",          # https://github.com/r-spatial/sf/
+    "DBI",         # https://github.com/r-dbi/DBI/
+    "duckdb",      # https://github.com/duckdb/duckdb-r/
+    "duckplyr",    # https://github.com/tidyverse/duckplyr/
+    "duckspatial", # https://github.com/Cidree/duckspatial/
+    "arrow",       # https://github.com/apache/arrow/tree/main/r
+    "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
+    "janitor",     # https://github.com/sfirke/janitor/
+    "mapgl",       # https://github.com/walkerke/mapgl/
+    "here"         # https://github.com/r-lib/here/
+    ),
+    dependencies = TRUE
+  )
+```
+
+```{r}
+#| label: setup-libraries
+#| message: false
+#| warning: false
+
+library(sf)
+library(DBI)
+library(duckdb)
+library(duckplyr)
+library(duckspatial)
+library(arrow)
+library(geoarrow)
+library(janitor)
+library(mapgl)
+library(here)
+```
+
+## Project Configurations
+
+### Database Setup
+
+```{r}
+#| label: setup-db-init
+
+# Initialize In-memory database
+conn <- DBI::dbConnect(duckdb::duckdb())
+
+# install and load spatial extension
+DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+DBI::dbExecute(conn, "CALL register_geoarrow_extension()")
+```
+
+### Path Configuration
+
+```{r}
+#| label: setup-dirs
+
+# Setup Paths & Params
+dirs <- list(
+  source = here::here("_src"), # Source custom functions
+  raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets & Buffers
+  results = here::here("_output") # Final Output: Analysis Results
+)
+```
+
+```{r}
+#| label: setup-subdirs
+
+# Define Sub-directories (To match your existing structure)
+sub_dirs <- list(
+  base   = here::here(dirs$processed, "base_layers"),
+  parcels = here::here(dirs$processed, "parcels_taz"),
+  landuse = here::here(dirs$processed, "landuse_zones"),
+  transport = here::here(dirs$processed, "transportation"),
+  access = here::here(dirs$processed, "access"),
+  amenities = here::here(dirs$processed, "amenities")
+)
+```
+
+### Projection Constants
+
+```{r}
+#| label: setup-crs
+
+# Projection Constants
+CRS_PROJ <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
+CRS_VIEW <- "EPSG:3857" # WGS 84 / Pseudo-Mercator (Projected - Meters)
+CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
+```
+
+## Helper Functions
+
+```{r}
+#| label: load-helpers
+
+source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
+source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
+source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
+```

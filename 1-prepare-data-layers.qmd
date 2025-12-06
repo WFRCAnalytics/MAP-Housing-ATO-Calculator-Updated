@@ -20,18 +20,15 @@ install.packages("pak") # https://github.com/r-lib/pak
 
 pak::pak(
   c(
-    "tidyverse",   # https://github.com/tidyverse/tidyverse/
-    "sf",          # https://github.com/r-spatial/sf/
-    "DBI",         # https://github.com/r-dbi/DBI/
-    "duckdb",      # https://github.com/duckdb/duckdb-r/
-    "duckplyr",    # https://github.com/tidyverse/duckplyr/
-    "duckspatial", # https://github.com/Cidree/duckspatial/
-    "arcgis",      # https://github.com/R-ArcGIS/arcgis/
-    "arrow",       # https://github.com/apache/arrow/tree/main/r
-    "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
-    "janitor",     # https://github.com/sfirke/janitor/
-    "mapgl",       # https://github.com/walkerke/mapgl/
-    "here"         # https://github.com/r-lib/here/
+    "tidyverse",    # https://github.com/tidyverse/tidyverse/
+    "sf",           # https://github.com/r-spatial/sf/
+    "arcgislayers", # https://github.com/R-ArcGIS/arcgislayers/
+    "arrow",        # https://github.com/apache/arrow/tree/main/r
+    "geoarrow",     # https://github.com/geoarrow/geoarrow-r/
+    "janitor",      # https://github.com/sfirke/janitor/
+    "mapgl",        # https://github.com/walkerke/mapgl/
+    "here",         # https://github.com/r-lib/here/
+    "fs"            # https://github.com/r-lib/fs/
     ),
     dependencies = TRUE
   )
@@ -43,35 +40,22 @@ pak::pak(
 #| warning: false
 
 library(sf)
-library(DBI)
-library(duckdb)
-library(duckplyr)
-library(duckspatial)
 library(arcgislayers)
 library(arrow)
 library(geoarrow)
 library(janitor)
 library(mapgl)
 library(here)
+library(fs)
 ```
 
 ## Project Configurations
 
-### Database Setup/Initialization
+### Arrow Initialization
 
 ```r
 # Only run if this is the first time using `arrow` package on this device
 arrow::install_arrow()
-```
-
-```{r}
-#| label: setup-db-init
-
-# Initialize In-memory database
-conn <- DBI::dbConnect(duckdb::duckdb())
-
-# install and load spatial extension
-DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
 ```
 
 ### Path Configuration
@@ -81,12 +65,13 @@ DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
 
 # Setup Paths & Params
 dirs <- list(
+  source = here::here("_src"), # Source custom functions
   raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
   processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets & Buffers
   results = here::here("_output") # Final Output: Analysis Results
 )
 
-purrr::walk(dirs, ~dir.create(., recursive = TRUE, showWarnings = FALSE))
+purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -94,14 +79,15 @@ purrr::walk(dirs, ~dir.create(., recursive = TRUE, showWarnings = FALSE))
 
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
-  base   = file.path(dirs$processed, "base_layers"),
-  parcels = file.path(dirs$processed, "parcels_taz"),
-  landuse = file.path(dirs$processed, "landuse_zones"),
-  transport = file.path(dirs$processed, "transportation"),
-  amenities = file.path(dirs$processed, "amenities")
+  base   = here::here(dirs$processed, "base_layers"),
+  parcels = here::here(dirs$processed, "parcels_taz"),
+  landuse = here::here(dirs$processed, "landuse_zones"),
+  transport = here::here(dirs$processed, "transportation"),
+  access = here::here(dirs$processed, "access"),
+  amenities = here::here(dirs$processed, "amenities")
 )
 
-purrr::walk(sub_dirs, ~dir.create(., recursive = TRUE, showWarnings = FALSE))
+purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
 ```
 
 ### Projection Constants
@@ -121,9 +107,9 @@ CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
-source(here::here("_src/download_feature_layer.R")) # Download ArcGIS Feature Layers
-source(here::here("_src/process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
-source(here::here("_src/preview_layer.R")) # Preview (geo)parquet files using mapgl
+source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
+source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
+source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
 ```
 
 # Base Layers (The Canvas)
@@ -147,7 +133,7 @@ fp_municipal_bound <- download_feature_layer(
 #| eval: false
 
 # Check Municipal Boundaries
-preview_layer(fp_municipal_bound, color = "purple")
+preview_layer(fp_municipal_bound)
 ```
 
 ### County Boundaries
@@ -167,7 +153,7 @@ fp_county_bound <- download_feature_layer(
 #| eval: false
 
 # Check County Boundaries
-preview_layer(fp_county_bound, color = "purple")
+preview_layer(fp_county_bound)
 ```
 
 ### Regional Boundaries (WFRC/MAG)
@@ -188,24 +174,21 @@ fp_regional_bound <- download_feature_layer(
 #| eval: false
 
 # Check Regional Boundaries
-preview_layer(fp_regional_bound, color = "purple")
+preview_layer(fp_regional_bound)
 ```
 
 ## The "Target" Universe: Parcels
 
-* Note: This is likely your largest file.
-* Download/Load Parcels.
-* Standardize Column Names (clean for SQL).
-* Save parcels.parquet.
-
-### Land Parcels
+### REMM Parcels
 
 ```{r}
-# Parcels (from GDB)
-fp_parcels <- process_local_layer(
-  relative_path = "remm_base_year_20221003/remm_base_year.gdb",
-  output_name   = "parcels",
-  layer_name    = "Buildings" # Verify this layer name in your GDB
+# REMM Parcels (from GDB)
+fp_remm_parcels <- process_local_layer(
+  path = "remm_base_year_20221003/remm_base_year.gdb.zip",
+  layer = "parcels",
+  name = "REMM_BY_parcels",
+  save_dir = sub_dirs$parcels,
+  crs  = CRS_PROJ
 )
 ```
 
@@ -213,11 +196,32 @@ fp_parcels <- process_local_layer(
 #| label: verify
 #| eval: false
 
-# Check Parcels (Limit to 1000 so browser doesn't crash)
-preview_layer(fp_parcels, color = "orange", limit = 1000)
+# Check REMM Parcels (Limit to 1000 so browser doesn't crash)
+preview_layer(fp_remm_parcels, limit = 1000)
 ```
 
-### Traffic Analysis Zones (TAZ).
+### REMM Buildings
+
+```{r}
+# REMM Buildings (from GDB)
+fp_remm_buildings <- process_local_layer(
+  path = "remm_base_year_20221003/remm_base_year.gdb.zip",
+  layer = "buildings",
+  name = "REMM_BY_buildings",
+  save_dir = sub_dirs$parcels,
+  crs  = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check REMM Buildings (Limit to 1000 so browser doesn't crash)
+preview_layer(fp_remm_buildings, limit = 1000)
+```
+
+### Wasatch Front - Traffic Analysis Zones (TAZ)
 
 ```{r}
 #| label: taz-zones
@@ -234,7 +238,27 @@ fp_wf_taz <- process_local_layer(
 #| eval: false
 
 # Check WF-TDM TAZs
-preview_layer(fp_wf_taz, color = "orange", limit = 999)
+preview_layer(fp_wf_taz)
+```
+
+### Utah Statewide - Traffic Analysis Zones (TAZ)
+
+```{r}
+#| label: taz-zones
+fp_ustm_taz <- process_local_layer(
+  path = "Statewide_TAZ.zip",
+  name = "Statewide_TAZ",
+  save_dir = sub_dirs$parcels,
+  crs  = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check WF-TDM TAZs
+preview_layer(fp_ustm_taz)
 ```
 
 ## Land Use & Zones
@@ -256,7 +280,7 @@ fp_wcv_centers <- download_feature_layer(
 #| eval: false
 
 # Check Wasatch Choice Vision Centers
-preview_layer(fp_wcv_centers, color = "purple")
+preview_layer(fp_wcv_centers, column = "CenterType")
 ```
 
 ### Utah Qualified Opportunity Zones (QOZ).
@@ -276,7 +300,7 @@ fp_utah_qoz <- download_feature_layer(
 #| eval: false
 
 # Check Utah Qualified Opportunity Zones
-preview_layer(fp_utah_qoz, color = "purple")
+preview_layer(fp_utah_qoz)
 ```
 
 # Transportation Network (Data & Buffers)
@@ -287,6 +311,7 @@ preview_layer(fp_utah_qoz, color = "purple")
 
 ```{r}
 #| label: transit-routes
+
 fp_transit_routes <- download_feature_layer(
   url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Routes_and_Most_Recent_Ridership/FeatureServer/0",
   name = "UTA_Routes_and_Most_Recent_Ridership",
@@ -300,7 +325,7 @@ fp_transit_routes <- download_feature_layer(
 #| eval: false
 
 # Check Transit Routes
-preview_layer(fp_transit_routes, color = "red") # TODO: missing crs
+preview_layer(fp_transit_routes, column = "routetype")
 ```
 
 ### Transit Stops
@@ -320,13 +345,14 @@ fp_transit_stops <- download_feature_layer(
 #| eval: false
 
 # Check Transit Stops
-preview_layer(fp_transit_stops, color = "red")
+preview_layer(fp_transit_stops)
 ```
 
 ## Active Transportation
 
 ```{r}
 #| label: bikeways
+
 fp_bikeways <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
   name = "Bikeways",
@@ -340,13 +366,52 @@ fp_bikeways <- download_feature_layer(
 #| eval: false
 
 # Check Utah Bikeways
-preview_layer(fp_bikeways, color = "red") # TODO: mising CRS
+preview_layer(fp_bikeways, column = "facility1", limit = 1000)
 ```
 
 ## Roadway Network
 
-* Download: Highway Interchanges.
-* Processing: Generate Interchange buffers.
+## Freeway Exits
+
+```{r}
+#| label: freeway-exits
+
+fp_freeway_exits <- download_feature_layer(
+  url = "https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0",
+  name = "Freeway_Exit_Locations",
+  save_dir = sub_dirs$transport,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Freeway Exits
+preview_layer(fp_freeway_exits)
+```
+
+# Access to Opportunity (ATO)
+
+```{r}
+#| label: taz_ato
+
+fp_taz_ato <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
+  name = "TAZ_AccessToOpportunities_RTP2023",
+  save_dir = sub_dirs$access,
+  crs = CRS_PROJ
+)
+```
+
+```{r}
+#| label: verify
+#| eval: false
+
+# Check Access to Opportunities
+preview_layer(fp_taz_ato, column = "compauto_50")
+```
 
 # Community Amenities (Data & Buffers)
 
@@ -369,7 +434,7 @@ fp_edu_k12 <- download_feature_layer(
 #| eval: false
 
 # Check K-12 Schools
-preview_layer(fp_edu_k12, color = "red")
+preview_layer(fp_edu_k12)
 ```
 
 ### Higher Education
@@ -389,7 +454,7 @@ fp_edu_higher <- download_feature_layer(
 #| eval: false
 
 # Check Higher Education
-preview_layer(fp_edu_higher, color = "red")
+preview_layer(fp_edu_higher)
 ```
 
 ## Public Health & Safety
@@ -411,18 +476,19 @@ fp_health_fac <- download_feature_layer(
 #| eval: false
 
 # Check Healthcare Facilities
-preview_layer(fp_health_fac, color = "red")
+preview_layer(fp_health_fac)
 ```
 
 ### Childcare Centers
 
 ```{r}
-#| label: health-facilities
-fp_child_care <- download_feature_layer(
-  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/5", # TODO: use UGRC
+#| label: childcare-facilities
+fp_child_care <- process_local_layer(
+  path = "HIFLD OPEN Child Care Centers/child-care-centers-geojson.zip",
   name = "ChildCareFacilities",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_PROJ,
+  read_mode = "zip"
 )
 ```
 
@@ -431,7 +497,7 @@ fp_child_care <- download_feature_layer(
 #| eval: false
 
 # Check Childcare Facilities
-preview_layer(fp_child_care, color = "red")
+preview_layer(fp_child_care)
 ```
 
 ## Lifestyle & Services
@@ -441,8 +507,8 @@ preview_layer(fp_child_care, color = "red")
 ```{r}
 #| label: grocery-store
 fp_grocery_store <- download_feature_layer(
-  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/374", # TODO: use UGRC
-  name = "Grocery_Stores",
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0",
+  name = "UtahGroceryAndFoodStores_DAF",
   save_dir = sub_dirs$amenities,
   crs = CRS_PROJ
 )
@@ -453,7 +519,7 @@ fp_grocery_store <- download_feature_layer(
 #| eval: false
 
 # Check Grocery Stores
-preview_layer(fp_grocery_store, color = "red")
+preview_layer(fp_grocery_store)
 ```
 
 ### Community Centers
@@ -473,16 +539,16 @@ fp_community_center <- download_feature_layer(
 #| eval: false
 
 # Check Community Centers
-preview_layer(fp_community_center, color = "red")
+preview_layer(fp_community_center)
 ```
 
-### Parks and Open Spaces
+### Parks and Open Spaces (Walk Access)
 
 ```{r}
-#| label: open-spaces
-fp_open_spaces <- download_feature_layer(
-  url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahParksLocal/FeatureServer/0",
-  name = "UtahParksLocal",
+#| label: park-access
+fp_park_access <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/ParkEdits/FeatureServer/0",
+  name = "WalkAccesstoParks_10Min",
   save_dir = sub_dirs$amenities,
   crs = CRS_PROJ
 )
@@ -492,8 +558,8 @@ fp_open_spaces <- download_feature_layer(
 #| label: verify
 #| eval: false
 
-# Check Parks and Open Spaces
-preview_layer(fp_open_spaces, color = "red")
+# Check Walk Access to Parks and Open Spaces
+preview_layer(fp_park_access)
 ```
 
 # Quality Control & Manifest

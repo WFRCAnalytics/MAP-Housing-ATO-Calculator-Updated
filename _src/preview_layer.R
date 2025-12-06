@@ -1,22 +1,21 @@
 #' Preview a Parquet Spatial Layer
 #'
 #' Lazy-loads a Parquet file, extracts a subset (head), converts the WKB
-#' geometry to SF, and renders a map.
+#' geometry to SF, and renders a map using mapgl::maplibre_view.
 #'
 #' @param file_path A string path to the parquet file.
-#' @param color A string hex code or color name for the features (default: "steelblue").
+#' @param ... Additional arguments passed to \code{mapgl::maplibre_view}
+#'   (e.g., \code{tooltip}, \code{style}, \code{palette}, \code{n}).
 #' @param limit An integer for the max number of features to load.
-#'   Default is `NULL` (loads all data). If provided, loads the first N rows.
-#' @param crs The CRS object or EPSG code to assign to the data (default: CRS_PROJ).
+#'   Default is \code{NULL} (loads all data). If provided, loads the first N rows.
 #'
 #' @return A mapgl object (interactive map) or NULL if the file/column is missing.
 #'
 #' @export
 preview_layer <- function(
   file_path,
-  color = "steelblue",
-  limit = NULL,
-  crs = CRS_PROJ
+  ...,
+  limit = NULL
 ) {
   # 1. Dependency Check
   required_pkgs <- c("arrow", "dplyr", "sf", "mapgl")
@@ -42,8 +41,6 @@ preview_layer <- function(
       ds <- arrow::open_dataset(file_path)
 
       # 3. Apply Limit (Head) or Collect All
-      # We use the Arrow engine (not DuckDB) to ensure WKB binary
-      # is preserved as 'raw' vectors, which sf requires.
       if (!is.null(limit)) {
         df_raw <- ds |> head(limit) |> dplyr::collect()
       } else {
@@ -59,16 +56,14 @@ preview_layer <- function(
       df_raw$geometry <- sf::st_as_sfc(df_raw$geometry)
 
       # 5. Convert to SF
-      sf_obj <- sf::st_as_sf(df_raw, crs = crs)
+      sf_obj <- sf::st_as_sf(df_raw)
 
       # 6. Render
+      # We pass data, color, and column explicitly.
+      # The '...' captures everything else (palette, style, n, legend, etc.)
       mapgl::maplibre_view(
-        sf_obj,
-        tooltip = names(sf_obj)[1],
-        fill_color = color,
-        line_color = "white",
-        fill_opacity = 0.6,
-        line_width = 1
+        data = sf_obj,
+        ...
       )
     },
     error = function(e) {

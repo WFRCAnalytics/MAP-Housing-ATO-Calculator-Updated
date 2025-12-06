@@ -17,7 +17,7 @@ download_feature_layer <- function(
   crs = CRS_PROJ
 ) {
   # 1. Dependency Check
-  required_pkgs <- c("arcgislayers", "janitor", "arrow")
+  required_pkgs <- c("arcgislayers", "janitor", "arrow", "sf", "dplyr")
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
   ]
@@ -44,11 +44,17 @@ download_feature_layer <- function(
     {
       sf_obj <- arcgislayers::arc_read(url, where = query, crs = crs)
 
-      # Clean & Save
+      # 5. Clean Names
       sf_obj <- janitor::clean_names(sf_obj)
+
+      # Force the active geometry column to be named "geometry".
+      # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.
+      sf::st_geometry(sf_obj) <- "geometry"
+
+      # Write to Parquet (Geometry becomes WKB binary)
       arrow::write_parquet(sf_obj, fp)
 
-      message(paste("💾 Saved to processed:", fp))
+      message(paste("💾 Saved GeoParquet to processed:", fp))
       return(fp)
     },
     error = function(e) {
