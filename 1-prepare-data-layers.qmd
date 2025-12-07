@@ -110,6 +110,7 @@ CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
+source(here::here(dirs$source, "as_geoparquet_table.R")) # Download ArcGIS Feature Layers
 source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
 source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
@@ -191,7 +192,7 @@ fp_remm_parcels <- process_local_layer(
   layer = "parcels",
   name = "REMM_BY_parcels",
   save_dir = sub_dirs$parcels,
-  partitioning = "co_name",
+  # partitioning = "co_name",
   compression = "zstd",
   crs  = CRS_PROJ
 )
@@ -214,7 +215,7 @@ fp_remm_buildings <- process_local_layer(
   layer = "buildings",
   name = "REMM_BY_buildings",
   save_dir = sub_dirs$parcels,
-  partitioning = "building_type",
+  # partitioning = "building_type",
   compression = "zstd",
   crs  = CRS_PROJ
 )
@@ -287,7 +288,7 @@ fp_wcv_centers <- download_feature_layer(
 #| eval: false
 
 # Check Wasatch Choice Vision Centers
-preview_layer(fp_wcv_centers, column = "CenterType")
+preview_layer(fp_wcv_centers, column = "center_type")
 ```
 
 ### Utah Qualified Opportunity Zones (QOZ).
@@ -493,6 +494,7 @@ preview_layer(fp_health_fac)
 fp_child_care <- process_local_layer(
   path = "HIFLD OPEN Child Care Centers/child-care-centers-geojson.zip",
   name = "ChildCareFacilities",
+  query = "SELECT * FROM Child_Care_Centers WHERE STATE = 'UT'",
   save_dir = sub_dirs$amenities,
   crs = CRS_PROJ,
   read_mode = "zip"

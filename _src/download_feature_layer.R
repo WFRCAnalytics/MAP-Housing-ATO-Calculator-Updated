@@ -6,9 +6,12 @@
 #' @param url URL to the FeatureServer layer.
 #' @param name Desired output filename (without extension).
 #' @param save_dir Directory to save the Parquet file. Defaults to `dirs$processed`.
-#' @param query SQL-style WHERE clause (default "1=1").
+#' @param where A simple SQL where statement indicating which features should be
+#'   selected (e.g., "POPULATION > 1000"). Passed to \code{arcgislayers::arc_read}.
+#'   Defaults to "1=1" (all features).
 #' @param crs Target EPSG code (default `CRS_PROJ`).
 #' @param partitioning Character vector of columns to partition by (e.g. "co_name").
+#' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
 #' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}
 #'   (e.g., \code{compression = "snappy"}, \code{hive_style = FALSE}).
 #'
@@ -18,9 +21,10 @@ download_feature_layer <- function(
   url,
   name,
   save_dir = dirs$processed,
-  query = "1=1",
+  where = "1=1",
   crs = CRS_PROJ,
   partitioning = NULL,
+  overwrite = FALSE,
   ...
 ) {
   # 1. Dependency Check
@@ -44,7 +48,7 @@ download_feature_layer <- function(
   }
 
   # 3. Cache Check
-  if (file.exists(out_fp)) {
+  if (file.exists(out_fp) && !overwrite) {
     message(paste("✅ Exists:", name))
     return(out_fp)
   }
@@ -54,7 +58,7 @@ download_feature_layer <- function(
   # 4. Execution
   tryCatch(
     {
-      sf_obj <- arcgislayers::arc_read(url, where = query, crs = crs)
+      sf_obj <- arcgislayers::arc_read(url, where = where, crs = crs)
 
       # 5. Clean Names
       sf_obj <- janitor::clean_names(sf_obj)
@@ -63,10 +67,13 @@ download_feature_layer <- function(
       # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.
       sf::st_geometry(sf_obj) <- "geometry"
 
+      # Prepare GeoParquet
+      arrow_table <- as_geoparquet_table(sf_obj)
+
       # 6. Write (Conditional with Ellipsis)
       if (!is.null(partitioning)) {
         arrow::write_dataset(
-          dataset = sf_obj,
+          dataset = arrow_table,
           path = out_fp,
           format = "parquet",
           partitioning = partitioning,
@@ -76,7 +83,7 @@ download_feature_layer <- function(
         message(paste("💾 Saved Partitioned Dataset:", out_fp))
       } else {
         arrow::write_parquet(
-          x = sf_obj,
+          x = arrow_table,
           sink = out_fp,
           ...
         )
@@ -84,7 +91,7 @@ download_feature_layer <- function(
       }
 
       # MEMORY OPTIMIZATION
-      rm(sf_obj)
+      rm(sf_obj, arrow_table)
       gc()
 
       return(out_fp)

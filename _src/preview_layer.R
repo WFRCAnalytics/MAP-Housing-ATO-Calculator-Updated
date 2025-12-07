@@ -37,38 +37,62 @@ preview_layer <- function(
 
   tryCatch(
     {
-      # 2. Lazy Load
+      # 1. Load Data
       ds <- arrow::open_dataset(file_path)
 
-      # 3. Apply Limit (Head) or Collect All
+      # Check Metadata
+      file_crs <- NULL
+      if (!is.null(ds$metadata$geo)) {
+        geo_meta <- jsonlite::fromJSON(ds$metadata$geo)
+        file_crs <- geo_meta$columns$geometry$crs
+      }
+
+      # 2. Collect
       if (!is.null(limit)) {
         df_raw <- ds |> head(limit) |> dplyr::collect()
       } else {
         df_raw <- dplyr::collect(ds)
       }
 
-      # 4. Geometry Parsing
-      if (!"geometry" %in% names(df_raw)) {
-        stop("Column 'geometry' not found.")
+      # 3. Handle Geometry
+      col_names <- names(df_raw)
+      geom_col <- col_names[grepl(
+        "^(geometry|shape|geom)$",
+        col_names,
+        ignore.case = TRUE
+      )][1]
+      if (is.na(geom_col)) {
+        stop("No geometry column found.")
+      }
+      if (geom_col != "geometry") {
+        names(df_raw)[names(df_raw) == geom_col] <- "geometry"
       }
 
-      # Explicitly convert binary WKB -> sfc
-      df_raw$geometry <- sf::st_as_sfc(df_raw$geometry)
+      # Fix WKB
+      if (!inherits(df_raw$geometry, "sfc")) {
+        df_raw$geometry <- sf::st_as_sfc(df_raw$geometry)
+      }
 
-      # 5. Convert to SF
+      # 4. Create SF & Apply CRS
       sf_obj <- sf::st_as_sf(df_raw)
 
-      # 6. Render
-      # We pass data, color, and column explicitly.
-      # The '...' captures everything else (palette, style, n, legend, etc.)
-      mapgl::maplibre_view(
-        data = sf_obj,
-        ...
-      )
+      # Priority: Metadata CRS > Argument CRS
+      if (!is.null(file_crs)) {
+        sf::st_crs(sf_obj) <- file_crs
+      } else {
+        sf::st_crs(sf_obj) <- crs
+      }
+
+      # 5. Render
+      mapgl::maplibre_view(data = sf_obj, ...)
     },
     error = function(e) {
-      message(paste("❌ Preview failed:", basename(file_path)))
-      message(paste("   Reason:", e$message))
+      message(paste(
+        "❌ Preview failed:",
+        basename(file_path),
+        "\nReason:",
+        e$message
+      ))
       return(NULL)
     }
   )

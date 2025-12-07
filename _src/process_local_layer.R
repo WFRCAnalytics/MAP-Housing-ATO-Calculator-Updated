@@ -7,6 +7,9 @@
 #' @param name Desired output filename (without extension).
 #' @param save_dir Directory to save the Parquet file. Defaults to `dirs$processed`.
 #' @param layer (Optional) Layer name if reading from a multi-layer source (e.g. GDB).
+#' @param query (Optional) An SQL query string to select/filter records using the
+#'   OGR SQL engine (e.g., "SELECT * FROM layer WHERE id > 5"). If provided,
+#'   this overrides the `layer` argument in many drivers. Default \code{NA}.
 #' @param crs Target EPSG code (default: `CRS_PROJ`).
 #' @param read_mode How to read the file. Options:
 #'   - "auto": (Default) Tries to guess based on extension/prefix.
@@ -15,6 +18,7 @@
 #'   - "url": Remote file (/vsicurl/).
 #'   - "remote_zip": Remote zip file (/vsizip//vsicurl/).
 #' @param partitioning Character vector of columns to partition by (e.g. "co_name").
+#' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
 #' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}
 #'   (e.g., \code{compression = "snappy"}, \code{hive_style = FALSE}).
 #'
@@ -25,9 +29,11 @@ process_local_layer <- function(
   name,
   save_dir = dirs$processed,
   layer = NULL,
+  query = NA,
   crs = CRS_PROJ,
   read_mode = "auto",
   partitioning = NULL,
+  overwrite = FALSE,
   ...
 ) {
   # 1. Dependency Check
@@ -52,7 +58,7 @@ process_local_layer <- function(
   }
 
   # 3. Cache Check
-  if (file.exists(out_fp)) {
+  if (file.exists(out_fp) && !overwrite) {
     message(paste("✅ Exists:", name))
     return(out_fp)
   }
@@ -110,27 +116,68 @@ process_local_layer <- function(
   tryCatch(
     {
       # Read
-      sf_obj <- sf::st_read(
-        dsn = dsn_path,
-        layer = layer,
-        quiet = TRUE
-      )
-
+      # If 'query' is provided, pass it to st_read.
+      # Note: For some drivers, providing 'query' creates a new layer result, so 'layer' might be ignored.
+      if (!is.na(query)) {
+        sf_obj <- sf::st_read(dsn = dsn_path, query = query, quiet = TRUE)
+      } else if (!is.null(layer)) {
+        sf_obj <- sf::st_read(dsn = dsn_path, layer = layer, quiet = TRUE)
+      } else {
+        sf_obj <- sf::st_read(dsn = dsn_path, quiet = TRUE)
+      }
       # 1. Standardize Names & Drop Z/M
       sf_obj <- sf_obj |>
         janitor::clean_names() |>
         sf::st_zm(drop = TRUE)
 
       # 2. Linearize Curved Geometries ONLY
-      types <- unique(as.character(sf::st_geometry_type(sf_obj)))
-      if (any(grepl("CURVE|SURFACE|ARC", types))) {
-        target <- if (any(grepl("POLYGON|SURFACE", types))) {
-          "MULTIPOLYGON"
-        } else {
-          "MULTILINESTRING"
-        }
-        sf_obj <- sf::st_cast(sf_obj, target)
+      # Instead of checking every row, we check the class of the geometry column.
+
+      current_types <- unique(as.character(sf::st_geometry_type(sf_obj)))
+
+      # Define Complex Types that need Linearization
+      complex_polys <- c(
+        "CURVEPOLYGON",
+        "MULTISURFACE",
+        "SURFACE",
+        "POLYHEDRALSURFACE",
+        "TIN"
+      )
+      complex_lines <- c(
+        "CIRCULARSTRING",
+        "COMPOUNDCURVE",
+        "MULTICURVE",
+        "CURVE"
+      )
+
+      # Conditional Casting
+      if (any(current_types %in% complex_polys)) {
+        # Convert Curves/Surfaces -> MultiPolygon
+        sf_obj <- sf::st_cast(sf_obj, "MULTIPOLYGON")
+      } else if (any(current_types %in% complex_lines)) {
+        # Convert Curved Lines -> MultiLineString
+        sf_obj <- sf::st_cast(sf_obj, "MULTILINESTRING")
       }
+      # ELSE: Do nothing. Keep Point as Point, Polygon as Polygon.
+
+      # if (grepl("POLYGON|SURFACE", geom_class_str, ignore.case = TRUE)) {
+      #   # If it's any kind of Polygon/Surface (including CurvePolygon), we force MULTIPOLYGON.
+      #   sf_obj <- sf::st_cast(sf_obj, "MULTIPOLYGON")
+      # } else if (grepl("LINE|CURVE", geom_class_str, ignore.case = TRUE)) {
+      #   # If it's Line/Curve (including MultiCurve), we force MULTILINESTRING.
+      #   sf_obj <- sf::st_cast(sf_obj, "MULTILINESTRING")
+      # }
+
+      # if (any(grepl("CURVE|SURFACE|ARC", geom_class_str, ignore.case = TRUE))) {
+      #   target <- if (
+      #     any(grepl("POLYGON|SURFACE", , geom_class_str, ignore.case = TRUE))
+      #   ) {
+      #     "MULTIPOLYGON"
+      #   } else {
+      #     "MULTILINESTRING"
+      #   }
+      #   sf_obj <- sf::st_cast(sf_obj, target)
+      # }
 
       # 3. Final Fixes & Project
       sf_obj <- sf_obj |>
@@ -140,6 +187,9 @@ process_local_layer <- function(
       # 4. Standardize Geometry Name
       sf::st_geometry(sf_obj) <- "geometry"
 
+      # Prepare GeoParquet
+      arrow_table <- as_geoparquet_table(sf_obj)
+
       # Write (Conditional with Ellipsis)
       if (!is.null(partitioning)) {
         # Ensure directory clean/create for partitioning
@@ -148,7 +198,7 @@ process_local_layer <- function(
         }
 
         arrow::write_dataset(
-          dataset = sf_obj,
+          dataset = arrow_table,
           path = out_fp,
           format = "parquet",
           partitioning = partitioning,
@@ -158,7 +208,7 @@ process_local_layer <- function(
         message(paste("💾 Saved Partitioned Dataset:", out_fp))
       } else {
         arrow::write_parquet(
-          x = sf_obj,
+          x = arrow_table,
           sink = out_fp,
           ...
         )
@@ -167,7 +217,7 @@ process_local_layer <- function(
 
       # MEMORY OPTIMIZATION:
       # Explicitly remove the huge object and run GC immediately
-      rm(sf_obj)
+      rm(sf_obj, arrow_table)
       gc()
 
       return(out_fp)
