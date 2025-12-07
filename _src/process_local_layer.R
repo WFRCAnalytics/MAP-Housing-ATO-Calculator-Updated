@@ -110,20 +110,11 @@ process_local_layer <- function(
   tryCatch(
     {
       # Read
-      # We add options to ignore the expensive hole-sorting check
-      # This makes reading massive/complex polygons much faster
-      if (!is.null(layer)) {
-        sf_obj <- sf::st_read(
-          dsn = dsn_path,
-          layer = layer,
-          quiet = TRUE
-        )
-      } else {
-        sf_obj <- sf::st_read(
-          dsn = dsn_path,
-          quiet = TRUE
-        )
-      }
+      sf_obj <- sf::st_read(
+        dsn = dsn_path,
+        layer = layer,
+        quiet = TRUE
+      )
 
       # 1. Standardize Names & Drop Z/M
       sf_obj <- sf_obj |>
@@ -131,34 +122,17 @@ process_local_layer <- function(
         sf::st_zm(drop = TRUE)
 
       # 2. Linearize Curved Geometries ONLY
-      # We check specific types present, not the summary "GEOMETRY"
-      present_types <- sf::st_geometry_type(sf_obj) |>
-        unique() |>
-        as.character()
-
-      # Check if any "bad" types (Curves/Surfaces) exist
-      has_curves <- any(grepl("CURVE|SURFACE|ARC", present_types))
-
-      if (has_curves) {
-        target_cast <- NULL
-
-        # If it's a Polygon-type curve (CURVEPOLYGON, MULTISURFACE)
-        if (any(grepl("POLYGON|SURFACE", present_types))) {
-          target_cast <- "MULTIPOLYGON"
-          # If it's a Line-type curve (MULTICURVE, CIRCULARSTRING, COMPOUNDCURVE)
-          # We check for CURVE here specifically for lines if it wasn't a polygon
-        } else if (any(grepl("LINE|STRING|ARC|CURVE", present_types))) {
-          target_cast <- "MULTILINESTRING"
+      types <- unique(as.character(sf::st_geometry_type(sf_obj)))
+      if (any(grepl("CURVE|SURFACE|ARC", types))) {
+        target <- if (any(grepl("POLYGON|SURFACE", types))) {
+          "MULTIPOLYGON"
+        } else {
+          "MULTILINESTRING"
         }
-
-        if (!is.null(target_cast)) {
-          message(paste("   ⚠️ Linearizing curved geometry to:", target_cast))
-          sf_obj <- sf::st_cast(sf_obj, target_cast)
-        }
+        sf_obj <- sf::st_cast(sf_obj, target)
       }
 
       # 3. Final Fixes & Project
-
       sf_obj <- sf_obj |>
         sf::st_make_valid() |>
         sf::st_transform(crs)
@@ -168,6 +142,11 @@ process_local_layer <- function(
 
       # Write (Conditional with Ellipsis)
       if (!is.null(partitioning)) {
+        # Ensure directory clean/create for partitioning
+        if (dir.exists(out_fp)) {
+          fs::dir_delete(out_fp)
+        }
+
         arrow::write_dataset(
           dataset = sf_obj,
           path = out_fp,
@@ -185,6 +164,11 @@ process_local_layer <- function(
         )
         message(paste("💾 Saved Parquet File:", out_fp))
       }
+
+      # MEMORY OPTIMIZATION:
+      # Explicitly remove the huge object and run GC immediately
+      rm(sf_obj)
+      gc()
 
       return(out_fp)
     },

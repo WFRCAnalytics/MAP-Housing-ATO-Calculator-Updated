@@ -83,6 +83,10 @@ download_feature_layer <- function(
         message(paste("💾 Saved Parquet File:", out_fp))
       }
 
+      # MEMORY OPTIMIZATION
+      rm(sf_obj)
+      gc()
+
       return(out_fp)
     },
     error = function(e) {

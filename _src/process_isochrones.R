@@ -3,6 +3,7 @@
 #' Generates isochrones for points in a Parquet file using the OpenRouteService API.
 #' Supports both time-based and distance-based isochrones via the `range` argument.
 #' The output is automatically saved into a subfolder corresponding to the routing profile.
+#' Uses DuckDB to stream coordinates efficiently without loading the entire input file into memory.
 #'
 #' @param path A string path to the input Parquet file (from PROCESSED).
 #' @param name Desired output filename (without extension).
@@ -30,7 +31,7 @@
 #'   or NULL if dry_run is TRUE or generation fails.
 #'
 #' @section Dependencies:
-#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `arrow`, `janitor`.
+#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `arrow`, `geoarrow`, `janitor`, `duckdb`, `DBI`.
 #'
 #' @examples
 #' \dontrun{
@@ -73,7 +74,10 @@ process_isochrones <- function(
     "dplyr",
     "purrr",
     "arrow",
-    "janitor"
+    "geoarrow",
+    "janitor",
+    "duckdb",
+    "DBI"
   )
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
@@ -97,70 +101,101 @@ process_isochrones <- function(
 
   message(paste("🚀 Generating isochrones:", name, "| Profile:", profile))
 
+  # 3. Connect to DuckDB for Streaming
+  con <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # Register the parquet file as a view
+  # We extract only X and Y (WGS84) directly using spatial extension
   tryCatch(
     {
-      # 3. Read & Prepare Data
-      points_sf <- arrow::read_parquet(path) |>
-        sf::st_as_sf() |>
-        sf::st_transform(4326) # ORS requires WGS84
-
-      # Prepare Batches
-      coords_mat <- sf::st_coordinates(points_sf)
-      coords_list <- purrr::array_branch(coords_mat[, 1:2], 1)
-      batches <- split(
-        coords_list,
-        ceiling(seq_along(coords_list) / batch_size)
+      DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
+      query_view <- glue::glue(
+        "
+      CREATE OR REPLACE VIEW input_points AS
+      SELECT
+        ST_X(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lon,
+        ST_Y(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lat
+      FROM read_parquet('{path}')
+    "
       )
+      DBI::dbExecute(con, query_view)
 
-      # --- DRY RUN SIMULATION ---
+      # Count total rows
+      total_rows <- DBI::dbGetQuery(
+        con,
+        "SELECT COUNT(*) as n FROM input_points"
+      )$n
+      num_batches <- ceiling(total_rows / batch_size)
+
+      # --- DRY RUN ---
       if (dry_run) {
-        message("⚠️  DRY RUN: API Request Preview")
+        message("⚠️  DRY RUN: API Request Preview (Streaming Mode)")
         message("------------------------------------------------")
         message(paste("   Input File:   ", basename(path)))
-        message(paste("   Output Path:  ", out_fp))
-        message(paste("   Total Points: ", length(coords_list)))
+        message(paste("   Total Points: ", total_rows))
         message(paste("   Batch Size:   ", batch_size))
-        message(paste("   Num Batches:  ", length(batches)))
+        message(paste("   Num Batches:  ", num_batches))
 
-        # Capture the arguments that WOULD be sent
-        api_params <- list(
-          locations = "Batch 1 (Coordinates hidden)",
-          profile = profile,
-          range = range,
-          output = "sf",
-          ... # This captures units, range_type, etc.
+        # Sample first batch query
+        sample_batch <- DBI::dbGetQuery(
+          con,
+          glue::glue(
+            "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET 0"
+          )
         )
+        # Convert to list of pairs for API
+        sample_list <- purrr::array_branch(as.matrix(sample_batch), 1)
 
-        message("   API Parameters (passed to ors_isochrones):")
-        print(api_params)
-        message("------------------------------------------------")
+        message("   Sample Batch 1 (Coordinates):")
+        print(sample_list)
         return(invisible(NULL))
       }
 
-      message(paste("   Mapping over", length(batches), "batches..."))
+      message(paste("   Streaming", num_batches, "batches..."))
 
-      # 4. Execute Batches
-      results_list <- purrr::imap(batches, function(batch, i) {
-        Sys.sleep(1.5) # Rate limit
+      # 4. Process Batches (Streaming Loop)
+      results_list <- purrr::map(
+        1:num_batches,
+        function(i) {
+          # Calculate OFFSET
+          offset <- (i - 1) * batch_size
 
-        tryCatch(
-          {
-            openrouteservice::ors_isochrones(
-              locations = batch,
-              profile = profile,
-              range = range, # Renamed from ranges_sec
-              output = "sf",
-              ... # Passes range_type, units, interval, etc.
+          # Fetch just this batch from DuckDB
+          # This keeps RAM usage tiny regardless of dataset size
+          batch_df <- DBI::dbGetQuery(
+            con,
+            glue::glue(
+              "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET {offset}"
             )
-          },
-          error = function(e) {
-            warning(paste("   ⚠️ Batch", i, "failed:", e$message))
-            return(NULL)
-          }
-        )
-      })
+          )
 
-      # 5. Collapse & Save
+          # Convert to API format (List of c(lon, lat))
+          batch_coords <- purrr::array_branch(as.matrix(batch_df), 1)
+
+          # Rate Limit Sleep
+          Sys.sleep(1.5)
+
+          tryCatch(
+            {
+              openrouteservice::ors_isochrones(
+                locations = batch_coords,
+                profile = profile,
+                range = range,
+                output = "sf",
+                ...
+              )
+            },
+            error = function(e) {
+              warning(paste("   ⚠️ Batch", i, "failed:", e$message))
+              return(NULL)
+            }
+          )
+        },
+        .progress = TRUE
+      ) # Add progress bar!
+
+      # 5. Save Results
       final_iso <- results_list |>
         purrr::discard(is.null) |>
         dplyr::bind_rows()
@@ -169,9 +204,8 @@ process_isochrones <- function(
         final_iso <- final_iso |>
           janitor::clean_names() |>
           sf::st_cast("MULTIPOLYGON") |>
-          sf::st_transform(crs) # Project back to local CRS
+          sf::st_transform(crs)
 
-        # Standardize geometry column name for downstream consistency
         sf::st_geometry(final_iso) <- "geometry"
 
         arrow::write_parquet(final_iso, out_fp)
