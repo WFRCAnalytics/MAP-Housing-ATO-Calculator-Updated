@@ -39,6 +39,7 @@ pak::pak(
 #| message: false
 #| warning: false
 
+library(dplyr)
 library(sf)
 library(arcgislayers)
 library(arrow)
@@ -586,4 +587,5 @@ list.files(dirs$processed, recursive = TRUE)
 ```{r}
 #| label: dis-conn
 DBI::dbDisconnect(conn)
+
 ```

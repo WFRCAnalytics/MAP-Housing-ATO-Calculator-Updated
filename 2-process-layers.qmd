@@ -22,10 +22,11 @@ pak::pak(
   c(
     "tidyverse",   # https://github.com/tidyverse/tidyverse/
     "sf",          # https://github.com/r-spatial/sf/
-    "DBI",         # https://github.com/r-dbi/DBI/
-    "duckdb",      # https://github.com/duckdb/duckdb-r/
-    "duckplyr",    # https://github.com/tidyverse/duckplyr/
-    "duckspatial", # https://github.com/Cidree/duckspatial/
+    "openrouteservice", # https://github.com/GIScience/openrouteservice-r/
+    # "DBI",         # https://github.com/r-dbi/DBI/
+    # "duckdb",      # https://github.com/duckdb/duckdb-r/
+    # "duckplyr",    # https://github.com/tidyverse/duckplyr/
+    # "duckspatial", # https://github.com/Cidree/duckspatial/
     "arrow",       # https://github.com/apache/arrow/tree/main/r
     "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
     "janitor",     # https://github.com/sfirke/janitor/
@@ -41,11 +42,13 @@ pak::pak(
 #| message: false
 #| warning: false
 
+library(dplyr)
 library(sf)
-library(DBI)
-library(duckdb)
-library(duckplyr)
-library(duckspatial)
+library(openrouteservice)
+# library(DBI)
+# library(duckdb)
+# library(duckplyr)
+# library(duckspatial)
 library(arrow)
 library(geoarrow)
 library(janitor)
@@ -54,6 +57,24 @@ library(here)
 ```
 
 ## Project Configurations
+
+### Setup OpenRouteService API
+
+```{r}
+#| label: setup-ors
+
+# Ensure your _environment file has: ORS_API_KEY="your_key_here"
+readRenviron(here::here("_environment"))
+
+# 2. Check Key
+if (Sys.getenv("ORS_API_KEY") == "") {
+  stop("❌ ORS_API_KEY not found in _environment file.")
+} else {
+  # Set it for the package
+  ors_api_key(Sys.getenv("ORS_API_KEY"))
+  message("✅ API Key Loaded")
+}
+```
 
 ### Database Setup
 
@@ -117,4 +138,122 @@ CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
 source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
+```
+
+# Process Isochrones
+
+## Set Isochrone Inputs and Configuration
+
+```{r}
+#| label: isochrone-setup
+
+# We use the parquet files created in step 1
+input_layers <- c(
+  file.path(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"), # Transit (All Modes)
+  file.path(sub_dirs$amenities, "Community_Centers.parquet"),
+  file.path(sub_dirs$amenities, "ChildCareFacilities.parquet"),
+  file.path(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet"),
+  file.path(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet"),
+  file.path(sub_dirs$amenities, "Schools_PreKto12.parquet"),
+  file.path(sub_dirs$amenities, "Schools_HigherEducation.parquet")
+)
+```
+
+```{r}
+#| label: isochrone-batch-helper
+
+# Batch Helper Function
+# Takes a list of files -> Generates Isochrones using original filenames
+run_batch <- function(file_list, profile, range, ...) {
+
+  purrr::walk(file_list, function(input_path) {
+
+    # 1. Get original name (e.g. "ChildCareFacilities")
+    original_name <- fs::path_ext_remove(fs::path_file(input_path))
+
+    # 2. Execute
+    # process_isochrones automatically handles the subfolder creation based on 'profile'
+    process_isochrones(
+      path        = input_path,
+      name        = original_name,  # Output name matches input name
+      profile     = profile,
+      range       = range,
+      save_dir    = dirs$isochrones,
+      dry_run     = FALSE,          # Set to TRUE to test
+      batch_size  = 5,
+      ...                           # Pass extra args
+    )
+  })
+}
+```
+
+## Generate Walking Isochrones
+
+```{r}
+#| label: isochrone-walking
+
+run_batch(
+  file_list = target_layers,
+  profile   = "foot-walking",
+  range     = c(300, 600, 900)
+)
+```
+
+## Generate Biking Isochrones
+
+```{r}
+#| label: isochrone-biking
+
+run_batch(
+  file_list = target_layers,
+  profile   = "cycling-regular",
+  range     = c(300, 600, 900)
+)
+```
+
+## Generate Driving Isochrones
+
+```{r}
+#| label: isochrone-driving
+
+run_batch(
+  file_list = target_layers,
+  profile   = "driving-car",
+  range     = c(300, 600, 900)
+)
+```
+
+## Verify Results
+
+```{r}
+#| label: verify-isochrones
+#| eval: false
+
+# 1. Verify Folder Structure
+fs::dir_tree(dirs$isochrones)
+```
+
+
+```{r}
+#| eval: false
+
+# 2. Visual Check: Compare Walking vs Driving for Grocery
+# Walking (Blue)
+preview_layer(
+  here::here(dirs$isochrones, "foot-walking", "UtahGroceryAndFoodStores_DAF.parquet"),
+  color = "blue",
+  limit = 100
+)
+```
+
+
+```{r}
+#| eval: false
+
+# Driving (Red) - Should be much larger
+preview_layer(
+  here::here(dirs$isochrones, "driving-car", "UtahGroceryAndFoodStores_DAF.parquet"),
+  color = "red",
+  limit = 100
+)
 ```
