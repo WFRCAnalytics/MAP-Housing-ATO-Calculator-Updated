@@ -151,28 +151,39 @@ DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 fp_regional_bound <- here::here(sub_dirs$base, "RegionalBoundaryComponents.parquet")
 fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
 
-# Process using DuckDB SQL
-query_prep <- glue::glue("
-  COPY (
-    SELECT * FROM read_parquet('{fp_regional_bound}')
-    WHERE plan_org IN ('MAG MPO', 'WFRC MPO')
-  ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
-")
+# --- Conditional Processing Block ---
+if (file.exists(fp_boundary_wftdm)) {
+  # File exists, skip processing
+  message("✅ Analysis boundary already exists: ", fp_boundary_wftdm)
+} else {
+  # File does NOT exist, proceed with DuckDB SQL processing
 
-DBI::dbExecute(conn, query_prep)
+  # Process using DuckDB SQL
+  query_prep <- glue::glue("
+    COPY (
+      SELECT
+        -- 1. Input 'geometry' is already native GEOMETRY type (thanks to GeoArrow ext)
+        -- 2. ST_Union_Agg dissolves it
+        -- 3. ST_AsWKB converts it back to standard Binary for safe storage
+        ST_AsWKB(ST_Union_Agg(geometry)) as geometry
+      FROM read_parquet('{fp_regional_bound}')
+      WHERE plan_org IN ('MAG MPO', 'WFRC MPO')
+    ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
+  ")
 
-# # Process using R Arrow (Preserves Metadata)
-# arrow::open_dataset(fp_regional_bound) |>
-#   dplyr::filter(plan_org %in% c("MAG MPO", "WFRC MPO")) |>
-#   arrow::write_parquet(fp_boundary_wftdm)
+  # Assuming 'conn' is your active DuckDB connection
+  DBI::dbExecute(conn, query_prep)
 
-message("✅ Analysis boundary filtered (DuckDB): ", fp_boundary_wftdm)
+  message("✅ Analysis boundary created (DuckDB): ", fp_boundary_wftdm)
+}
 ```
 
 ```{r}
 #| eval: false
 
-preview_layer(fp_boundary_wftdm)
+arrow::open_dataset(fp_boundary_wftdm) |>
+  sf::st_as_sf(crs = CRS_WGS) |>
+  mapgl::maplibre_view()
 ```
 
 ## Set Regional Boundary
@@ -214,8 +225,10 @@ run_batch <- function(file_list, profile, range, ...) {
       name        = original_name,  # Output name matches input name
       profile     = profile,
       range       = range,
+      boundary_path = fp_boundary_wftdm,
+      src_crs       = CRS_PROJ,
       save_dir    = dirs$isochrones,
-      dry_run     = FALSE,          # Set to TRUE to test
+      dry_run     = TRUE,          # Set to TRUE to test
       batch_size  = 5,
       ...                           # Pass extra args
     )
@@ -229,7 +242,7 @@ run_batch <- function(file_list, profile, range, ...) {
 #| label: isochrone-walking
 
 run_batch(
-  file_list = target_layers,
+  file_list = input_layers,
   profile   = "foot-walking",
   range     = c(300, 600, 900)
 )
@@ -241,7 +254,7 @@ run_batch(
 #| label: isochrone-biking
 
 run_batch(
-  file_list = target_layers,
+  file_list = input_layers,
   profile   = "cycling-regular",
   range     = c(300, 600, 900)
 )
@@ -253,7 +266,7 @@ run_batch(
 #| label: isochrone-driving
 
 run_batch(
-  file_list = target_layers,
+  file_list = input_layers,
   profile   = "driving-car",
   range     = c(300, 600, 900)
 )

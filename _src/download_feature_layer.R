@@ -9,7 +9,7 @@
 #' @param where A simple SQL where statement indicating which features should be
 #'   selected (e.g., "POPULATION > 1000"). Passed to \code{arcgislayers::arc_read}.
 #'   Defaults to "1=1" (all features).
-#' @param crs Target EPSG code (default `CRS_PROJ`).
+#' @param crs Target EPSG code (default `CRS_WGS`).
 #' @param partitioning Character vector of columns to partition by (e.g. "co_name").
 #' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
 #' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}

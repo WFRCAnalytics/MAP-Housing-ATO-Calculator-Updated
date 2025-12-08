@@ -10,7 +10,7 @@
 #' @param query (Optional) An SQL query string to select/filter records using the
 #'   OGR SQL engine (e.g., "SELECT * FROM layer WHERE id > 5"). If provided,
 #'   this overrides the `layer` argument in many drivers. Default \code{NA}.
-#' @param crs Target EPSG code (default: `CRS_PROJ`).
+#' @param crs Target EPSG code (default: `CRS_WGS`).
 #' @param read_mode How to read the file. Options:
 #'   - "auto": (Default) Tries to guess based on extension/prefix.
 #'   - "standard": Standard local file read (e.g. .shp, .gdb).

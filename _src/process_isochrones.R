@@ -11,11 +11,12 @@
 #' @param range A numeric vector of ranges.
 #'   If `range_type = "time"` (default), values are in **seconds**.
 #'   If `range_type = "distance"`, values are in **meters**.
+#' @param input_filter A SQL WHERE clause to filter input points (e.g., "type = 'Grocery'").
 #' @param boundary_path Path to the regional boundary parquet (optional).
 #' @param batch_size An integer number of coordinates to send per API call (default 5).
 #' @param save_dir A string path to the root isochrone directory.
 #'   Defaults to `dirs$isochrones`.
-#' @param crs Target EPSG code (default `CRS_PROJ`).
+#' @param crs Projected EPSG code for spatial operations (default `CRS_PROJ`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
 #' @param ... Additional arguments passed to \code{openrouteservice::ors_isochrones}.
 #'   Common options include:
@@ -62,10 +63,11 @@ process_isochrones <- function(
   name,
   profile,
   range,
+  input_filter = "1=1",
   boundary_path = NULL,
   batch_size = 5,
   save_dir = dirs$isochrones,
-  crs = CRS_WGS,
+  crs = CRS_PROJ,
   dry_run = TRUE,
   ...
 ) {
@@ -79,7 +81,8 @@ process_isochrones <- function(
     "geoarrow",
     "janitor",
     "duckdb",
-    "DBI"
+    "DBI",
+    "glue"
   )
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
@@ -104,13 +107,13 @@ process_isochrones <- function(
   message(paste("🚀 Generating isochrones:", name, "| Profile:", profile))
 
   # 3. Connect to DuckDB
-  con <- DBI::dbConnect(duckdb::duckdb())
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  conn <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(conn, shutdown = TRUE), add = TRUE)
 
   tryCatch(
     {
-      DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
-      DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+      DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+      # DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 
       # --- QUERY CONSTRUCTION ---
       if (!is.null(boundary_path)) {
@@ -118,37 +121,61 @@ process_isochrones <- function(
         query_view <- glue::glue(
           "
           CREATE OR REPLACE VIEW input_points AS
-          WITH region AS (
-            -- Collapse all rows in the boundary file into one multipolygon
-            SELECT ST_Union_Agg(ST_GeomFromWKB(geometry)) as geom
-            FROM read_parquet('{boundary_path}')
+          WITH region_source AS (
+            -- 1. Read Boundary (4326) and convert WKB to Geometry
+            SELECT geometry as geom FROM read_parquet('{boundary_path}')
+          ),
+          region_projected AS (
+            -- 2. Project to Meter Plane (3566) and FIX VALIDITY
+            -- ST_MakeValid is crucial to prevent crashes during Union
+            SELECT ST_MakeValid(ST_Transform(geom, 'EPSG:4326', '{crs}')) as geom
+            FROM region_source
+          ),
+          region_unified AS (
+            -- 3. Safely Dissolve (Union) all boundary features into one
+            SELECT ST_Union_Agg(geom) as geom FROM region_projected
+          ),
+          pts AS (
+            -- 4. Read Points (4326) -> Filter Attributes
+            SELECT * FROM read_parquet('{path}')
+            WHERE {input_filter}
           )
           SELECT
-            ST_X(ST_Transform(ST_GeomFromWKB(p.geometry), 'EPSG:4326', 'EPSG:4326')) as lon,
-            ST_Y(ST_Transform(ST_GeomFromWKB(p.geometry), 'EPSG:4326', 'EPSG:4326')) as lat
-          FROM read_parquet('{path}') p, region r
-          WHERE ST_Intersects(ST_GeomFromWKB(p.geometry), r.geom)
+            -- 6. Extract Original 4326 Coordinates for API
+            ST_X(pts.geometry) as lon,
+            ST_Y(pts.geometry) as lat
+          FROM pts, region_unified
+          -- 5. Project Point to Meter Plane (3566) -> Intersect with Dissolved Boundary
+          WHERE ST_Intersects(ST_Transform(pts.geometry, 'EPSG:4326', '{crs}'), region_unified.geom)
         "
         )
-        message("   🛡️  Filtering to boundary: ", basename(boundary_path))
+        message(
+          "   🛡️  Filtering | SQL: [",
+          input_filter,
+          "] | Boundary: [",
+          basename(boundary_path),
+          "]"
+        )
       } else {
         # Original query (No boundary)
         query_view <- glue::glue(
           "
           CREATE OR REPLACE VIEW input_points AS
           SELECT
-            ST_X(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lon,
-            ST_Y(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lat
+            ST_X(geometry) as lon,
+            ST_Y(geometry) as lat
           FROM read_parquet('{path}')
+          WHERE {input_filter}
         "
         )
+        message("   🔎 Filtering | SQL: [", input_filter, "]")
       }
 
-      DBI::dbExecute(con, query_view)
+      DBI::dbExecute(conn, query_view)
 
       # Count total rows
       total_rows <- DBI::dbGetQuery(
-        con,
+        conn,
         "SELECT COUNT(*) as n FROM input_points"
       )$n
       num_batches <- ceiling(total_rows / batch_size)
@@ -164,7 +191,7 @@ process_isochrones <- function(
 
         # Sample first batch query
         sample_batch <- DBI::dbGetQuery(
-          con,
+          conn,
           glue::glue(
             "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET 0"
           )
@@ -189,7 +216,7 @@ process_isochrones <- function(
           # Fetch just this batch from DuckDB
           # This keeps RAM usage tiny regardless of dataset size
           batch_df <- DBI::dbGetQuery(
-            con,
+            conn,
             glue::glue(
               "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET {offset}"
             )
@@ -226,16 +253,26 @@ process_isochrones <- function(
         dplyr::bind_rows()
 
       if (nrow(final_iso) > 0) {
+        # API returns 4326. We simply save it as 4326.
         final_iso <- final_iso |>
           janitor::clean_names() |>
-          sf::st_cast("MULTIPOLYGON") |>
-          sf::st_transform(crs)
+          sf::st_cast("MULTIPOLYGON")
 
         sf::st_geometry(final_iso) <- "geometry"
 
-        arrow::write_parquet(final_iso, out_fp)
+        # Ensure CRS is set (ORS output usually has it, but good to be explicit)
+        if (is.na(sf::st_crs(final_iso))) {
+          sf::st_crs(final_iso) <- 4326
+        }
+
+        arrow_table <- as_geoparquet_table(final_iso)
+
+        arrow::write_parquet(arrow_table, out_fp)
         message(paste("💾 Saved:", out_fp))
         return(out_fp)
+
+        rm(final_iso, arrow_table)
+        gc()
       } else {
         warning("❌ No isochrones generated.")
         return(NULL)
