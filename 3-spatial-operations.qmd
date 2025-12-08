@@ -79,7 +79,7 @@ conn <- DBI::dbConnect(duckdb::duckdb())
 
 # install and load spatial extension
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
-DBI::dbExecute(conn, "CALL register_geoarrow_extension()")
+DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 ```
 
 ### Path Configuration

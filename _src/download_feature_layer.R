@@ -22,7 +22,7 @@ download_feature_layer <- function(
   name,
   save_dir = dirs$processed,
   where = "1=1",
-  crs = CRS_PROJ,
+  crs = CRS_WGS,
   partitioning = NULL,
   overwrite = FALSE,
   ...
@@ -60,8 +60,11 @@ download_feature_layer <- function(
     {
       sf_obj <- arcgislayers::arc_read(url, where = where, crs = crs)
 
-      # 5. Clean Names
+      # Clean Names
       sf_obj <- janitor::clean_names(sf_obj)
+
+      # Clean Names
+      sf_obj <- sf::st_make_valid(sf_obj)
 
       # Force the active geometry column to be named "geometry".
       # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.

@@ -23,10 +23,10 @@ pak::pak(
     "tidyverse",   # https://github.com/tidyverse/tidyverse/
     "sf",          # https://github.com/r-spatial/sf/
     "openrouteservice", # https://github.com/GIScience/openrouteservice-r/
-    # "DBI",         # https://github.com/r-dbi/DBI/
-    # "duckdb",      # https://github.com/duckdb/duckdb-r/
-    # "duckplyr",    # https://github.com/tidyverse/duckplyr/
-    # "duckspatial", # https://github.com/Cidree/duckspatial/
+    "DBI",         # https://github.com/r-dbi/DBI/
+    "duckdb",      # https://github.com/duckdb/duckdb-r/
+    "duckplyr",    # https://github.com/tidyverse/duckplyr/
+    "duckspatial", # https://github.com/Cidree/duckspatial/
     "arrow",       # https://github.com/apache/arrow/tree/main/r
     "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
     "janitor",     # https://github.com/sfirke/janitor/
@@ -45,10 +45,10 @@ pak::pak(
 library(dplyr)
 library(sf)
 library(openrouteservice)
-# library(DBI)
-# library(duckdb)
-# library(duckplyr)
-# library(duckspatial)
+library(DBI)
+library(duckdb)
+library(duckplyr)
+library(duckspatial)
 library(arrow)
 library(geoarrow)
 library(janitor)
@@ -74,19 +74,6 @@ if (Sys.getenv("ORS_API_KEY") == "") {
   ors_api_key(Sys.getenv("ORS_API_KEY"))
   message("✅ API Key Loaded")
 }
-```
-
-### Database Setup
-
-```{r}
-#| label: setup-db-init
-
-# Initialize In-memory database
-conn <- DBI::dbConnect(duckdb::duckdb())
-
-# install and load spatial extension
-DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
-DBI::dbExecute(conn, "CALL register_geoarrow_extension()")
 ```
 
 ### Path Configuration
@@ -135,12 +122,61 @@ CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
-source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
-source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
+source(here::here(dirs$source, "process_isochrones.R")) # Generate isochrones using OpenRouteService API
+source(here::here(dirs$source, "create_buffer.R")) # Generate equidistant buffers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
 ```
 
+# Preprocessing
+
+## Database Setup
+
+```{r}
+#| label: setup-db-init
+
+# Initialize In-memory database
+conn <- DBI::dbConnect(duckdb::duckdb())
+
+# install and load spatial extension
+DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+```
+
 # Process Isochrones
+
+```{r}
+#| label: prep-boundary
+
+# Define inputs/outputs
+fp_regional_bound <- here::here(sub_dirs$base, "RegionalBoundaryComponents.parquet")
+fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
+
+# Process using DuckDB SQL
+query_prep <- glue::glue("
+  COPY (
+    SELECT * FROM read_parquet('{fp_regional_bound}')
+    WHERE plan_org IN ('MAG MPO', 'WFRC MPO')
+  ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
+")
+
+DBI::dbExecute(conn, query_prep)
+
+# # Process using R Arrow (Preserves Metadata)
+# arrow::open_dataset(fp_regional_bound) |>
+#   dplyr::filter(plan_org %in% c("MAG MPO", "WFRC MPO")) |>
+#   arrow::write_parquet(fp_boundary_wftdm)
+
+message("✅ Analysis boundary filtered (DuckDB): ", fp_boundary_wftdm)
+```
+
+```{r}
+#| eval: false
+
+preview_layer(fp_boundary_wftdm)
+```
+
+## Set Regional Boundary
+
 
 ## Set Isochrone Inputs and Configuration
 
@@ -256,4 +292,10 @@ preview_layer(
   color = "red",
   limit = 100
 )
+```
+
+
+```{r}
+# Disconnect duckdb
+DBI::dbDisconnect(conn)
 ```

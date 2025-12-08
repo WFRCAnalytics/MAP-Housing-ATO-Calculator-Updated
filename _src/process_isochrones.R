@@ -11,6 +11,7 @@
 #' @param range A numeric vector of ranges.
 #'   If `range_type = "time"` (default), values are in **seconds**.
 #'   If `range_type = "distance"`, values are in **meters**.
+#' @param boundary_path Path to the regional boundary parquet (optional).
 #' @param batch_size An integer number of coordinates to send per API call (default 5).
 #' @param save_dir A string path to the root isochrone directory.
 #'   Defaults to `dirs$isochrones`.
@@ -61,9 +62,10 @@ process_isochrones <- function(
   name,
   profile,
   range,
+  boundary_path = NULL,
   batch_size = 5,
   save_dir = dirs$isochrones,
-  crs = CRS_PROJ,
+  crs = CRS_WGS,
   dry_run = TRUE,
   ...
 ) {
@@ -101,24 +103,47 @@ process_isochrones <- function(
 
   message(paste("🚀 Generating isochrones:", name, "| Profile:", profile))
 
-  # 3. Connect to DuckDB for Streaming
+  # 3. Connect to DuckDB
   con <- DBI::dbConnect(duckdb::duckdb())
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
-  # Register the parquet file as a view
-  # We extract only X and Y (WGS84) directly using spatial extension
   tryCatch(
     {
       DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
-      query_view <- glue::glue(
+      DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+
+      # --- QUERY CONSTRUCTION ---
+      if (!is.null(boundary_path)) {
+        # 1. Read ANY boundary file -> 2. Dissolve All Features -> 3. Spatial Join
+        query_view <- glue::glue(
+          "
+          CREATE OR REPLACE VIEW input_points AS
+          WITH region AS (
+            -- Collapse all rows in the boundary file into one multipolygon
+            SELECT ST_Union_Agg(ST_GeomFromWKB(geometry)) as geom
+            FROM read_parquet('{boundary_path}')
+          )
+          SELECT
+            ST_X(ST_Transform(ST_GeomFromWKB(p.geometry), 'EPSG:4326', 'EPSG:4326')) as lon,
+            ST_Y(ST_Transform(ST_GeomFromWKB(p.geometry), 'EPSG:4326', 'EPSG:4326')) as lat
+          FROM read_parquet('{path}') p, region r
+          WHERE ST_Intersects(ST_GeomFromWKB(p.geometry), r.geom)
         "
-      CREATE OR REPLACE VIEW input_points AS
-      SELECT
-        ST_X(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lon,
-        ST_Y(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lat
-      FROM read_parquet('{path}')
-    "
-      )
+        )
+        message("   🛡️  Filtering to boundary: ", basename(boundary_path))
+      } else {
+        # Original query (No boundary)
+        query_view <- glue::glue(
+          "
+          CREATE OR REPLACE VIEW input_points AS
+          SELECT
+            ST_X(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lon,
+            ST_Y(ST_Transform(ST_GeomFromWKB(geometry), 'EPSG:4326', 'EPSG:4326')) as lat
+          FROM read_parquet('{path}')
+        "
+        )
+      }
+
       DBI::dbExecute(con, query_view)
 
       # Count total rows

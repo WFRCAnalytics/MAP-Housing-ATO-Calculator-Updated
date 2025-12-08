@@ -128,7 +128,7 @@ fp_municipal_bound <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0",
   name = "UtahMunicipalBoundaries",
   save_dir = sub_dirs$base, # Saves to _data/processed/base_layers/
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -148,7 +148,7 @@ fp_county_bound <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahCountyBoundaries/FeatureServer/0",
   name = "UtahCountyBoundaries",
   save_dir = sub_dirs$base,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -169,7 +169,7 @@ fp_regional_bound <- download_feature_layer(
   name = "RegionalBoundaryComponents",
   # query = "PlanOrg IN ('MAG MPO', 'WFRC MPO')",
   save_dir = sub_dirs$base,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -194,7 +194,7 @@ fp_remm_parcels <- process_local_layer(
   save_dir = sub_dirs$parcels,
   # partitioning = "co_name",
   compression = "zstd",
-  crs  = CRS_PROJ
+  crs  = CRS_WGS
 )
 ```
 
@@ -217,7 +217,7 @@ fp_remm_buildings <- process_local_layer(
   save_dir = sub_dirs$parcels,
   # partitioning = "building_type",
   compression = "zstd",
-  crs  = CRS_PROJ
+  crs  = CRS_WGS
 )
 ```
 
@@ -237,7 +237,7 @@ fp_wf_taz <- process_local_layer(
   path = "WFv920_TAZ.zip",
   name = "WFv920_TAZ",
   save_dir = sub_dirs$parcels,
-  crs  = CRS_PROJ
+  crs  = CRS_WGS
 )
 ```
 
@@ -257,7 +257,7 @@ fp_ustm_taz <- process_local_layer(
   path = "Statewide_TAZ.zip",
   name = "Statewide_TAZ",
   save_dir = sub_dirs$parcels,
-  crs  = CRS_PROJ
+  crs  = CRS_WGS
 )
 ```
 
@@ -279,7 +279,7 @@ fp_wcv_centers <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
   name = "WCV_Centers_and_Regional_Land_Uses",
   save_dir = sub_dirs$landuse,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -299,7 +299,7 @@ fp_utah_qoz <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Qualified_Opportunity_Zones/FeatureServer/0",
   name = "Utah_Qualified_Opportunity_Zones",
   save_dir = sub_dirs$landuse,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -324,7 +324,7 @@ fp_transit_routes <- download_feature_layer(
   url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Routes_and_Most_Recent_Ridership/FeatureServer/0",
   name = "UTA_Routes_and_Most_Recent_Ridership",
   save_dir = sub_dirs$transport,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -344,7 +344,7 @@ fp_transit_stops <- download_feature_layer(
   url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0",
   name = "UTA_Stops_and_Most_Recent_Ridership",
   save_dir = sub_dirs$transport,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -365,7 +365,7 @@ fp_bikeways <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
   name = "Bikeways",
   save_dir = sub_dirs$transport,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -388,7 +388,7 @@ fp_freeway_exits <- download_feature_layer(
   url = "https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0",
   name = "Freeway_Exit_Locations",
   save_dir = sub_dirs$transport,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -409,7 +409,7 @@ fp_taz_ato <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
   name = "TAZ_AccessToOpportunities_RTP2023",
   save_dir = sub_dirs$access,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -433,7 +433,7 @@ fp_edu_k12 <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0",
   name = "Schools_PreKto12",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -453,7 +453,7 @@ fp_edu_higher <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0",
   name = "Schools_HigherEducation",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -475,7 +475,7 @@ fp_health_fac <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0",
   name = "LicensedHealthCareFacilities",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -495,9 +495,9 @@ fp_child_care <- process_local_layer(
   path = "HIFLD OPEN Child Care Centers/child-care-centers-geojson.zip",
   name = "ChildCareFacilities",
   query = "SELECT * FROM Child_Care_Centers WHERE STATE = 'UT'",
+  read_mode = "zip",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ,
-  read_mode = "zip"
+  crs = CRS_WGS
 )
 ```
 
@@ -519,7 +519,7 @@ fp_grocery_store <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0",
   name = "UtahGroceryAndFoodStores_DAF",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -539,7 +539,7 @@ fp_community_center <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412", # TODO: use UGRC
   name = "Community_Centers",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 
@@ -559,7 +559,7 @@ fp_park_access <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/ParkEdits/FeatureServer/0",
   name = "WalkAccesstoParks_10Min",
   save_dir = sub_dirs$amenities,
-  crs = CRS_PROJ
+  crs = CRS_WGS
 )
 ```
 

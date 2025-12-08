@@ -30,7 +30,7 @@ process_local_layer <- function(
   save_dir = dirs$processed,
   layer = NULL,
   query = NA,
-  crs = CRS_PROJ,
+  crs = CRS_WGS,
   read_mode = "auto",
   partitioning = NULL,
   overwrite = FALSE,
