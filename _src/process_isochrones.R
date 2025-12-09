@@ -16,7 +16,7 @@
 #' @param batch_size An integer number of coordinates to send per API call (default 5).
 #' @param save_dir A string path to the root isochrone directory.
 #'   Defaults to `dirs$isochrones`.
-#' @param crs Projected EPSG code for spatial operations (default `CRS_PROJ`).
+#' @param crs Projected EPSG code for spatial operations (default `CRS_STP`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
 #' @param ... Additional arguments passed to \code{openrouteservice::ors_isochrones}.
 #'   Common options include:
@@ -67,7 +67,7 @@ process_isochrones <- function(
   boundary_path = NULL,
   batch_size = 5,
   save_dir = dirs$isochrones,
-  crs = CRS_PROJ,
+  crs = CRS_STP,
   dry_run = TRUE,
   ...
 ) {

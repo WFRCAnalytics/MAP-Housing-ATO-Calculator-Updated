@@ -112,9 +112,9 @@ sub_dirs <- list(
 #| label: setup-crs
 
 # Projection Constants
-CRS_PROJ <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
-CRS_VIEW <- "EPSG:3857" # WGS 84 / Pseudo-Mercator (Projected - Meters)
-CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
+CRS_STP <- "EPSG:3566"  # NAD83 / Utah Central (Projected - ftUS)
+CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
+CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
 ```
 
 ## Helper Functions
@@ -206,7 +206,7 @@ arrow::open_dataset(fp_boundary_wftdm) |>
 # 1. Define Inputs/Outputs
 fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
 fp_h3_grid        <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-H3_RES            <- 7
+H3_RES            <- 7 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
 
 if (file.exists(fp_h3_grid)) {
   message("✅ H3 Grid already exists: ", fp_h3_grid)
@@ -260,7 +260,6 @@ if (file.exists(fp_h3_grid)) {
 #| eval: false
 
 arrow::read_parquet(fp_h3_grid) |>
-  # dplyr::mutate(geometry = sf::st_as_sfc(geometry, crs = CRS_WGS)) |>
   sf::st_as_sf(crs = CRS_WGS) |>
   mapgl::maplibre_view()
 ```
@@ -302,7 +301,7 @@ run_batch <- function(file_list, profile, range, ...) {
       profile     = profile,
       range       = range,
       boundary_path = fp_boundary_wftdm,
-      src_crs       = CRS_PROJ,
+      src_crs       = CRS_STP,
       save_dir    = dirs$isochrones,
       dry_run     = TRUE,          # Set to TRUE to test
       batch_size  = 5,

@@ -118,9 +118,9 @@ sub_dirs <- list(
 #| label: setup-crs
 
 # Projection Constants
-CRS_PROJ <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
-CRS_VIEW <- "EPSG:3857" # WGS 84 / Pseudo-Mercator (Projected - Meters)
-CRS_WGS  <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
+CRS_STP <- "EPSG:3566"  # NAD83 / Utah Central (Projected - ftUS)
+CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
+CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
 ```
 
 ## Helper Functions

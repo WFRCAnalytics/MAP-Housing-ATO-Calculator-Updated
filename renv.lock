@@ -536,14 +536,20 @@
     "geoarrow": {
       "Package": "geoarrow",
       "Version": "0.4.1",
-      "Source": "Repository",
-      "Repository": "CRAN",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteRepo": "geoarrow-r",
+      "RemoteUsername": "geoarrow",
+      "RemotePkgRef": "geoarrow/geoarrow-r",
+      "RemoteRef": "HEAD",
+      "RemoteSha": "115b5a193f91588205d50cd0e7065aa5af5f619c",
       "Requirements": [
         "R",
         "nanoarrow",
         "wk"
       ],
-      "Hash": "836a795cf18aef417f6d3bf090c15875"
+      "Hash": "f08bfed2b1a39a85c973d758c0cf5fa8"
     },
     "geojsonsf": {
       "Package": "geojsonsf",
