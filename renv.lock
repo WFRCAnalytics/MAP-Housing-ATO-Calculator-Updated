@@ -398,7 +398,7 @@
     },
     "duckdb": {
       "Package": "duckdb",
-      "Version": "1.4.2",
+      "Version": "1.4.3",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -407,7 +407,7 @@
         "methods",
         "utils"
       ],
-      "Hash": "b1c6b32f7cad19610e529a4d66c1330f"
+      "Hash": "2b5e646fd1f96486879c65d403959559"
     },
     "duckplyr": {
       "Package": "duckplyr",
@@ -625,7 +625,7 @@
     },
     "htmltools": {
       "Package": "htmltools",
-      "Version": "0.5.8.1",
+      "Version": "0.5.9",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -637,7 +637,7 @@
         "rlang",
         "utils"
       ],
-      "Hash": "81d371a9cc60640e74e4ab6ac46dcedc"
+      "Hash": "102298e238c14eb830cc4b5edd23c3e8"
     },
     "htmlwidgets": {
       "Package": "htmlwidgets",
@@ -692,7 +692,7 @@
     },
     "httr2": {
       "Package": "httr2",
-      "Version": "1.2.1",
+      "Version": "1.2.2",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -709,7 +709,7 @@
         "vctrs",
         "withr"
       ],
-      "Hash": "6e29f1ed132b927f7d52e9fd8869f0ea"
+      "Hash": "c20959a9442c0e3adb1e8d3809c5d1f7"
     },
     "janitor": {
       "Package": "janitor",
@@ -980,10 +980,10 @@
     },
     "nanoarrow": {
       "Package": "nanoarrow",
-      "Version": "0.7.0-1",
+      "Version": "0.7.0-2",
       "Source": "Repository",
       "Repository": "CRAN",
-      "Hash": "28a6a6cca2259ba184d4b81230f847ec"
+      "Hash": "060edf915dbf5d0ecebe3cd7705c1af3"
     },
     "openrouteservice": {
       "Package": "openrouteservice",
@@ -1240,7 +1240,7 @@
     },
     "sf": {
       "Package": "sf",
-      "Version": "1.0-22",
+      "Version": "1.0-23",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -1259,7 +1259,7 @@
         "units",
         "utils"
       ],
-      "Hash": "4d371eea6c5242745ddca3fdb2cef197"
+      "Hash": "ce0c8d7dc7715a383d874eb5be01edd5"
     },
     "sfheaders": {
       "Package": "sfheaders",
@@ -1275,7 +1275,7 @@
     },
     "shiny": {
       "Package": "shiny",
-      "Version": "1.11.1",
+      "Version": "1.12.1",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -1296,6 +1296,7 @@
         "lifecycle",
         "methods",
         "mime",
+        "otel",
         "promises",
         "rlang",
         "sourcetools",
@@ -1304,7 +1305,7 @@
         "withr",
         "xtable"
       ],
-      "Hash": "1c1a2437351984ff592639ae28cda09e"
+      "Hash": "4eee104c56972c9ef07741219099b0dd"
     },
     "snakecase": {
       "Package": "snakecase",
@@ -1384,7 +1385,7 @@
     },
     "terra": {
       "Package": "terra",
-      "Version": "1.8-80",
+      "Version": "1.8-86",
       "Source": "Repository",
       "Repository": "CRAN",
       "Requirements": [
@@ -1392,7 +1393,7 @@
         "Rcpp",
         "methods"
       ],
-      "Hash": "af6ece019beb5940e6453a5efe12d86d"
+      "Hash": "1cc3e57b7ea625c7ef5c814f75bd087a"
     },
     "tibble": {
       "Package": "tibble",
@@ -1580,10 +1581,10 @@
     },
     "yaml": {
       "Package": "yaml",
-      "Version": "2.3.11",
+      "Version": "2.3.12",
       "Source": "Repository",
       "Repository": "CRAN",
-      "Hash": "fd01df43bb8d6c9e0c8968440bb46d34"
+      "Hash": "7cd77cb32abd9220d744307e9fc94ffb"
     },
     "yyjsonr": {
       "Package": "yyjsonr",
