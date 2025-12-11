@@ -43,6 +43,7 @@ pak::pak(
 #| warning: false
 
 library(dplyr)
+library(tidyr)
 library(sf)
 library(openrouteservice)
 library(DBI)
@@ -63,17 +64,58 @@ library(here)
 ```{r}
 #| label: setup-ors
 
-# Ensure your _environment file has: ORS_API_KEY="your_key_here"
-readRenviron(here::here("_environment"))
+# --- Configuration ---
+# TRUE  = Use local Docker instance (Free, Unlimited, Fast)
+# FALSE = Use Public Cloud API (Limited tokens, Requires Key)
+USE_LOCAL_ORS <- TRUE
 
-# 2. Check Key
-if (Sys.getenv("ORS_API_KEY") == "") {
-  stop("❌ ORS_API_KEY not found in _environment file.")
+if (USE_LOCAL_ORS) {
+  # 1. Local Setup
+  local_url <- "http://localhost:8080/ors"
+
+  # Set the option that the package looks for
+  options(openrouteservice.url = local_url)
+
+  # Local instances ignore the key, but the package sometimes checks for existence.
+  # We set a dummy key to prevent errors.
+  suppressMessages(ors_api_key("local-instance"))
+
+  message("✅ Using Local ORS instance at: ", local_url)
+
 } else {
-  # Set it for the package
-  ors_api_key(Sys.getenv("ORS_API_KEY"))
-  message("✅ API Key Loaded")
+  # 2. Remote Setup
+  # Important: Clear the URL option so it defaults back to "api.openrouteservice.org"
+  options(openrouteservice.url = NULL)
+
+  # Load Key
+  readRenviron(here::here("_environment"))
+
+  if (Sys.getenv("ORS_API_KEY") == "") {
+    stop("❌ ORS_API_KEY not found in _environment file.")
+  } else {
+    ors_api_key(Sys.getenv("ORS_API_KEY"))
+    message("✅ Using Public ORS API (Key Loaded)")
+  }
 }
+```
+
+```r
+# Optionally set ORS Paths
+options(
+  openrouteservice.paths = list(
+      directions = "v2/directions",
+      isochrones = "v2/isochrones",
+      matrix = "v2/matrix",
+      geocode = "geocode",
+      pois = "pois",
+      elevation = "elevation",
+      optimization = "optimization",
+      snap = "v2/snap",
+      export = "v2/export",
+      health = "v2/health",
+      status = "v2/status"
+  )
+)
 ```
 
 ### Path Configuration
@@ -83,12 +125,12 @@ if (Sys.getenv("ORS_API_KEY") == "") {
 
 # Setup Paths & Params
 dirs <- list(
-  source = here::here("_src"), # Source custom functions
-  raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
-  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
-  buffered = here::here("_data/buffered"), # Intermediate Output: Buffered layers
+  source     = here::here("_src"), # Source custom functions
+  raw        = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
+  processed  = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
+  buffered   = here::here("_data/buffered"), # Intermediate Output: Buffered layers
   isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
-  results = here::here("_output") # Final Output: Analysis Results
+  results    = here::here("_output") # Final Output: Analysis Results
 )
 ```
 
@@ -97,12 +139,23 @@ dirs <- list(
 
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
-  base   = here::here(dirs$processed, "base_layers"),
-  parcels = here::here(dirs$processed, "parcels_taz"),
-  landuse = here::here(dirs$processed, "landuse_zones"),
+  base      = here::here(dirs$processed, "base_layers"),
+  parcels   = here::here(dirs$processed, "parcels_taz"),
+  landuse   = here::here(dirs$processed, "landuse_zones"),
   transport = here::here(dirs$processed, "transportation"),
-  access = here::here(dirs$processed, "access"),
+  access    = here::here(dirs$processed, "access"),
   amenities = here::here(dirs$processed, "amenities")
+)
+```
+
+```{r}
+#| label: setup-iso-subdirs
+
+# Define Sub-directories for Isochrones
+iso_dirs <- list(
+  walking   = here::here(dirs$isochrones, "foor-walking"),
+  biking    = here::here(dirs$isochrones, "cycling-regular"),
+  driving   = here::here(dirs$isochrones, "driving-car")
 )
 ```
 
@@ -130,6 +183,71 @@ source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files 
 # Preprocessing
 
 ## Set Regional Boundary
+
+```r
+#| label: prep-boundary
+
+# -----------------------------------------------------------------------------
+# DOESN'T WORK CURRENTLY BECAUSE {duckspatial} IS STILL UNDER DEVELOPMENT
+# -----------------------------------------------------------------------------
+
+fp_regional_bound <- here::here(sub_dirs$base, "RegionalBoundaryComponents.parquet")
+fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
+
+if (file.exists(fp_boundary_wftdm)) {
+  message("✅ Analysis boundary already exists: ", fp_boundary_wftdm)
+} else {
+
+  # 1. Connection Management (duckspatial)
+  # Uses ddbs_create_conn for standardized in-memory DB setup
+  conn <- duckspatial::ddbs_create_conn()
+  on.exit(duckspatial::ddbs_stop_conn(conn), add = TRUE)
+
+  # 2. Extension Management (duckspatial)
+  duckspatial::ddbs_load(conn)
+  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+
+  # 3. Define Lazy Source (duckplyr)
+  # duckplyr works seamlessly with DuckDB connections
+  tbl_boundary <- dplyr::tbl(conn, paste0("read_parquet('", fp_regional_bound, "')"))
+
+  # 4. Build Pipeline
+  processed_boundary <- tbl_boundary |>
+
+    # Filter using duckplyr (optimized translation)
+    duckplyr::filter(plan_org %in% c('MAG MPO', 'WFRC MPO')) |>
+
+    # A. Initial Dissolve
+    # MISSING FUNCTION: ddbs_union_agg()
+    duckplyr::summarise(geom = ddbs_union_agg(geometry)) |>
+
+    # B. Explode MultiPolygons
+    # MISSING FUNCTION: ddbs_dump() returns a list/struct
+    duckplyr::mutate(parts = ddbs_dump(geom)) |>
+
+    # Unnest is a tidyr verb, but handled by dbplyr/duckplyr backend
+    tidyr::unnest_longer(parts) |>
+
+    # C. Remove Holes (ExteriorRing -> MakePolygon)
+    # MISSING FUNCTIONS: ddbs_exterior_ring(), ddbs_make_polygon()
+    duckplyr::mutate(
+      # Accessing struct field '.geom' from the dump result
+      outer_ring = ddbs_exterior_ring(parts$geom),
+      clean_poly = ddbs_make_polygon(outer_ring)
+    ) |>
+
+    # D. Re-Aggregate and Convert to WKB
+    # MISSING FUNCTIONS: ddbs_union_agg(), ddbs_as_wkb()
+    duckplyr::summarise(geometry = ddbs_as_wkb(ddbs_union_agg(clean_poly)))
+
+  # 5. Execute & Write (Zero-Copy)
+  # We convert the duckplyr lazy object to SQL and execute COPY
+  query_sql <- dbplyr::sql_render(processed_boundary)
+  DBI::dbExecute(conn, glue::glue("COPY ({query_sql}) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)"))
+
+  message("✅ Analysis boundary created (Duck-Native): ", fp_boundary_wftdm)
+}
+```
 
 ```{r}
 #| label: prep-boundary
@@ -200,6 +318,64 @@ arrow::open_dataset(fp_boundary_wftdm) |>
 
 ## Generate H3 Hexagons
 
+```r
+#| label: gen-h3-grid
+
+# -----------------------------------------------------------------------------
+# DOESN'T WORK CURRENTLY BECAUSE {duckspatial} IS STILL UNDER DEVELOPMENT
+# -----------------------------------------------------------------------------
+
+fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
+H3_RES     <- 7
+
+if (file.exists(fp_h3_grid)) {
+  message("✅ H3 Grid already exists: ", fp_h3_grid)
+} else {
+
+  conn <- duckspatial::ddbs_create_conn()
+  on.exit(duckspatial::ddbs_stop_conn(conn), add = TRUE)
+
+  duckspatial::ddbs_load(conn)
+  DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
+  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+
+  # Define Lazy Table from the cleaned boundary
+  tbl_clean_boundary <- dplyr::tbl(conn, paste0("read_parquet('", fp_boundary_wftdm, "')"))
+
+  h3_grid <- tbl_clean_boundary |>
+
+    # A. Dump MultiPolygons (Using hypothetical wrapper)
+    # MISSING FUNCTION: ddbs_dump()
+    duckplyr::mutate(parts = ddbs_dump(geometry)) |>
+    tidyr::unnest_longer(parts) |>
+
+    # B. Convert to WKT (Using hypothetical wrapper)
+    # MISSING FUNCTION: ddbs_as_text()
+    duckplyr::mutate(wkt_geom = ddbs_as_text(parts$geom)) |>
+
+    # C. H3 Polyfill (Manual SQL as requested)
+    # DuckDB's H3 extension functions are not standard OGC, so we inject SQL
+    duckplyr::mutate(
+      h3_indices = dbplyr::sql(glue::glue("h3_polygon_wkt_to_cells(wkt_geom, {H3_RES})"))
+    ) |>
+    tidyr::unnest_longer(h3_indices) |>
+
+    # D. Convert H3 Index back to Geometry (Manual SQL)
+    duckplyr::transmute(
+      h3_index = h3_indices,
+      geometry = dbplyr::sql("h3_cell_to_boundary_wkb(h3_indices)")
+    ) |>
+
+    duckplyr::distinct()
+
+  # Write Result
+  query_h3_sql <- dbplyr::sql_render(h3_grid)
+  DBI::dbExecute(conn, glue::glue("COPY ({query_h3_sql}) TO '{fp_h3_grid}' (FORMAT PARQUET)"))
+
+  message("✅ H3 Grid saved to: ", fp_h3_grid)
+}
+```
+
 ```{r}
 #| label: gen-h3-grid
 
@@ -267,84 +443,94 @@ arrow::read_parquet(fp_h3_grid) |>
 ## Set Isochrone Inputs and Configuration
 
 ```{r}
-#| label: isochrone-setup
+#| label: config-layers
 
-# We use the parquet files created in step 1
-input_layers <- c(
-  here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"), # Transit (All Modes)
-  here::here(sub_dirs$amenities, "Community_Centers.parquet"),
-  here::here(sub_dirs$amenities, "ChildCareFacilities.parquet"),
-  here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet"),
-  here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet"),
-  here::here(sub_dirs$amenities, "Schools_PreKto12.parquet"),
-  here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet")
+# Master Input Configuration
+# - name: Output filename prefix
+# - filter: SQL filtering logic (default "1=1")
+# - paths: List of file paths (if >1, they are unioned)
+layer_config <- tibble::tribble(
+  ~name,                      ~filter,    ~paths,
+
+  # --- AMENITIES ---
+  "Community_Centers",         "1=1",      list(here::here(sub_dirs$amenities, "Community_Centers.parquet")),
+  "Grocery",                   "1=1",      list(here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet")),
+  "Schools_PreK12",            "1=1",      list(here::here(sub_dirs$amenities, "Schools_PreKto12.parquet")),
+  "Schools_HigherEd",          "1=1",      list(here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet")),
+  "Healthcare",                "1=1",      list(here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet")),
+  "Transit_Current", "Mode != 'Bus'",      list(here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"))
 )
-```
-
-```{r}
-#| label: isochrone-batch-helper
-
-# Batch Helper Function
-# Takes a list of files -> Generates Isochrones using original filenames
-run_batch <- function(file_list, profile, range, ...) {
-
-  purrr::walk(file_list, function(input_path) {
-
-    # 1. Get original name (e.g. "ChildCareFacilities")
-    original_name <- fs::path_ext_remove(fs::path_file(input_path))
-
-    # 2. Execute
-    # process_isochrones automatically handles the subfolder creation based on 'profile'
-    process_isochrones(
-      path        = input_path,
-      name        = original_name,  # Output name matches input name
-      profile     = profile,
-      range       = range,
-      boundary_path = fp_boundary_wftdm,
-      src_crs       = CRS_STP,
-      save_dir    = dirs$isochrones,
-      dry_run     = TRUE,          # Set to TRUE to test
-      batch_size  = 5,
-      ...                           # Pass extra args
-    )
-  })
-}
 ```
 
 ## Generate Walking Isochrones
 
 ```{r}
-#| label: isochrone-walking
+#| label: iso-walking
 
-run_batch(
-  file_list = input_layers,
-  profile   = "foot-walking",
-  range     = c(300, 600, 900)
-)
+layer_config |>
+  # Optional: You can filter the config first if you only want specific layers for driving
+  # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
+  purrr::pwalk(function(name, filter, path) {
+
+    # Direct execution (No union logic needed)
+    process_isochrones(
+      path          = path,
+      name          = name,
+      profile       = "foot-walking",
+      range         = c(300, 600, 900),
+      input_filter  = filter,
+      boundary_path = fp_boundary_wftdm,
+      save_dir      = dirs$isochrones,
+      dry_run       = TRUE # Set to FALSE to generate files
+    )
+
+  })
 ```
 
 ## Generate Biking Isochrones
 
 ```{r}
-#| label: isochrone-biking
+#| label: iso-biking
 
-run_batch(
-  file_list = input_layers,
-  profile   = "cycling-regular",
-  range     = c(300, 600, 900)
-)
+layer_config |>
+  # Optional: You can filter the config first if you only want specific layers for driving
+  # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
+  purrr::pwalk(function(name, filter, path) {
+
+    process_isochrones(
+      path          = path,
+      name          = name,
+      profile       = "cycling-regular",
+      range         = c(300, 600, 900),
+      input_filter  = filter,
+      boundary_path = fp_boundary_wftdm,
+      save_dir      = dirs$isochrones,
+      dry_run       = TRUE # Set to FALSE to generate files
+    )
+  })
 ```
 
 ## Generate Driving Isochrones
 
 ```{r}
-#| label: isochrone-driving
+#| label: iso-driving
 
-run_batch(
-  file_list = input_layers,
-  profile   = "driving-car",
-  range     = c(300, 600, 900)
-)
+layer_config |>
+  # Optional: You can filter the config first if you only want specific layers for driving
+  # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
+  purrr::pwalk(function(name, filter, path) {
+
+    process_isochrones(
+      path          = path,
+      name          = name,
+      profile       = "driving-car",
+      range         = c(300, 600, 900),
+      input_filter  = filter,
+      boundary_path = fp_boundary_wftdm,
+      save_dir      = dirs$isochrones,
+      dry_run       = TRUE # Set to FALSE to generate files
+    )
+  })
 ```
 
 ## Verify Results
