@@ -110,7 +110,7 @@ CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
-source(here::here(dirs$source, "as_geoparquet_table.R")) # Download ArcGIS Feature Layers
+source(here::here(dirs$source, "as_geoparquet_table.R")) # Write Geoparquet metadata
 source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
 source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl

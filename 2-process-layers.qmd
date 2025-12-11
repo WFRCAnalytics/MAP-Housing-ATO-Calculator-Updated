@@ -132,6 +132,8 @@ dirs <- list(
   isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
   results    = here::here("_output") # Final Output: Analysis Results
 )
+
+purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -146,6 +148,8 @@ sub_dirs <- list(
   access    = here::here(dirs$processed, "access"),
   amenities = here::here(dirs$processed, "amenities")
 )
+
+purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -157,6 +161,8 @@ iso_dirs <- list(
   biking    = here::here(dirs$isochrones, "cycling-regular"),
   driving   = here::here(dirs$isochrones, "driving-car")
 )
+
+purrr::walk(iso_dirs, ~fs::dir_create(., recurse = TRUE))
 ```
 
 ### Projection Constants
@@ -175,6 +181,7 @@ CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
+source(here::here(dirs$source, "as_geoparquet_table.R")) # Write Geoparquet metadata
 source(here::here(dirs$source, "process_isochrones.R")) # Generate isochrones using OpenRouteService API
 source(here::here(dirs$source, "create_buffer.R")) # Generate equidistant buffers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
@@ -453,12 +460,15 @@ layer_config <- tibble::tribble(
   ~name,                      ~filter,    ~paths,
 
   # --- AMENITIES ---
-  "Community_Centers",         "1=1",      list(here::here(sub_dirs$amenities, "Community_Centers.parquet")),
-  "Grocery",                   "1=1",      list(here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet")),
-  "Schools_PreK12",            "1=1",      list(here::here(sub_dirs$amenities, "Schools_PreKto12.parquet")),
-  "Schools_HigherEd",          "1=1",      list(here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet")),
-  "Healthcare",                "1=1",      list(here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet")),
-  "Transit_Current", "Mode != 'Bus'",      list(here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"))
+  "Transit_Current", "Mode != 'Bus'",      here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
+  "Freeways",                  "1=1",      here::here(sub_dirs$transport, "Freeway_Exit_Locations.parquet"),
+
+  "ChildCare",                 "1=1",      here::here(sub_dirs$amenities, "ChildCareFacilities.parquet"),
+  "Healthcare",                "1=1",      here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet"),
+  "Schools_PreK12",            "1=1",      here::here(sub_dirs$amenities, "Schools_PreKto12.parquet"),
+  "Schools_HigherEd",          "1=1",      here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet"),
+  "Grocery",                   "1=1",      here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet"),
+  "Community_Centers",         "1=1",      here::here(sub_dirs$amenities, "Community_Centers.parquet")
 )
 ```
 
@@ -470,11 +480,11 @@ layer_config <- tibble::tribble(
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
-  purrr::pwalk(function(name, filter, path) {
+  purrr::pwalk(function(name, filter, paths) {
 
     # Direct execution (No union logic needed)
     process_isochrones(
-      path          = path,
+      path          = paths,
       name          = name,
       profile       = "foot-walking",
       range         = c(300, 600, 900),
@@ -495,10 +505,10 @@ layer_config |>
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
-  purrr::pwalk(function(name, filter, path) {
+  purrr::pwalk(function(name, filter, paths) {
 
     process_isochrones(
-      path          = path,
+      path          = paths,
       name          = name,
       profile       = "cycling-regular",
       range         = c(300, 600, 900),
@@ -518,10 +528,10 @@ layer_config |>
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
-  purrr::pwalk(function(name, filter, path) {
+  purrr::pwalk(function(name, filter, paths) {
 
     process_isochrones(
-      path          = path,
+      path          = paths,
       name          = name,
       profile       = "driving-car",
       range         = c(300, 600, 900),

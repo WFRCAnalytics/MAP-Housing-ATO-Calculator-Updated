@@ -18,6 +18,7 @@
 #'   Defaults to `dirs$isochrones`.
 #' @param crs Projected EPSG code for spatial operations (default `CRS_STP`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
+#' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
 #' @param ... Additional arguments passed to \code{openrouteservice::ors_isochrones}.
 #'   Common options include:
 #'   \itemize{
@@ -69,6 +70,7 @@ process_isochrones <- function(
   save_dir = dirs$isochrones,
   crs = CRS_STP,
   dry_run = TRUE,
+  overwrite = FALSE,
   ...
 ) {
   # 1. Dependency Check
@@ -99,7 +101,7 @@ process_isochrones <- function(
   out_fp <- file.path(target_dir, paste0(name, ".parquet"))
 
   # 3. Cache Check
-  if (file.exists(out_fp) && !dry_run) {
+  if (file.exists(out_fp) && !overwrite && !dry_run) {
     message(paste("✅ Isochrones exist:", name))
     return(out_fp)
   }
