@@ -157,7 +157,7 @@ purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
 
 # Define Sub-directories for Isochrones
 iso_dirs <- list(
-  walking   = here::here(dirs$isochrones, "foor-walking"),
+  walking   = here::here(dirs$isochrones, "foot-walking"),
   biking    = here::here(dirs$isochrones, "cycling-regular"),
   driving   = here::here(dirs$isochrones, "driving-car")
 )
@@ -560,7 +560,7 @@ fs::dir_tree(dirs$isochrones)
 # 2. Visual Check: Compare Walking vs Driving for Grocery
 # Walking (Blue)
 preview_layer(
-  here::here(dirs$isochrones, "foot-walking", "UtahGroceryAndFoodStores_DAF.parquet"),
+  here::here(iso_dirs$walking, "Grocery.parquet"),
   color = "blue",
   limit = 100
 )
@@ -572,7 +572,7 @@ preview_layer(
 
 # Driving (Red) - Should be much larger
 preview_layer(
-  here::here(dirs$isochrones, "driving-car", "UtahGroceryAndFoodStores_DAF.parquet"),
+  here::here(iso_dirs$walking, "Grocery.parquet"),
   color = "red",
   limit = 100
 )
