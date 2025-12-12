@@ -13,8 +13,10 @@
 #'   If `range_type = "distance"`, values are in **meters**.
 #' @param input_filter A SQL WHERE clause to filter input points (e.g., "type = 'Grocery'").
 #' @param boundary_path Path to the regional boundary parquet (optional).
+#' @param boundary_crs The EPSG code of the boundary file (e.g., "EPSG:26912").
+#'   Defaults to "EPSG:4326" (which matches your new boundary generation).
 #' @param batch_size An integer number of coordinates to send per API call (default 5).
-#' @param save_dir A string path to the root isochrone directory.
+#' @param save_dir A string path to the isochrone profile directory.
 #'   Defaults to `dirs$isochrones`.
 #' @param crs Projected EPSG code for spatial operations (default `CRS_STP`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
@@ -66,6 +68,7 @@ process_isochrones <- function(
   range,
   input_filter = "1=1",
   boundary_path = NULL,
+  boundary_crs = "EPSG:4326",
   batch_size = 5,
   save_dir = dirs$isochrones,
   crs = CRS_STP,
@@ -94,7 +97,7 @@ process_isochrones <- function(
   }
 
   # 2. Path Setup
-  target_dir <- file.path(save_dir, profile)
+  target_dir <- save_dir
   if (!dir.exists(target_dir)) {
     dir.create(target_dir, recursive = TRUE)
   }
@@ -119,36 +122,29 @@ process_isochrones <- function(
 
       # --- QUERY CONSTRUCTION ---
       if (!is.null(boundary_path)) {
+        transform_logic <- if (boundary_crs != "EPSG:4326") {
+          glue::glue("ST_Transform(geom, '{boundary_crs}', 'EPSG:4326')")
+        } else {
+          "geom"
+        }
         # 1. Read ANY boundary file -> 2. Dissolve All Features -> 3. Spatial Join
         query_view <- glue::glue(
           "
           CREATE OR REPLACE VIEW input_points AS
           WITH region_source AS (
-            -- 1. Read Boundary (4326) and convert WKB to Geometry
             SELECT geometry as geom FROM read_parquet('{boundary_path}')
           ),
-          region_projected AS (
-            -- 2. Project to Meter Plane (3566) and FIX VALIDITY
-            -- ST_MakeValid is crucial to prevent crashes during Union
-            SELECT ST_MakeValid(ST_Transform(geom, 'EPSG:4326', '{crs}')) as geom
-            FROM region_source
-          ),
           region_unified AS (
-            -- 3. Safely Dissolve (Union) all boundary features into one
-            SELECT ST_Union_Agg(geom) as geom FROM region_projected
-          ),
-          pts AS (
-            -- 4. Read Points (4326) -> Filter Attributes
-            SELECT * FROM read_parquet('{path}')
-            WHERE {input_filter}
+            SELECT ST_Union_Agg({transform_logic}) as geom
+            FROM region_source
           )
           SELECT
-            -- 6. Extract Original 4326 Coordinates for API
             ST_X(pts.geometry) as lon,
             ST_Y(pts.geometry) as lat
-          FROM pts, region_unified
-          -- 5. Project Point to Meter Plane (3566) -> Intersect with Dissolved Boundary
-          WHERE ST_Intersects(ST_Transform(pts.geometry, 'EPSG:4326', '{crs}'), region_unified.geom)
+          FROM read_parquet('{path}') pts, region_unified
+          WHERE
+            {input_filter}
+            AND ST_Intersects(pts.geometry, region_unified.geom)
         "
         )
         message(
@@ -228,7 +224,7 @@ process_isochrones <- function(
           batch_coords <- purrr::array_branch(as.matrix(batch_df), 1)
 
           # Rate Limit Sleep
-          Sys.sleep(1.5)
+          Sys.sleep(0)
 
           tryCatch(
             {

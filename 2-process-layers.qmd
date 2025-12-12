@@ -263,6 +263,10 @@ if (file.exists(fp_boundary_wftdm)) {
 fp_regional_bound <- here::here(sub_dirs$base, "RegionalBoundaryComponents.parquet")
 fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
 
+# Define the CRS of your INPUT file 'RegionalBoundaryComponents.parquet'
+# Common Utah CRSs: "EPSG:26912" (UTM 12N) or "EPSG:3566" (Utah Central State Plane)
+SOURCE_CRS <- CRS_WGS
+
 # --- Conditional Processing Block ---
 if (file.exists(fp_boundary_wftdm)) {
   # File exists, skip processing
@@ -282,29 +286,37 @@ if (file.exists(fp_boundary_wftdm)) {
   query_prep <- glue::glue("
     COPY (
       WITH raw_union AS (
-        -- 1. Initial Dissolve (Result likely has holes/slivers)
+        -- 1. Initial Dissolve
         SELECT ST_Union_Agg(geometry) as geom
         FROM read_parquet('{fp_regional_bound}')
         WHERE plan_org IN ('MAG MPO', 'WFRC MPO')
       ),
 
       exploded_parts AS (
-        -- 2. Handle MultiPolygons: Dump into individual polygons
-        --    We alias the struct output as 'd' to access d.geom
+        -- 2. Handle MultiPolygons
         SELECT unnest(ST_Dump(geom)) as d
         FROM raw_union
       ),
 
       filled_polys AS (
-        -- 3. Strip Holes:
-        --    Get Exterior Ring (LineString) -> Make new Polygon (No internal rings)
+        -- 3. Strip Holes (Make Exterior Ring -> Polygon)
         SELECT ST_MakePolygon(ST_ExteriorRing(d.geom)) as geom
         FROM exploded_parts
+      ),
+
+      final_union AS (
+        -- 4. Re-Aggregate
+        SELECT ST_Union_Agg(geom) as geom
+        FROM filled_polys
       )
 
-      -- 4. Re-Aggregate (in case there were legitimate islands) & Save
-      SELECT ST_AsWKB(ST_Union_Agg(geom)) as geometry
-      FROM filled_polys
+      -- 5. FINAL SELECT: Explicit Transform
+      --    ST_Transform(geometry, source_crs, target_crs)
+      SELECT
+        ST_AsWKB(
+          ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326')
+        ) as geometry
+      FROM final_union
 
     ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
   ")
@@ -391,6 +403,10 @@ fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parqu
 fp_h3_grid        <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
 H3_RES            <- 7 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
 
+# The input boundary should now be EPSG:4326 from the previous step.
+# We define it explicitly here for the 3-argument ST_Transform.
+BOUNDARY_CRS      <- CRS_WGS
+
 if (file.exists(fp_h3_grid)) {
   message("✅ H3 Grid already exists: ", fp_h3_grid)
 } else {
@@ -406,24 +422,29 @@ if (file.exists(fp_h3_grid)) {
   query_h3 <- glue::glue("
     COPY (
       WITH boundary_parts AS (
+        -- 1. Read Boundary & FORCE Transform to 4326
+        --    ST_Transform(geom, source_crs, target_crs)
         SELECT
-          -- 1. Dump MultiPolygon to list of structs [geom, path]
-          -- 2. Unnest to rows. We alias the struct as 'd'
-          unnest(ST_Dump(geometry)) as d
+          unnest(
+            ST_Dump(
+              ST_Transform(geometry, '{BOUNDARY_CRS}', 'EPSG:4326')
+            )
+          ) as d
         FROM read_parquet('{fp_boundary_wftdm}')
       ),
 
       h3_indices AS (
         SELECT
-          -- 3. Access the '.geom' field of the struct 'd'
-          -- 4. Convert to WKT (Text) for H3 Polyfill
+          -- 2. Generate H3 Indices (Polyfill)
+          --    ST_AsText creates the WKT needed by H3
           unnest(h3_polygon_wkt_to_cells(ST_AsText(d.geom), {H3_RES})) as h3_index
         FROM boundary_parts
       )
 
       SELECT DISTINCT
         h3_index,
-        -- 5. Convert Cell ID back to WKB Geometry
+        -- 3. Convert Index back to Geometry
+        --    H3 boundaries are naturally 4326
         h3_cell_to_boundary_wkb(h3_index) as geometry
       FROM h3_indices
 
@@ -457,7 +478,7 @@ arrow::read_parquet(fp_h3_grid) |>
 # - filter: SQL filtering logic (default "1=1")
 # - paths: List of file paths (if >1, they are unioned)
 layer_config <- tibble::tribble(
-  ~name,                      ~filter,    ~paths,
+  ~name,                      ~filter,    ~path,
 
   # --- AMENITIES ---
   "Transit_Current", "Mode != 'Bus'",      here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
@@ -480,17 +501,17 @@ layer_config <- tibble::tribble(
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
-  purrr::pwalk(function(name, filter, paths) {
+  purrr::pwalk(function(name, filter, path) {
 
     # Direct execution (No union logic needed)
     process_isochrones(
-      path          = paths,
+      path          = path,
       name          = name,
       profile       = "foot-walking",
       range         = c(300, 600, 900),
       input_filter  = filter,
       boundary_path = fp_boundary_wftdm,
-      save_dir      = dirs$isochrones,
+      save_dir      = iso_dirs$walking,
       dry_run       = TRUE # Set to FALSE to generate files
     )
 
@@ -505,16 +526,16 @@ layer_config |>
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
-  purrr::pwalk(function(name, filter, paths) {
+  purrr::pwalk(function(name, filter, path) {
 
     process_isochrones(
-      path          = paths,
+      path          = path,
       name          = name,
       profile       = "cycling-regular",
       range         = c(300, 600, 900),
       input_filter  = filter,
       boundary_path = fp_boundary_wftdm,
-      save_dir      = dirs$isochrones,
+      save_dir      = iso_dirs$biking,
       dry_run       = TRUE # Set to FALSE to generate files
     )
   })
@@ -528,17 +549,17 @@ layer_config |>
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
-  purrr::pwalk(function(name, filter, paths) {
+  purrr::pwalk(function(name, filter, path) {
 
     process_isochrones(
-      path          = paths,
+      path          = path,
       name          = name,
       profile       = "driving-car",
       range         = c(300, 600, 900),
       input_filter  = filter,
       boundary_path = fp_boundary_wftdm,
-      save_dir      = dirs$isochrones,
-      dry_run       = TRUE # Set to FALSE to generate files
+      save_dir      = iso_dirs$driving,
+      dry_run       = FALSE # Set to FALSE to generate files
     )
   })
 ```
@@ -557,23 +578,20 @@ fs::dir_tree(dirs$isochrones)
 ```{r}
 #| eval: false
 
-# 2. Visual Check: Compare Walking vs Driving for Grocery
-# Walking (Blue)
-preview_layer(
-  here::here(iso_dirs$walking, "Grocery.parquet"),
-  color = "blue",
-  limit = 100
-)
+# 2. Visual Check: Compare Walking vs Biking vs Driving
+preview_layer(here::here(iso_dirs$walking, "Schools_HigherEd.parquet"), column = "value")
 ```
-
 
 ```{r}
 #| eval: false
 
-# Driving (Red) - Should be much larger
-preview_layer(
-  here::here(iso_dirs$walking, "Grocery.parquet"),
-  color = "red",
-  limit = 100
-)
+# Biking - Should be larger
+preview_layer(here::here(iso_dirs$biking, "Schools_HigherEd.parquet"), column = "value")
+```
+
+```{r}
+#| eval: false
+
+# Driving Should be much larger
+preview_layer(here::here(iso_dirs$driving, "Schools_HigherEd.parquet"), column = "value")
 ```
