@@ -1,0 +1,250 @@
+---
+title: ATO Scoring & Normalization
+subtitle: Calculate Final Housing Suitability Component Scores
+description: Normalize raw metric values into 0-1 scores based on city maximums and proximity decay functions.
+author:
+ - name: Pukar Bhandari
+   email: pukar.bhandari@wfrc.utah.gov
+   affiliation:
+     - name: Wasatch Front Regional Council
+       url: "https://wfrc.utah.gov/"
+date: "2025-12-02"
+---
+
+# Environment Setup
+
+## Libraries
+
+```{r}
+#| label: setup-libraries
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(DBI)
+library(duckdb)
+library(glue)
+library(here)
+library(fs)
+```
+
+# Configuration
+
+```{r}
+#| label: setup-dirs
+
+dirs <- list(
+  results = here::here("_output")
+)
+
+# Input Paths (From Step 3)
+fp_parcels_enriched <- here::here(dirs$results, "parcels_enriched.parquet")
+fp_h3_enriched      <- here::here(dirs$results, "h3_enriched.parquet")
+
+# Output Paths
+fp_parcels_scored   <- here::here(dirs$results, "parcels_scored.parquet")
+fp_h3_scored        <- here::here(dirs$results, "h3_scored.parquet")
+```
+
+## Initialize Database
+
+```{r}
+#| label: init-db
+conn <- DBI::dbConnect(duckdb::duckdb())
+```
+
+# Scoring Logic
+
+We define helper functions to standardize the scoring logic across both Parcels and H3 grids.
+
+1. Job Access Normalization (City-Based)
+*Logic: `Score = Value / Max_Value_In_City`*
+* If a city has low job access overall, the best parcel in that city still gets a 1.0.
+* We use DuckDB window functions: MAX(val) OVER (PARTITION BY CommCode).
+
+2. Proximity Decay (Isochrones & Buffers)
+*Logic: `Score = Best_Threshold / Actual_Value`*
+
+* Example (Walking): Best threshold is 5 mins (300s).
+    * If parcel is 300s away: `300 / 300 = 1.0`
+    * If parcel is 600s away: `300 / 600 = 0.5`
+    * If parcel is 900s away: `300 / 900 = 0.33`
+* This matches the Python logic: `1 / (Distance * (1/Smallest))`
+
+```{r}
+#| label: define-macros
+
+# Define a scoring function for inverse decay
+# Usage: score_decay(col_name, best_val)
+# If NULL (no access), score is 0.
+query_macro <- "
+CREATE OR REPLACE MACRO score_decay(val, best) AS
+CASE
+    WHEN val IS NULL THEN 0
+    WHEN val < best THEN 1.0  -- Cap score at 1.0 if closer than threshold
+    ELSE ROUND(best / val, 4)
+END;
+"
+DBI::dbExecute(conn, query_macro)
+```
+
+# Execution Function
+
+This function applies the scoring logic to any target table (Parcels or H3).
+
+```{r}
+#| label: func-scoring
+
+process_scoring <- function(conn, input_path, output_path, table_name) {
+
+  message(glue::glue("🚀 Scoring {table_name}..."))
+
+  # 1. Load Data
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM read_parquet('{input_path}')
+  "))
+
+  # 2. Calculate Job Access Scores (City Normalized)
+  #    We create new columns AA_score and AT_score
+  #    Handle division by zero if a city has 0 max jobs
+
+  message("   📊 Normalizing Job Access by City (CommCode)...")
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TEMP TABLE job_scores AS
+    SELECT
+      rowid,
+      -- Auto Access (AA)
+      CASE
+        WHEN MAX(AA) OVER (PARTITION BY CommCode) = 0 THEN 0
+        ELSE ROUND(AA / MAX(AA) OVER (PARTITION BY CommCode), 4)
+      END as AA_score,
+
+      -- Transit Access (AT)
+      CASE
+        WHEN MAX(AT) OVER (PARTITION BY CommCode) = 0 THEN 0
+        ELSE ROUND(AT / MAX(AT) OVER (PARTITION BY CommCode), 4)
+      END as AT_score
+    FROM {table_name}
+  "))
+
+  # Update main table
+  DBI::dbExecute(conn, glue::glue("
+    ALTER TABLE {table_name} ADD COLUMN AA_score DOUBLE;
+    ALTER TABLE {table_name} ADD COLUMN AT_score DOUBLE;
+
+    UPDATE {table_name}
+    SET
+      AA_score = j.AA_score,
+      AT_score = j.AT_score
+    FROM job_scores j
+    WHERE {table_name}.rowid = j.rowid
+  "))
+  DBI::dbExecute(conn, "DROP TABLE job_scores")
+
+  # 3. Calculate Decay Scores (Isochrones & Buffers)
+  #    We define the 'Best' threshold for each layer below.
+
+  message("   ⏱️  Calculating Proximity Decay Scores...")
+
+  # Configuration mapping: Column Name -> Best Threshold
+  # Time is in Seconds (300 = 5 min), Distance in Miles (0.25)
+  # NOTE: Ensure 'TA' (Bikeways) matches the units produced in Step 3.
+  # If Step 3 output TA in 'miles', use 0.25. If 'meters', use 402.3.
+  # Based on Step 3 script, TA buffer loop put 'miles' value into the column.
+
+  scoring_map <- list(
+    # Time-Based (Seconds) - Best is 5 mins (300s)
+    "TT" = 300,  # Transit
+    "TF" = 300,  # Freeway (using transit layer as proxy per prompt?)
+    "AC" = 300,  # Childcare
+    "AG" = 300,  # Grocery
+    "AM" = 300,  # Community Centers
+    "AE" = 300,  # Education (Combined)
+    "AH" = 300,  # Healthcare
+
+    # Distance-Based (Miles) - Best is 0.25 miles
+    "TA" = 0.25  # Bikeways
+  )
+
+  for (col in names(scoring_map)) {
+    best_val <- scoring_map[[col]]
+    new_col <- paste0(col, "_score")
+
+    # Check if column exists before trying to score it
+    cols_exist <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field
+
+    if (col %in% cols_exist) {
+      # Add column
+      DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {new_col} DOUBLE"))
+
+      # Update with Macro
+      DBI::dbExecute(conn, glue::glue("
+        UPDATE {table_name}
+        SET {new_col} = score_decay({col}, {best_val})
+      "))
+    }
+  }
+
+  # 4. Binary Columns (Pass-through)
+  #    Ensure 0/1 columns (OZ, AP, Centers) are clean.
+  #    We rename them to *_score for consistency if desired,
+  #    or just ensure NULLs are 0.
+
+  binary_cols <- c("OZ", "AP", "CM", "CU", "CC", "CN")
+
+  for (col in binary_cols) {
+     cols_exist <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field
+     if (col %in% cols_exist) {
+       DBI::dbExecute(conn, glue::glue("UPDATE {table_name} SET {col} = 0 WHERE {col} IS NULL"))
+     }
+  }
+
+  # 5. Export
+  message(glue::glue("💾 Saving results to {output_path}"))
+  DBI::dbExecute(conn, glue::glue("
+    COPY {table_name} TO '{output_path}' (FORMAT PARQUET)
+  "))
+}
+```
+
+# Run Scoring
+
+## Parcels
+
+```{r}
+#| label: run-parcels
+process_scoring(conn, fp_parcels_in, fp_parcels_out, "parcels_scored")
+```
+
+## H3 Grid
+
+```{r}
+#| label: run-h3
+process_scoring(conn, fp_h3_in, fp_h3_out, "h3_scored")
+```
+
+## Validation
+
+Check a few records to ensure scores make sense (e.g., scores shouldn't be > 1.0 or infinite).
+
+```{r}
+#| label: validate
+#| echo: false
+
+cat("--- Parcel Score Summary ---\n")
+DBI::dbGetQuery(conn, "
+  SELECT
+    AVG(AA_score) as mean_AA,
+    AVG(AG_score) as mean_Grocery,
+    AVG(TT_score) as mean_Transit,
+    MAX(AG_score) as max_Grocery
+  FROM parcels_scored
+") |> print()
+```
+
+## Cleanup
+
+```{r}
+#| label: cleanup
+DBI::dbDisconnect(conn, shutdown = TRUE)
+```
