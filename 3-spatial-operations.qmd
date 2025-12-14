@@ -391,8 +391,10 @@ amenity_config <- tibble::tribble(
 
   # --- ISOCHRONES (Time Values) ---
   # We extract the raw 'value' (300, 600, etc) here.
-  "TT",      "isochrone", iso_walk("Transit_Current.parquet"),      "1=1", "value", NA,
-  "TF",      "isochrone", iso_drive("Transit_Current.parquet"),     "1=1", "value", NA,
+  "TT_Local", "isochrone", iso_walk("Transit_Local.parquet"),       "1=1", "value", NA,
+  "TT_Rapid", "isochrone", iso_walk("Transit_Rapid.parquet"),       "1=1", "value", NA,
+  "TT_CRT",   "isochrone", iso_walk("Transit_CRT.parquet"),         "1=1", "value", NA,
+  "TF",      "isochrone", iso_drive("Freeways.parquet"),            "1=1", "value", NA,
   "AC",      "isochrone", iso_walk("ChildCare.parquet"),            "1=1", "value", NA,
   "AH",      "isochrone", iso_drive("Healthcare.parquet"),          "1=1", "value", NA,
   "AG",      "isochrone", iso_walk("Grocery.parquet"),              "1=1", "value", NA,
@@ -402,7 +404,7 @@ amenity_config <- tibble::tribble(
 
   # --- BUFFER LAYERS (Distance in Miles) ---
   # We will convert these miles to meters inside the function for UTM buffering
-  "TA",      "buffer",    trans("Bikeways.parquet"),                "1=1", NA,      c(0.25, 0.5, 1.0) # miles
+  "TA",      "buffer",    trans("Bikeways.parquet"),                "1=1", NA,      c(0.25, 0.5, 0.75, 1.5, 3.0) # in miles
 )
 ```
 
@@ -474,7 +476,7 @@ process_layer <- function(conn, target_table, config) {
       FROM (
         SELECT t.rowid as tid, MIN(iso.val) as min_val
         FROM {target_table} t, optimized_iso iso
-        WHERE ST_Intersects(t.geom, iso.geom)
+        WHERE ST_Intersects(ST_Centroid(t.geom), iso.geom)
         GROUP BY t.rowid
       ) matched
       WHERE {target_table}.rowid = matched.tid

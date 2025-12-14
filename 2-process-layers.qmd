@@ -345,7 +345,7 @@ arrow::open_dataset(fp_boundary_wftdm) |>
 # -----------------------------------------------------------------------------
 
 fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-H3_RES     <- 7
+H3_RES     <- 9
 
 if (file.exists(fp_h3_grid)) {
   message("✅ H3 Grid already exists: ", fp_h3_grid)
@@ -478,18 +478,23 @@ arrow::read_parquet(fp_h3_grid) |>
 # - filter: SQL filtering logic (default "1=1")
 # - paths: List of file paths (if >1, they are unioned)
 layer_config <- tibble::tribble(
-  ~name,                      ~filter,    ~path,
+  ~name,               ~filter,                                          ~path,
+
+  # --- TRANSIT (Split by Mode) ---
+  "Transit_Local",     "Mode IN ('Bus', 'Flex Bus', 'Microtransit')",    here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
+  "Transit_Rapid",     "Mode IN ('BRT', 'TRAX', 'BRT, Bus')",           here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
+  "Transit_CRT",       "Mode = 'FrontRunner'",                           here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
+
+  # --- INFRASTRUCTURE ---
+  "Freeways",          "1=1",                                            here::here(sub_dirs$transport, "Freeway_Exit_Locations.parquet"),
 
   # --- AMENITIES ---
-  "Transit_Current", "Mode != 'Bus'",      here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
-  "Freeways",                  "1=1",      here::here(sub_dirs$transport, "Freeway_Exit_Locations.parquet"),
-
-  "ChildCare",                 "1=1",      here::here(sub_dirs$amenities, "ChildCareFacilities.parquet"),
-  "Healthcare",                "1=1",      here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet"),
-  "Schools_PreK12",            "1=1",      here::here(sub_dirs$amenities, "Schools_PreKto12.parquet"),
-  "Schools_HigherEd",          "1=1",      here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet"),
-  "Grocery",                   "1=1",      here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet"),
-  "Community_Centers",         "1=1",      here::here(sub_dirs$amenities, "Community_Centers.parquet")
+  "ChildCare",         "1=1",                                            here::here(sub_dirs$amenities, "ChildCareFacilities.parquet"),
+  "Healthcare",        "1=1",                                            here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet"),
+  "Schools_PreK12",    "1=1",                                            here::here(sub_dirs$amenities, "Schools_PreKto12.parquet"),
+  "Schools_HigherEd",  "1=1",                                            here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet"),
+  "Grocery",           "1=1",                                            here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet"),
+  "Community_Centers", "1=1",                                            here::here(sub_dirs$amenities, "Community_Centers.parquet")
 )
 ```
 
@@ -508,7 +513,7 @@ layer_config |>
       path          = path,
       name          = name,
       profile       = "foot-walking",
-      range         = c(300, 600, 900),
+      range         = c(300, 600, 900, 1800, 3599),
       input_filter  = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir      = iso_dirs$walking,
@@ -532,7 +537,7 @@ layer_config |>
       path          = path,
       name          = name,
       profile       = "cycling-regular",
-      range         = c(300, 600, 900),
+      range         = c(300, 600, 900, 1800, 3599),
       input_filter  = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir      = iso_dirs$biking,
@@ -555,11 +560,11 @@ layer_config |>
       path          = path,
       name          = name,
       profile       = "driving-car",
-      range         = c(300, 600, 900),
+      range         = c(300, 600, 900, 1800, 3599),
       input_filter  = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir      = iso_dirs$driving,
-      dry_run       = FALSE # Set to FALSE to generate files
+      dry_run       = TRUE # Set to FALSE to generate files
     )
   })
 ```

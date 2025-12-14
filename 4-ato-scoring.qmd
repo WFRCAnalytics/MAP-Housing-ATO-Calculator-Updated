@@ -88,7 +88,7 @@ END;
 DBI::dbExecute(conn, query_macro)
 ```
 
-# Execution Function
+# Scoring & Weighting
 
 This function applies the scoring logic to any target table (Parcels or H3).
 
