@@ -57,19 +57,9 @@ conn <- DBI::dbConnect(duckdb::duckdb())
 
 We define helper functions to standardize the scoring logic across both Parcels and H3 grids.
 
-1. Job Access Normalization (City-Based)
-*Logic: `Score = Value / Max_Value_In_City`*
-* If a city has low job access overall, the best parcel in that city still gets a 1.0.
-* We use DuckDB window functions: MAX(val) OVER (PARTITION BY CommCode).
-
-2. Proximity Decay (Isochrones & Buffers)
-*Logic: `Score = Best_Threshold / Actual_Value`*
-
-* Example (Walking): Best threshold is 5 mins (300s).
-    * If parcel is 300s away: `300 / 300 = 1.0`
-    * If parcel is 600s away: `300 / 600 = 0.5`
-    * If parcel is 900s away: `300 / 900 = 0.33`
-* This matches the Python logic: `1 / (Distance * (1/Smallest))`
+* **Logic:** `Score = Benchmark / Actual`.
+* **Benchmark:** Determined dynamically (Minimum observed value).
+* **Cap:** If `Actual <= Benchmark`, Score is **1.0**.
 
 ```{r}
 #| label: define-macros
@@ -81,7 +71,7 @@ query_macro <- "
 CREATE OR REPLACE MACRO score_decay(val, best) AS
 CASE
     WHEN val IS NULL THEN 0
-    WHEN val < best THEN 1.0  -- Cap score at 1.0 if closer than threshold
+    WHEN val < best THEN 1.0  -- Cap score at 1.0 if closer or equal to benchmark
     ELSE ROUND(best / val, 4)
 END;
 "
@@ -90,7 +80,7 @@ DBI::dbExecute(conn, query_macro)
 
 # Scoring & Weighting
 
-This function applies the scoring logic to any target table (Parcels or H3).
+This function encapsulates the entire scoring workflow so it can be applied identically to both Parcels and H3 grids.
 
 ```{r}
 #| label: func-scoring
@@ -104,106 +94,193 @@ process_scoring <- function(conn, input_path, output_path, table_name) {
     CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM read_parquet('{input_path}')
   "))
 
-  # 2. Calculate Job Access Scores (City Normalized)
-  #    We create new columns AA_score and AT_score
-  #    Handle division by zero if a city has 0 max jobs
-
+  # ===========================================================================
+  # A. JOB ACCESS SCORING (Normalized by City Max)
+  #    Logic: Score = Value / Max_Value_In_City
+  # ===========================================================================
   message("   📊 Normalizing Job Access by City (CommCode)...")
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TEMP TABLE job_scores AS
-    SELECT
-      rowid,
-      -- Auto Access (AA)
-      CASE
-        WHEN MAX(AA) OVER (PARTITION BY CommCode) = 0 THEN 0
-        ELSE ROUND(AA / MAX(AA) OVER (PARTITION BY CommCode), 4)
-      END as AA_score,
 
-      -- Transit Access (AT)
-      CASE
-        WHEN MAX(AT) OVER (PARTITION BY CommCode) = 0 THEN 0
-        ELSE ROUND(AT / MAX(AT) OVER (PARTITION BY CommCode), 4)
-      END as AT_score
-    FROM {table_name}
-  "))
+  cols_in_table <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field
 
-  # Update main table
-  DBI::dbExecute(conn, glue::glue("
-    ALTER TABLE {table_name} ADD COLUMN AA_score DOUBLE;
-    ALTER TABLE {table_name} ADD COLUMN AT_score DOUBLE;
+  # Only run if CommCode exists (Parcels/H3 should both have it now)
+  if("CommCode" %in% cols_in_table) {
+    DBI::dbExecute(conn, glue::glue("
+      CREATE OR REPLACE TEMP TABLE job_scores AS
+      SELECT
+        rowid,
+        CASE
+          WHEN MAX(AA) OVER (PARTITION BY CommCode) = 0 THEN 0
+          ELSE ROUND(AA / MAX(AA) OVER (PARTITION BY CommCode), 4)
+        END as AA_score,
+        CASE
+          WHEN MAX(AT) OVER (PARTITION BY CommCode) = 0 THEN 0
+          ELSE ROUND(AT / MAX(AT) OVER (PARTITION BY CommCode), 4)
+        END as AT_score
+      FROM {table_name}
+    "))
 
-    UPDATE {table_name}
-    SET
-      AA_score = j.AA_score,
-      AT_score = j.AT_score
-    FROM job_scores j
-    WHERE {table_name}.rowid = j.rowid
-  "))
-  DBI::dbExecute(conn, "DROP TABLE job_scores")
+    DBI::dbExecute(conn, glue::glue("
+      ALTER TABLE {table_name} ADD COLUMN AA_score DOUBLE;
+      ALTER TABLE {table_name} ADD COLUMN AT_score DOUBLE;
 
-  # 3. Calculate Decay Scores (Isochrones & Buffers)
-  #    We define the 'Best' threshold for each layer below.
+      UPDATE {table_name}
+      SET
+        AA_score = j.AA_score,
+        AT_score = j.AT_score
+      FROM job_scores j
+      WHERE {table_name}.rowid = j.rowid
+    "))
+    DBI::dbExecute(conn, "DROP TABLE job_scores")
+  }
 
-  message("   ⏱️  Calculating Proximity Decay Scores...")
+  # ===========================================================================
+  # B. DYNAMIC BENCHMARKING (Minimum Value)
+  #    We calculate the 'Best' (Minimum) value for every amenity column.
+  # ===========================================================================
+  message("   ⏱️  Calculating Dynamic Benchmarks (Minimum)...")
 
-  # Configuration mapping: Column Name -> Best Threshold
-  # Time is in Seconds (300 = 5 min), Distance in Miles (0.25)
-  # NOTE: Ensure 'TA' (Bikeways) matches the units produced in Step 3.
-  # If Step 3 output TA in 'miles', use 0.25. If 'meters', use 402.3.
-  # Based on Step 3 script, TA buffer loop put 'miles' value into the column.
-
-  scoring_map <- list(
-    # Time-Based (Seconds) - Best is 5 mins (300s)
-    "TT" = 300,  # Transit
-    "TF" = 300,  # Freeway (using transit layer as proxy per prompt?)
-    "AC" = 300,  # Childcare
-    "AG" = 300,  # Grocery
-    "AM" = 300,  # Community Centers
-    "AE" = 300,  # Education (Combined)
-    "AH" = 300,  # Healthcare
-
-    # Distance-Based (Miles) - Best is 0.25 miles
-    "TA" = 0.25  # Bikeways
+  target_cols <- c(
+    # Transit Components (Time)
+    "TT_Local", "TT_Rapid", "TT_CRT",
+    # Education Components (Time)
+    "AE_K12", "AE_High",
+    # Other Isochrones (Time)
+    "TF", "AG", "AC", "AH", "AM",
+    # Buffers (Distance)
+    "TA"
   )
 
-  for (col in names(scoring_map)) {
-    best_val <- scoring_map[[col]]
-    new_col <- paste0(col, "_score")
+  # Filter to columns that actually exist in the table
+  available_cols <- intersect(target_cols, cols_in_table)
 
-    # Check if column exists before trying to score it
-    cols_exist <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field
+  # Calculate MINIMUM (non-NA) for each available column [cite: 104]
+  if(length(available_cols) > 0) {
 
-    if (col %in% cols_exist) {
-      # Add column
-      DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {new_col} DOUBLE"))
+    stats_sql <- paste0(
+      "SELECT ",
+      paste0(
+        glue::glue("MIN({available_cols}) AS {available_cols}_best"),
+        collapse = ", "
+      ),
+      glue::glue(" FROM {table_name}")
+    )
 
-      # Update with Macro
-      DBI::dbExecute(conn, glue::glue("
-        UPDATE {table_name}
-        SET {new_col} = score_decay({col}, {best_val})
-      "))
+    benchmarks <- DBI::dbGetQuery(conn, stats_sql)
+
+    print("   ✅ Dynamic Benchmarks (Best Observed Values):")
+    print(benchmarks)
+
+    # ===========================================================================
+    # C. CALCULATE RAW DECAY SCORES
+    # ===========================================================================
+
+    for (col in available_cols) {
+      best_val <- benchmarks[[paste0(col, "_best")]]
+
+      # Safety check: If a column is all NULL, MIN returns NA. Skip scoring.
+      if (!is.na(best_val)) {
+
+        # Create "_raw" columns to hold the intermediate score
+        new_col <- paste0(col, "_raw")
+
+        DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {new_col} DOUBLE"))
+
+        # Apply Decay Macro: Score = best / val
+        DBI::dbExecute(conn, glue::glue("UPDATE {table_name} SET {new_col} = score_decay({col}, {best_val})"))
+      }
     }
   }
 
-  # 4. Binary Columns (Pass-through)
-  #    Ensure 0/1 columns (OZ, AP, Centers) are clean.
-  #    We rename them to *_score for consistency if desired,
-  #    or just ensure NULLs are 0.
+  # ===========================================================================
+  # D. COMPOSITE SCORING
+  # ===========================================================================
 
+  # 1. TRANSIT (TT)
+  #    Max( Local*0.5, Rapid*0.8, CRT*1.0 ) [cite: 108]
+  message("   🚌 Calculating Composite Transit Score (TT)...")
+
+  # Helper to safe-reference columns (COALESCE to 0 if they don't exist)
+  safe_col <- function(cname) {
+    if (paste0(cname, "_raw") %in% DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field) {
+      return(paste0("COALESCE(", cname, "_raw, 0)"))
+    } else {
+      return("0")
+    }
+  }
+
+  transit_sql <- glue::glue("
+    ALTER TABLE {table_name} ADD COLUMN TT_score DOUBLE;
+    UPDATE {table_name}
+    SET TT_score = GREATEST(
+      {safe_col('TT_Local')} * 0.5,
+      {safe_col('TT_Rapid')} * 0.8,
+      {safe_col('TT_CRT')}   * 1.0
+    )
+  ")
+  DBI::dbExecute(conn, transit_sql)
+
+  # 2. EDUCATION (AE)
+  #    Max( K12, HigherEd ) [cite: 109]
+  message("   🎓 Calculating Composite Education Score (AE)...")
+
+  edu_sql <- glue::glue("
+    ALTER TABLE {table_name} ADD COLUMN AE_score DOUBLE;
+    UPDATE {table_name}
+    SET AE_score = GREATEST(
+      {safe_col('AE_K12')},
+      {safe_col('AE_High')}
+    )
+  ")
+  DBI::dbExecute(conn, edu_sql)
+
+  # 3. STANDARD LAYERS (Pass through _raw to _score)
+  #    Grocery (AG), Health (AH), Childcare (AC), CommCtr (AM), Freeway (TF), ActiveTrans (TA)
+
+  standard_map <- c(
+    "AG_score" = "AG_raw",
+    "AH_score" = "AH_raw",
+    "AC_score" = "AC_raw",
+    "AM_score" = "AM_raw",
+    "TF_score" = "TF_raw",
+    "TA_score" = "TA_raw"
+  )
+
+  for (final in names(standard_map)) {
+    raw <- standard_map[[final]]
+    # Only update if the raw column was actually created
+    if(paste0(raw) %in% DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field) {
+      DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {final} DOUBLE"))
+      DBI::dbExecute(conn, glue::glue("UPDATE {table_name} SET {final} = {raw}"))
+    }
+  }
+
+  # ===========================================================================
+  # E. BINARY COLUMNS (Cleanup)
+  # ===========================================================================
   binary_cols <- c("OZ", "AP", "CM", "CU", "CC", "CN")
-
   for (col in binary_cols) {
-     cols_exist <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field
-     if (col %in% cols_exist) {
+     if (col %in% cols_in_table) {
        DBI::dbExecute(conn, glue::glue("UPDATE {table_name} SET {col} = 0 WHERE {col} IS NULL"))
      }
   }
 
-  # 5. Export
+  # ===========================================================================
+  # F. EXPORT
+  # ===========================================================================
   message(glue::glue("💾 Saving results to {output_path}"))
-  DBI::dbExecute(conn, glue::glue("
-    COPY {table_name} TO '{output_path}' (FORMAT PARQUET)
-  "))
+
+  # Exclude raw intermediate columns
+  all_cols <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {table_name}"))$Field
+  raw_cols <- all_cols[grepl("_raw$", all_cols)]
+
+  if(length(raw_cols) > 0) {
+    exclude_clause <- paste(raw_cols, collapse = ", ")
+    query <- glue::glue("COPY (SELECT * EXCLUDE ({exclude_clause}) FROM {table_name}) TO '{output_path}' (FORMAT PARQUET)")
+  } else {
+    query <- glue::glue("COPY {table_name} TO '{output_path}' (FORMAT PARQUET)")
+  }
+
+  DBI::dbExecute(conn, query)
 }
 ```
 
@@ -213,14 +290,14 @@ process_scoring <- function(conn, input_path, output_path, table_name) {
 
 ```{r}
 #| label: run-parcels
-process_scoring(conn, fp_parcels_in, fp_parcels_out, "parcels_scored")
+process_scoring(conn, fp_parcels_enriched, fp_parcels_scored, "parcels_scored")
 ```
 
 ## H3 Grid
 
 ```{r}
 #| label: run-h3
-process_scoring(conn, fp_h3_in, fp_h3_out, "h3_scored")
+process_scoring(conn, fp_h3_enriched, fp_h3_scored, "h3_scored")
 ```
 
 ## Validation
@@ -231,14 +308,23 @@ Check a few records to ensure scores make sense (e.g., scores shouldn't be > 1.0
 #| label: validate
 #| echo: false
 
-cat("--- Parcel Score Summary ---\n")
+cat("--- Score Summary ---\n")
 DBI::dbGetQuery(conn, "
   SELECT
-    AVG(AA_score) as mean_AA,
-    AVG(AG_score) as mean_Grocery,
+    'Parcels' as layer,
     AVG(TT_score) as mean_Transit,
-    MAX(AG_score) as max_Grocery
+    AVG(AE_score) as mean_Education,
+    AVG(AG_score) as mean_Grocery,
+    AVG(TA_score) as mean_Bikeways
   FROM parcels_scored
+  UNION ALL
+  SELECT
+    'H3' as layer,
+    AVG(TT_score) as mean_Transit,
+    AVG(AE_score) as mean_Education,
+    AVG(AG_score) as mean_Grocery,
+    AVG(TA_score) as mean_Bikeways
+  FROM h3_scored
 ") |> print()
 ```
 

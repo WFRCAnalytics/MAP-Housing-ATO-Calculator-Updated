@@ -60,3 +60,7 @@ _data/isochrones/*
 
 # Environment Variiables
 _environment
+
+# vdoc files
+.vdoc.*.r
+.tmp/*
