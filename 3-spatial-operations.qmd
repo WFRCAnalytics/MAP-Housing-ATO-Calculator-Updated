@@ -145,6 +145,8 @@ DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
 
 We start by loading the Parcels and H3 grids. We immediately join Administrative and Building attributes so our "Canvas" is fully described before we start painting it with amenities.
 
+Check Desired format here: https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/HousingSuitability_Centers2025_gdb/FeatureServer/0
+
 ## Load H3 Grid
 
 We load H3 first to get the resolution, then use that resolution to load Parcels with the correct H3 index pre-calculated.
@@ -239,132 +241,49 @@ A helper function to join City/County codes to any target table (Parcel or H3).
 attach_admin_data <- function(conn, target_table, point_table) {
 
   message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
-
-  # 1. Municipalities (CommCode)
-  fp_muni <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
-
-  # Create temp layer in UTM & Index
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TEMP TABLE layer_muni AS
-    SELECT
-      ugrcode as CommCode,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
-    FROM read_parquet('{fp_muni}')
-  "))
-  DBI::dbExecute(conn, "CREATE INDEX idx_muni ON layer_muni USING RTREE (geom)")
-
-  # Spatial Join using Pre-Calculated Points
-  DBI::dbExecute(conn, glue::glue("
-    ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS CommCode VARCHAR;
-
-    UPDATE {target_table}
-    SET CommCode = matched.CommCode
-    FROM (
-      SELECT
-        tp.rowid,
-        m.CommCode
-      FROM {point_table} tp, layer_muni m
-      WHERE ST_Intersects(tp.geom, m.geom)
-    ) matched
-    WHERE {target_table}.rowid = matched.rowid;
-  "))
-
-  # 2. Counties (COUNTYNBR)
-  fp_county <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
-
-  # Create temp layer in UTM & Index
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TEMP TABLE layer_county AS
-    SELECT
-      countynbr as COUNTYNBR,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
-    FROM read_parquet('{fp_county}')
-  "))
-  DBI::dbExecute(conn, "CREATE INDEX idx_county ON layer_county USING RTREE (geom)")
-
-  # Spatial Join using Pre-Calculated Points
-  DBI::dbExecute(conn, glue::glue("
-    ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS COUNTYNBR VARCHAR;
-
-    UPDATE {target_table}
-    SET COUNTYNBR = matched.COUNTYNBR
-    FROM (
-      SELECT
-        tp.rowid,
-        c.COUNTYNBR
-      FROM {point_table} tp, layer_county c
-      WHERE ST_Intersects(tp.geom, c.geom)
-    ) matched
-    WHERE {target_table}.rowid = matched.rowid;
-  "))
-
-  # Cleanup
-  DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
-}
-```
-
-```{r}
-#| label: func-admin-join
-
-attach_admin_data <- function(conn, target_table, point_table) {
-
-  message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
-
-  # 1. Municipalities (CommCode)
-  fp_municipal_bound <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
-
-  # OPTIMIZATION: Simplify Geometry by 1.0 meters
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TEMP TABLE layer_muni AS
-    SELECT
-      ugrcode as CommCode,
-      ST_Simplify(ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)), 1.0) as geom
-    FROM read_parquet('{fp_municipal_bound}')
-  "))
-  DBI::dbExecute(conn, "CREATE INDEX idx_muni ON layer_muni USING RTREE (geom)")
-
-  # Spatial Join
-  DBI::dbExecute(conn, glue::glue("
-    ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS CommCode VARCHAR;
-
-    UPDATE {target_table}
-    SET CommCode = matched.CommCode
-    FROM (
-      SELECT tp.rowid, m.CommCode
-      FROM {point_table} tp, layer_muni m
-      WHERE ST_Intersects(tp.geom, m.geom)
-    ) matched
-    WHERE {target_table}.rowid = matched.rowid;
-  "))
-
-  # 2. Counties (COUNTYNBR)
+  fp_municipal_bound   <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
   fp_county_bound <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
 
-  # OPTIMIZATION: Simplify Geometry by 1.0 meters
+  # 1. Load Admin Layers (Fixed Geometry)
+  #    We use ST_Union_Agg to flatten potential overlaps and speed up joins
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TEMP TABLE layer_muni AS
+    SELECT
+      ugrcode as CommCode,
+      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    FROM read_parquet('{fp_municipal_bound}')
+  "))
+
   DBI::dbExecute(conn, glue::glue("
     CREATE OR REPLACE TEMP TABLE layer_county AS
     SELECT
       countynbr as COUNTYNBR,
-      ST_Simplify(ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)), 1.0) as geom
+      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
     FROM read_parquet('{fp_county_bound}')
   "))
-  DBI::dbExecute(conn, "CREATE INDEX idx_county ON layer_county USING RTREE (geom)")
 
-  # Spatial Join
+  # 2. RESET COLUMNS (Drop if exists to prevent crashes)
+  for (col in c("CommCode", "COUNTYNBR")) {
+    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS {col}"))
+    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN {col} VARCHAR"))
+  }
+
+  # 3. Update City
   DBI::dbExecute(conn, glue::glue("
-    ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS COUNTYNBR VARCHAR;
-
     UPDATE {target_table}
-    SET COUNTYNBR = matched.COUNTYNBR
-    FROM (
-      SELECT tp.rowid, c.COUNTYNBR
-      FROM {point_table} tp, layer_county c
-      WHERE ST_Intersects(tp.geom, c.geom)
-    ) matched
-    WHERE {target_table}.rowid = matched.rowid;
+    SET CommCode = m.CommCode
+    FROM layer_muni m
+    WHERE ST_Intersects(ST_Centroid({target_table}.geom), m.geom);
   "))
 
-  # Cleanup
+  # 4. Update County/FIPS
+  DBI::dbExecute(conn, glue::glue("
+    UPDATE {target_table}
+    SET COUNTYNBR = c.COUNTYNBR
+    FROM layer_county c
+    WHERE ST_Intersects(ST_Centroid({target_table}.geom), c.geom);
+  "))
+
   DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
 }
 ```
@@ -443,9 +362,7 @@ bc_mapping <- tibble::tribble(
   # Note: NA values are handled in the join below
 )
 DBI::dbWriteTable(conn, "bc_map", bc_mapping, overwrite = TRUE)
-```
 
-```{r}
 # -----------------------------------------------------------------------------
 # 2. PARCELS: Attribute Join (Parcel ID Match)
 # -----------------------------------------------------------------------------
@@ -474,9 +391,7 @@ DBI::dbExecute(conn, "
   ) mapped
   WHERE targets_parcels.parcel_id = mapped.parcel_id
 ")
-```
 
-```{r}
 # -----------------------------------------------------------------------------
 # 3. H3: Aggregation via Index Match (Math-Based)
 # -----------------------------------------------------------------------------
@@ -515,23 +430,28 @@ attach_job_access <- function(conn, target_table, point_table) {
   message(glue::glue("💼 Attaching Job Access to {target_table}..."))
   fp_taz_access <- here::here(dirs$processed, "access", "TAZ_AccessToOpportunities_OY2023.parquet")
 
-  # 1. Load TAZ & Index
+  # 1. Load TAZ & SAFE Transform
   DBI::dbExecute(conn, glue::glue("
     CREATE OR REPLACE TEMP TABLE taz_access AS
     SELECT
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom,
+      ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom,
       job_by_auto,
       job_by_tran
     FROM read_parquet('{fp_taz_access}')
+    WHERE ST_IsValid(geometry)
   "))
   DBI::dbExecute(conn, "CREATE INDEX idx_taz_geom ON taz_access USING RTREE (geom)")
 
-  # 2. Spatial Join using Pre-Calculated Points
-  # Note: "AA" and "AT" must be quoted because they can be reserved keywords
-  DBI::dbExecute(conn, glue::glue("
-    ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS \"AA\" DOUBLE;
-    ALTER TABLE {target_table} ADD COLUMN IF NOT EXISTS \"AT\" DOUBLE;
+  # 2. RESET COLUMNS (Drop if exists)
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AA\""))
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AT\""))
 
+  # 3. Add Columns
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AA\" DOUBLE"))
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AT\" DOUBLE"))
+
+  # 4. Spatial Join
+  DBI::dbExecute(conn, glue::glue("
     UPDATE {target_table}
     SET \"AA\" = match.job_by_auto, \"AT\" = match.job_by_tran
     FROM (
@@ -552,10 +472,6 @@ attach_job_access <- function(conn, target_table, point_table) {
 # Run with pre-calculated points
 attach_job_access(conn, "targets_parcels", "points_parcels")
 attach_job_access(conn, "targets_h3", "points_h3")
-```
-
-```{r}
-print(DBI::dbGetQuery(conn, "SELECT COUNT(*) as Parcels_With_Jobs FROM targets_parcels WHERE \"AA\" IS NOT NULL"))
 ```
 
 # Part 3: Amenity Operations Engine
@@ -610,19 +526,19 @@ This function handles the transform, union-by-value optimization, and spatial jo
 
 ```{r}
 #| label: func-spatial-engine
-
-process_layer <- function(conn, target_table, point_table, config) {
+process_layers <- function(conn, point_table, config) {
 
   col  <- config$col_name
   path <- config$path
   type <- config$type
   sql_filter <- config$filter_sql
+  val_col <- config$value_col
 
-  # Set simplification tolerance based on data type:
+  # Simplification Tolerance
   if (type == "isochrone") {
-    SIMPLIFICATION_TOLERANCE <- 10.0 # Adjusted to 10m for stabilization
+    SIMPLIFICATION_TOLERANCE <- 1.0
   } else {
-    SIMPLIFICATION_TOLERANCE <- 5.0
+    SIMPLIFICATION_TOLERANCE <- 1.0
   }
 
   if (!fs::file_exists(path)) {
@@ -630,76 +546,91 @@ process_layer <- function(conn, target_table, point_table, config) {
     return(NULL)
   }
 
-  message(glue::glue("🔄 Processing {col} ({type}) for {target_table} with {SIMPLIFICATION_TOLERANCE}m tolerance..."))
+  message(glue::glue("🔄 Processing {col} ({type}) on {point_table}..."))
 
-  # C. Load Raw Data (UTM + Clean) - CRITICAL FIX
-  # Applies axis-fix, validation, and simplification before the join.
+  # A. Load Raw Data (UTM + Clean)
+  #    We create the index here, which is CRITICAL for ST_DWithin to be fast.
   DBI::dbExecute(conn, glue::glue("
     CREATE OR REPLACE TEMP TABLE raw_layer AS
     SELECT
-      -- FIX: ST_MakeValid first, then ST_Simplify more aggressively
       ST_Simplify(
         ST_MakeValid(
           ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)
         ),
         {SIMPLIFICATION_TOLERANCE}
       ) as geom
-      {if(type=='isochrone') glue::glue(', val') else ''}
+      {if(type=='isochrone') glue::glue(', {val_col} as val') else ''}
     FROM read_parquet('{path}')
     WHERE {sql_filter}
       AND ST_IsValid(geometry)
   "))
   DBI::dbExecute(conn, "CREATE INDEX idx_raw_layer ON raw_layer USING RTREE (geom)")
 
-  # D. Add Column if missing (and reset to NULL if exists)
-  cols <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE {target_table}"))$Field
-  if (!col %in% cols) {
-    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN {col} DOUBLE DEFAULT NULL"))
-  } else {
-    DBI::dbExecute(conn, glue::glue("UPDATE {target_table} SET {col} = NULL"))
-  }
+  # B. Reset Column (Clean Slate)
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {point_table} DROP COLUMN IF EXISTS {col}"))
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {point_table} ADD COLUMN {col} DOUBLE DEFAULT NULL"))
 
-  # E. Execute Spatial Logic (Binary, Isochrone, Buffer) - (Logic remains the same)
+  # C. Execute Spatial Logic
   if (type == "binary") {
+    # BINARY: Simple Intersection (Uses Index)
     DBI::dbExecute(conn, glue::glue("
-      UPDATE {target_table}
+      UPDATE {point_table}
       SET {col} = 1
-      FROM (
-        SELECT DISTINCT tp.rowid
-        FROM {point_table} tp, raw_layer r
-        WHERE ST_Intersects(tp.geom, r.geom)
-      ) match
-      WHERE {target_table}.rowid = match.rowid
+      FROM raw_layer r
+      WHERE ST_Intersects({point_table}.geom, r.geom)
     "))
-    DBI::dbExecute(conn, glue::glue("UPDATE {target_table} SET {col} = 0 WHERE {col} IS NULL"))
+    DBI::dbExecute(conn, glue::glue("UPDATE {point_table} SET {col} = 0 WHERE {col} IS NULL"))
 
   } else if (type == "isochrone") {
-    DBI::dbExecute(conn, glue::glue("
-      UPDATE {target_table}
-      SET {col} = matched.min_val
-      FROM (
-        SELECT tp.rowid, MIN(r.val) as min_val
-        FROM {point_table} tp, raw_layer r
-        WHERE ST_Intersects(tp.geom, r.geom)
-        GROUP BY tp.rowid
-      ) matched
-      WHERE {target_table}.rowid = matched.rowid
-    "))
+    # ISOCHRONE: Union & Iterate (Optimized)
 
-  } else if (type == "buffer") {
-    dists_miles <- config$buffer_opts[[1]]
-    DBI::dbExecute(conn, "CREATE OR REPLACE TEMP TABLE union_lines AS SELECT ST_MakeValid(ST_Union_Agg(geom)) as geom FROM raw_layer")
-    for (miles in sort(dists_miles, decreasing = TRUE)) {
-      meters <- miles * 1609.34
+    DBI::dbExecute(conn, "
+      CREATE OR REPLACE TEMP TABLE grouped_iso AS
+      SELECT val, ST_MakeValid(ST_Union_Agg(geom)) as geom
+      FROM raw_layer
+      GROUP BY val
+    ")
+
+    vals <- DBI::dbGetQuery(conn, "SELECT DISTINCT val FROM grouped_iso ORDER BY val ASC")$val
+
+    for (v in vals) {
       DBI::dbExecute(conn, glue::glue("
-        UPDATE {target_table}
-        SET {col} = {miles}
-        FROM union_lines u, {point_table} tp
-        WHERE {target_table}.rowid = tp.rowid
-          AND ST_Intersects(tp.geom, ST_Buffer(u.geom, {meters}))
+        UPDATE {point_table}
+        SET {col} = {v}
+        FROM grouped_iso g
+        WHERE {point_table}.{col} IS NULL
+          AND g.val = {v}
+          AND ST_Intersects({point_table}.geom, g.geom)
       "))
     }
-    DBI::dbExecute(conn, "DROP TABLE union_lines")
+    DBI::dbExecute(conn, "DROP TABLE grouped_iso")
+
+  } else if (type == "buffer") {
+    # BUFFER: The Ultra-Fast Method (ST_DWithin)
+    # No buffers created. Just distance checks using the index.
+
+    dists_miles <- config$buffer_opts[[1]]
+
+    # Sort ASCENDING (Smallest first)
+    # We find the closest points first, then SKIP them in later loops.
+    sorted_miles <- sort(dists_miles, decreasing = FALSE)
+
+    for (miles in sorted_miles) {
+      meters <- miles * 1609.34
+
+      # ST_DWithin uses the RTREE index on raw_layer.
+      # The 'WHERE {col} IS NULL' ensures we don't re-calculate points
+      # that already matched a closer distance.
+      DBI::dbExecute(conn, glue::glue("
+        UPDATE {point_table}
+        SET {col} = {miles}
+        WHERE {col} IS NULL
+          AND EXISTS (
+             SELECT 1 FROM raw_layer r
+             WHERE ST_DWithin({point_table}.geom, r.geom, {meters})
+          )
+      "))
+    }
   }
 
   DBI::dbExecute(conn, "DROP TABLE raw_layer;")
@@ -713,15 +644,52 @@ We iterate through the config and apply logic to both tables.
 ```{r}
 #| label: run-engine
 
-message("Starting Amenity Batch Processing...")
+message("🚀 Starting Staged Processing on Points...")
+
 amenity_config |>
   purrr::pwalk(function(...) {
     row <- list(...)
-    process_layer(conn, "targets_parcels", "points_parcels", row)
-    process_layer(conn, "targets_h3", "points_h3", row)
+    # Pass only the point table
+    process_layers(conn, "points_parcels", row)
+    process_layers(conn, "points_h3", row)
   })
 
-message("✅ All Amenity Layers Processed.")
+message("✅ Points enriched successfully.")
+```
+
+```{r}
+#| label: transfer-attributes
+
+message("📦 Transferring attributes from Points to Polygons...")
+
+transfer_columns <- function(conn, target_poly, source_point, config) {
+
+  config |>
+    purrr::pwalk(function(...) {
+      row <- list(...)
+      col <- row$col_name
+
+      message(glue::glue("  ↳ Transferring {col}..."))
+
+      # 1. RESET COLUMN on Target (Drop if exists)
+      DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly} DROP COLUMN IF EXISTS {col}"))
+      DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly} ADD COLUMN {col} DOUBLE"))
+
+      # 2. Update Target from Source using RowID
+      DBI::dbExecute(conn, glue::glue("
+        UPDATE {target_poly}
+        SET {col} = source.{col}
+        FROM {source_point} source
+        WHERE {target_poly}.rowid = source.rowid
+      "))
+    })
+}
+
+# Run Transfer
+transfer_columns(conn, "targets_parcels", "points_parcels", amenity_config)
+transfer_columns(conn, "targets_h3", "points_h3", amenity_config)
+
+message("🏁 All Data Transferred. Processing Complete.")
 ```
 
 # Export

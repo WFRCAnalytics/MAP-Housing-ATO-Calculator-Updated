@@ -64,3 +64,5 @@ _environment
 # vdoc files
 .vdoc.*.r
 .tmp/*
+
+_output/*
