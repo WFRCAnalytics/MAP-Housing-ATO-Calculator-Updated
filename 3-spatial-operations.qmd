@@ -701,7 +701,7 @@ fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
 # Transform geom from UTM to WGS84 before export
 DBI::dbExecute(conn, glue::glue("
   COPY (
-    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
+    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
     FROM targets_parcels
   ) TO '{fp_out_parcels}' (FORMAT PARQUET)
 "))
@@ -711,7 +711,7 @@ fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
 # Transform geom from UTM to WGS84 before export
 DBI::dbExecute(conn, glue::glue("
   COPY (
-    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
+    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
     FROM targets_h3
   ) TO '{fp_out_h3}' (FORMAT PARQUET)
 "))
