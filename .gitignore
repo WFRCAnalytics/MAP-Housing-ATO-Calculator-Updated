@@ -65,4 +65,5 @@ _environment
 .vdoc.*.r
 .tmp/*
 
-_output/*
+_output/parcels_*.parquet
+_output/*.gdb

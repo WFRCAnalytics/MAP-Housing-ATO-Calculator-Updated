@@ -485,6 +485,7 @@ We define all external layers here. This structure handles Binary (In/Out), Isoc
 
 # Helpers
 iso_walk  <- function(f) here::here(dirs$isochrones, "foot-walking", f)
+iso_bike  <- function(f) here::here(dirs$isochrones, "cycling-regular", f)
 iso_drive <- function(f) here::here(dirs$isochrones, "driving-car", f)
 land_use  <- function(f) here::here(sub_dirs$landuse, f)
 trans     <- function(f) here::here(sub_dirs$transport, f)
@@ -504,14 +505,14 @@ amenity_config <- tibble::tribble(
   # --- ISOCHRONES ---
   "TT_Local", "isochrone", iso_walk("Transit_Local.parquet"),       "1=1", "value", NA,
   "TT_Rapid", "isochrone", iso_walk("Transit_Rapid.parquet"),       "1=1", "value", NA,
-  "TT_CRT",   "isochrone", iso_walk("Transit_CRT.parquet"),         "1=1", "value", NA,
+  "TT_CRT",   "isochrone", iso_bike("Transit_CRT.parquet"),         "1=1", "value", NA,
   "TF",      "isochrone", iso_drive("Freeways.parquet"),            "1=1", "value", NA,
   "AC",      "isochrone", iso_walk("ChildCare.parquet"),            "1=1", "value", NA,
   "AH",      "isochrone", iso_drive("Healthcare.parquet"),          "1=1", "value", NA,
   "AG",      "isochrone", iso_walk("Grocery.parquet"),              "1=1", "value", NA,
   "AM",      "isochrone", iso_walk("Community_Centers.parquet"),    "1=1", "value", NA,
   "AE_K12",  "isochrone", iso_walk("Schools_PreK12.parquet"),       "1=1", "value", NA,
-  "AE_High", "isochrone", iso_drive("Schools_HigherEd.parquet"),    "1=1", "value", NA,
+  "AE_High", "isochrone", iso_bike("Schools_HigherEd.parquet"),    "1=1", "value", NA,
 
   # --- BUFFER ---
   "TA",      "buffer",    trans("Bikeways.parquet"),                "1=1", NA,      c(0.25, 0.5, 0.75, 1.5, 3.0)
@@ -535,11 +536,7 @@ process_layers <- function(conn, point_table, config) {
   val_col <- config$value_col
 
   # Simplification Tolerance
-  if (type == "isochrone") {
-    SIMPLIFICATION_TOLERANCE <- 1.0
-  } else {
-    SIMPLIFICATION_TOLERANCE <- 1.0
-  }
+  SIMPLIFICATION_TOLERANCE <- 1.0
 
   if (!fs::file_exists(path)) {
     message("⚠️ Missing file: ", path)
@@ -701,11 +698,23 @@ We export the "Wide" tables (ID + all amenity times). We exclude the geometry to
 
 # 1. Parcels
 fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
-DBI::dbExecute(conn, glue::glue("COPY (SELECT * FROM targets_parcels) TO '{fp_out_parcels}' (FORMAT PARQUET)"))
+# Transform geom from UTM to WGS84 before export
+DBI::dbExecute(conn, glue::glue("
+  COPY (
+    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
+    FROM targets_parcels
+  ) TO '{fp_out_parcels}' (FORMAT PARQUET)
+"))
 
 # 2. H3
 fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
-DBI::dbExecute(conn, glue::glue("COPY (SELECT * FROM targets_h3) TO '{fp_out_h3}' (FORMAT PARQUET)"))
+# Transform geom from UTM to WGS84 before export
+DBI::dbExecute(conn, glue::glue("
+  COPY (
+    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
+    FROM targets_h3
+  ) TO '{fp_out_h3}' (FORMAT PARQUET)
+"))
 
 message("🚀 Processing Complete!")
 ```
