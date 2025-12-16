@@ -720,7 +720,6 @@ message("🚀 Processing Complete!")
 ```
 
 ## Cleanup
-
 ```{r}
 #| label: cleanup
 DBI::dbDisconnect(conn, shutdown = TRUE)

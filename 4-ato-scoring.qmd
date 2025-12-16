@@ -227,7 +227,7 @@ score_and_export(conn, fp_h3_enriched, fp_h3_scored, "targets_h3")
 message("🌍 Converting Parquets to File Geodatabase...")
 
 # 1. Configuration
-gdb_path <- here::here(dirs$results, "HousingSuitability_Centers2025.gdb")
+gdb_path <- here::here(dirs$results, "HousingSuitability_Centers202512.gdb")
 
 # Define inputs: Layer Name -> File Path
 to_export <- list(

@@ -67,3 +67,5 @@ _environment
 
 _output/parcels_*.parquet
 _output/*.gdb
+
+*.gdb.zip
