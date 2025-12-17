@@ -642,7 +642,7 @@ amenity_config <- tibble::tribble(
   NA, c(0.25, 0.5, 0.75, 1.5, 3.0),
 
   "TA_trails", "buffer", trans("Bikeways.parquet"),
-  "facility1 LIKE '%Trails%'",
+  "facility1 LIKE '%Trail%'",
   NA, c(0.25, 0.5, 0.75, 1.5, 3.0)
 )
 ```

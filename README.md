@@ -82,3 +82,7 @@ ORS_API_KEY=your_key_here
 ## Authors
 
 Reach out to [Bill Hereth](https://github.com/bhereth) or [Pukar Bhandari](https://github.com/ar-puuk) at [Wasatch Front Regional Council](https://wfrc.utah.gov/) if you have any questions or suggestions.
+
+## TODO
+
+Use `shiny`, `mapgl` and `pmtiles` packages to build an interactive app.
