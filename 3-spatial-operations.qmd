@@ -31,10 +31,22 @@ pak::pak(
     "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
     "janitor",     # https://github.com/sfirke/janitor/
     "mapgl",       # https://github.com/walkerke/mapgl/
-    "here"         # https://github.com/r-lib/here/
+    "here",        # https://github.com/r-lib/here/
+    "fs",          # https://github.com/r-lib/fs/
+    "zip"          # https://github.com/r-lib/zip
     ),
     dependencies = TRUE
   )
+```
+
+OR,
+
+```r
+install.packages("pak") # https://github.com/r-lib/pak
+
+pak::pak("renv", dependencies = TRUE) # https://github.com/rstudio/renv/
+
+renv::restore()
 ```
 
 ```{r}
@@ -393,10 +405,13 @@ DBI::dbExecute(conn, "
 ")
 
 # -----------------------------------------------------------------------------
-# 3. H3: Aggregation via Index Match (Math-Based)
+# 3. H3: Hybrid Approach
+#    Pass A: Building Aggregation (Handles small parcels / mixed use)
+#    Pass B: Spatial Backfill (Handles large parcels / empty lots)
 # -----------------------------------------------------------------------------
 message("🏗️ Aggregating Building Codes to H3 (Index Match)...")
 
+# --- Pass A: Aggregation via Index Match (Existing Logic) ---
 DBI::dbExecute(conn, glue::glue("
   ALTER TABLE targets_h3 ADD COLUMN IF NOT EXISTS BC VARCHAR;
 
@@ -405,7 +420,6 @@ DBI::dbExecute(conn, glue::glue("
   FROM (
     SELECT
       b.h3_index,
-      -- COALESCE only works if the row exists, so LEFT JOIN is required
       MODE(COALESCE(m.abbr, 'OT')) as mode_bc
     FROM points_buildings b
     LEFT JOIN bc_map m ON b.building_type = m.full_name
@@ -414,8 +428,104 @@ DBI::dbExecute(conn, glue::glue("
   WHERE targets_h3.h3_index = agg.h3_index
 "))
 
+# --- Pass B: Spatial Backfill (Gap Filling) ---
+# Check: If BC is still NULL, sample the Parcel Polygon at the H3 Center.
+# This fixes large parcels where the H3 cell is far from the building centroid.
+
+message("  ↳ Filling gaps using Parcel Polygons...")
+
+# 1. Ensure Polygon Index Exists (Critical for spatial join speed)
+DBI::dbExecute(conn, "CREATE INDEX IF NOT EXISTS idx_tp_geom ON targets_parcels USING RTREE (geom)")
+
+# 2. Update NULLs only
+DBI::dbExecute(conn, "
+  UPDATE targets_h3
+  SET BC = matched.BC
+  FROM (
+    SELECT
+      ph.h3_index,
+      p.BC
+    FROM points_h3 ph
+    -- Spatial Join: H3 Center inside Parcel Polygon
+    JOIN targets_parcels p ON ST_Intersects(ph.geom, p.geom)
+    WHERE p.BC IS NOT NULL
+  ) matched
+  WHERE targets_h3.h3_index = matched.h3_index
+    AND targets_h3.BC IS NULL -- Only touch rows that failed Pass A
+")
+
+# --- Pass C: Spatial Voting (KNN Mode) ---
+# Logic: If a cell is empty, look at its 6 immediate neighbors.
+# If 4 or more neighbors have data, we assume this is a "glitch" or hole -> FILL IT.
+# If 3 or fewer neighbors have data, we assume this is a coastline/edge -> LEAVE IT.
+message("  ↳ Pass C: Filling holes using Grid Adjacency (Threshold >= 4)...")
+
+DBI::dbExecute(conn, "
+  UPDATE targets_h3
+  SET BC = fill.mode_bc
+  FROM (
+    SELECT
+      t.h3_index,
+      MODE(n.BC) as mode_bc
+    FROM targets_h3 t
+    -- 1. Get the 6 immediate neighbors (k=1) for the empty cell
+    CROSS JOIN LATERAL (
+      SELECT unnest(h3_grid_disk(t.h3_index, 1)) as neighbor_h3
+    ) grid
+    -- 2. Join back to the main table to check the neighbor's value
+    JOIN targets_h3 n ON grid.neighbor_h3 = n.h3_index
+
+    WHERE t.BC IS NULL          -- Target must be empty
+      AND n.BC IS NOT NULL      -- Neighbor must have data
+      AND t.h3_index != n.h3_index -- Exclude the cell itself
+
+    GROUP BY t.h3_index
+    -- 3. THE RULE: Only fill if surrounded by at least 4 valid cells
+    HAVING COUNT(*) >= 4
+  ) fill
+  WHERE targets_h3.h3_index = fill.h3_index
+")
+
+# --- Pass D: Final Cleanup (Catch-All) ---
+# Logic: If it is STILL null after Pass C, it means it is either:
+# 1. Genuinely empty (surrounded by < 4 valid neighbors)
+# 2. A remote area with no data
+# We force these to 'OT' (Other).
+message("  ↳ Pass D: Setting remaining NULLs to 'OT'...")
+
+DBI::dbExecute(conn, "
+  UPDATE targets_h3
+  SET BC = 'OT'
+  WHERE BC IS NULL
+")
+
 # Cleanup
 DBI::dbExecute(conn, "DROP TABLE points_buildings; DROP TABLE bc_map;")
+```
+
+```{r}
+#| label: check-missing-b3
+#| eval: false
+
+# Check H3 for missing BC values
+DBI::dbGetQuery(conn, "
+  SELECT
+    COUNT(*) as total,
+    COUNT(BC) as filled,
+    COUNT(*) - COUNT(BC) as missing,
+    ROUND(100.0 * (COUNT(*) - COUNT(BC)) / COUNT(*), 2) as missing_pct
+  FROM targets_h3
+")
+
+# Check Parcels (for comparison)
+parcel_stats <- DBI::dbGetQuery(conn, "
+  SELECT
+    COUNT(*) as total,
+    COUNT(BC) as filled,
+    COUNT(*) - COUNT(BC) as missing,
+    ROUND(100.0 * (COUNT(*) - COUNT(BC)) / COUNT(*), 2) as missing_pct
+  FROM targets_parcels
+")
 ```
 
 ## Attach Job Access (AA, AT)
@@ -720,6 +830,7 @@ message("🚀 Processing Complete!")
 ```
 
 ## Cleanup
+
 ```{r}
 #| label: cleanup
 DBI::dbDisconnect(conn, shutdown = TRUE)

@@ -1595,6 +1595,13 @@
         "R"
       ],
       "Hash": "97db85352dc8acbef0225411ea0859b5"
+    },
+    "zip": {
+      "Package": "zip",
+      "Version": "2.3.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "6ebe4b1dc74c3e50e74e316323629583"
     }
   }
 }

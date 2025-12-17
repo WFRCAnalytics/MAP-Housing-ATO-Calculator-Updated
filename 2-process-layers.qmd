@@ -31,10 +31,22 @@ pak::pak(
     "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
     "janitor",     # https://github.com/sfirke/janitor/
     "mapgl",       # https://github.com/walkerke/mapgl/
-    "here"         # https://github.com/r-lib/here/
+    "here",        # https://github.com/r-lib/here/
+    "fs",          # https://github.com/r-lib/fs/
+    "zip"          # https://github.com/r-lib/zip
     ),
     dependencies = TRUE
   )
+```
+
+OR,
+
+```r
+install.packages("pak") # https://github.com/r-lib/pak
+
+pak::pak("renv", dependencies = TRUE) # https://github.com/rstudio/renv/
+
+renv::restore()
 ```
 
 ```{r}
@@ -345,7 +357,7 @@ arrow::open_dataset(fp_boundary_wftdm) |>
 # -----------------------------------------------------------------------------
 
 fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-H3_RES     <- 9
+H3_RES     <- 11
 
 if (file.exists(fp_h3_grid)) {
   message("✅ H3 Grid already exists: ", fp_h3_grid)

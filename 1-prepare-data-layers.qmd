@@ -31,10 +31,22 @@ pak::pak(
     "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
     "janitor",     # https://github.com/sfirke/janitor/
     "mapgl",       # https://github.com/walkerke/mapgl/
-    "here"         # https://github.com/r-lib/here/
+    "here",        # https://github.com/r-lib/here/
+    "fs",          # https://github.com/r-lib/fs/
+    "zip"          # https://github.com/r-lib/zip
     ),
     dependencies = TRUE
   )
+```
+
+OR,
+
+```r
+install.packages("pak") # https://github.com/r-lib/pak
+
+pak::pak("renv", dependencies = TRUE) # https://github.com/rstudio/renv/
+
+renv::restore()
 ```
 
 ```{r}
