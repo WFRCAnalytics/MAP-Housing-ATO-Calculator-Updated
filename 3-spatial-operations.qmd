@@ -716,7 +716,10 @@ process_layers <- function(conn, point_table, config) {
     # BUFFER: The Ultra-Fast Method (ST_DWithin)
     # No buffers created. Just distance checks using the index.
 
-    dists_miles <- config$buffer_opts[[1]]
+    dists_miles <- config$buffer_opts
+
+    # Safety: Ensure it is a vector (handles if it comes wrapped in a list)
+    if (is.list(dists_miles)) dists_miles <- unlist(dists_miles)
 
     # Sort ASCENDING (Smallest first)
     # We find the closest points first, then SKIP them in later loops.
@@ -724,6 +727,8 @@ process_layers <- function(conn, point_table, config) {
 
     for (miles in sorted_miles) {
       meters <- miles * 1609.34
+
+      message(glue::glue("   Checking buffer: {miles} miles ({round(meters)}m)"))
 
       # ST_DWithin uses the RTREE index on raw_layer.
       # The 'WHERE {col} IS NULL' ensures we don't re-calculate points
