@@ -194,9 +194,8 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
   }
 
   # C. Active Transport (Bikeways): Weighted Max of normalized buffer scores
-  #    Matches your updated config: Class 1 (Trails), Class 2 (Lanes), etc.
   if (all(c("TA_class1", "TA_class2", "TA_trails") %in% score_cols)) {
-     composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*0.8, COALESCE(TA_trails,0)*1.0) AS TA"
+     composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*1.0, COALESCE(TA_trails,0)*1.0) AS TA"
   }
 
   # 5. Pass 2: Execute Pipeline
