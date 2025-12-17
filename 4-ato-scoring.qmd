@@ -126,114 +126,114 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
 
   # 2. Load Data
   DBI::dbExecute(conn, as.character(glue::glue(
-    "CREATE OR REPLACE TEMP TABLE {table_name} AS
+    "CREATE OR REPLACE VIEW raw_{table_name} AS
      SELECT * FROM read_parquet('{input_path}')"
   )))
 
-  # 3. Define Static Columns (SKIP these)
-  static_cols <- c("rowid", "geometry", "geom", "parcel_id", "h3_index",
-                   "BC", "CommCode", "city", "county", "fips", "COUNTYNBR")
+  # 2. Identify Columns
+  static_cols <- c(
+    "rowid", "geometry", "geom", "parcel_id", "h3_index", "CommCode", "COUNTYNBR", "BC"
+  )
 
   # 4. Identify Scorable Columns
-  all_cols <- DBI::dbListFields(conn, table_name)
+  all_cols <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
   score_cols <- setdiff(all_cols, static_cols)
 
   if(length(score_cols) == 0) {
     stop("❌ Error: No scorable columns found!")
   }
 
+  # 3. Pass 1: Gather Statistics (Min/Max)
+  #    We build a list of SQL case statements for the final projection
+  sql_parts <- list()
+
+  message("   ⚖️ Calculating global Min/Max statistics...")
+
   # 5. Iterate and Score
   for (col in score_cols) {
+    # Detect Type based on naming convention
+    # Cost: Transit Time (TT_), Access Time (AC, AH, AG, AM, AE_), Buffer Dist (TA), Freeway (TF)
+    is_cost <- grepl("^(TT_|AC|AH|AG|AM|AE_|TA|TF)", col)
 
-    # 🛑 CRITICAL FIX: Quote "{col}" to handle reserved keywords like "AT"
-    DBI::dbExecute(conn, glue::glue('ALTER TABLE {table_name} ALTER COLUMN "{col}" TYPE DOUBLE'))
+    if (is_cost) {
+      # COST: Get non-zero MIN
+      val <- DBI::dbGetQuery(conn, glue::glue('SELECT MIN("{col}") as m FROM raw_{table_name} WHERE "{col}" > 0'))$m
+      if (is.na(val) || val == 0) val <- 1.0 # Safety fallback
 
-    # ---------------------------------------------------------
-    # LOGIC SWITCH
-    # ---------------------------------------------------------
+      # Build Logic:
+      # IF NULL -> 0
+      # IF <= Min (e.g. 0 distance) -> 1.0 (Perfect)
+      # ELSE -> Min / Value
+      sql_parts[[col]] <- glue::glue('
+        CASE
+          WHEN "{col}" IS NULL THEN 0.0
+          WHEN "{col}" <= {val} THEN 1.0
+          ELSE {val} / "{col}"
+        END AS "{col}"
+      ')
 
-    # COST METRICS (Lower is Better -> Min / Value)
-    if (col %in% c("TA", "TF") || grepl("^(TT_|AC|AH|AG|AM|AE_)", col)) {
-
-      # Quote "{col}" in SELECT
-      sql_min <- as.character(glue::glue('SELECT MIN("{col}") as m FROM {table_name} WHERE "{col}" > 0'))
-      min_val <- DBI::dbGetQuery(conn, sql_min)$m
-      if (is.na(min_val)) min_val <- 1.0
-
-      message(glue::glue("   ⚖️ Scoring {col} (Inverse: Min/Val, Best={round(min_val, 2)})..."))
-
-      # Quote "{col}" in UPDATE
-      DBI::dbExecute(conn, as.character(glue::glue('
-        UPDATE {table_name}
-        SET "{col}" = CASE
-          WHEN "{col}" IS NULL THEN 0
-          WHEN "{col}" <= {min_val} THEN 1.0
-          ELSE {min_val} / "{col}"
-        END
-      ')))
-
-    # BENEFIT METRICS (Higher is Better -> Value / Max)
     } else {
+      # BENEFIT: Get MAX
+      val <- DBI::dbGetQuery(conn, glue::glue('SELECT MAX("{col}") as m FROM raw_{table_name}'))$m
+      if (is.na(val) || val == 0) val <- 1.0
 
-      sql_max <- as.character(glue::glue('SELECT MAX("{col}") as m FROM {table_name}'))
-      max_val <- DBI::dbGetQuery(conn, sql_max)$m
-      if (is.na(max_val) || max_val == 0) max_val <- 1.0
-
-      message(glue::glue("   ⚖️ Scoring {col} (Linear: Val/Max, Best={round(max_val, 2)})..."))
-
-      DBI::dbExecute(conn, as.character(glue::glue('
-        UPDATE {table_name}
-        SET "{col}" = CASE
-          WHEN "{col}" IS NULL THEN 0
-          ELSE "{col}" / {max_val}
-        END
-      ')))
+      # Build Logic:
+      # IF NULL -> 0
+      # ELSE -> Value / Max
+      sql_parts[[col]] <- glue::glue('
+        CASE
+          WHEN "{col}" IS NULL THEN 0.0
+          ELSE "{col}" / {val}
+        END AS "{col}"
+      ')
     }
   }
 
   # -------------------------------------------------------------------------
   # 6. Composite Scores
   # -------------------------------------------------------------------------
-  message("   🔗 Calculating Composite Scores...")
+  composites <- list()
 
-  # Transit Score (TT)
+  # Transit Score (Weighted Max)
   if (all(c("TT_Local", "TT_Rapid", "TT_CRT") %in% score_cols)) {
-    DBI::dbExecute(conn, glue::glue("
-      ALTER TABLE {table_name} DROP COLUMN IF EXISTS TT;
-      ALTER TABLE {table_name} ADD COLUMN TT DOUBLE;
-      UPDATE {table_name}
-      SET TT = GREATEST(
-        COALESCE(TT_Local, 0) * 0.5,
-        COALESCE(TT_Rapid, 0) * 0.8,
-        COALESCE(TT_CRT,   0) * 1.0
-      )
-    "))
+    composites[["TT"]] <- "GREATEST(COALESCE(TT_Local,0)*0.5, COALESCE(TT_Rapid,0)*0.8, COALESCE(TT_CRT,0)*1.0) AS TT"
   }
 
-  # Education Score (AE)
+  # Bikeways Score (Weighted Max)
+  if (all(c("TA_class1", "TA_class2", "TA_trails") %in% score_cols)) {
+    composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*0.8, COALESCE(TA_trails,0)*1.0) AS TA"
+  }
+
+  # Education Score (Weighted Max)
   if (all(c("AE_K12", "AE_High") %in% score_cols)) {
-    DBI::dbExecute(conn, glue::glue("
-      ALTER TABLE {table_name} DROP COLUMN IF EXISTS AE;
-      ALTER TABLE {table_name} ADD COLUMN AE DOUBLE;
-      UPDATE {table_name}
-      SET AE = GREATEST(
-        COALESCE(AE_K12,  0) * 0.8,
-        COALESCE(AE_High, 0) * 1.0
-      )
-    "))
+    composites[["AE"]] <- "GREATEST(COALESCE(AE_K12,0)*0.8, COALESCE(AE_High,0)*1.0) AS AE"
   }
 
-  # 7. Export
-  fs::dir_create(fs::path_dir(output_path))
-  message(glue::glue("💾 Saving Scored Data to {output_path}..."))
+  # 5. Pass 2: Execute Single-Pass Projection & Export
+  message(glue::glue("💾 Projecting & Saving to {output_path}..."))
 
-  DBI::dbExecute(conn, as.character(glue::glue("
+  # Construct the massive query
+  select_static <- paste(intersect(all_cols, static_cols), collapse = ", ")
+  select_scores <- paste(unlist(sql_parts), collapse = ", \n      ")
+  select_comps  <- if(length(composites) > 0) paste(",", paste(unlist(composites), collapse = ", ")) else ""
+
+  query <- glue::glue("
     COPY (
-      SELECT * FROM {table_name}
+      WITH scored_base AS (
+        SELECT
+          {select_static},
+          {select_scores}
+        FROM raw_{table_name}
+      )
+      SELECT
+        *
+        {select_comps}
+      FROM scored_base
     ) TO '{output_path}' (FORMAT PARQUET)
-  ")))
+  ")
 
-  DBI::dbExecute(conn, as.character(glue::glue("DROP TABLE {table_name}")))
+  DBI::dbExecute(conn, query)
+  DBI::dbExecute(conn, glue::glue("DROP VIEW raw_{table_name}"))
 }
 ```
 
@@ -280,10 +280,10 @@ purrr::iwalk(to_export, function(path, layer_name) {
 
   # Streamlined Approach: Open -> Convert to SF -> Write
   arrow::open_dataset(path) |>
-    sf::st_as_sf(crs = 4326) |> # WGS84 (matches your source)
+    sf::st_as_sf(crs = CRS_WGS) |> # WGS84
     sf::st_cast("MULTIPOLYGON") |>
-    # Optional: Uncomment next line if you need the GDB in UTM (Standard for WFRC)
-    # sf::st_transform(26912) |>
+    # Optional: Uncomment next line if you need the GDB in UTM
+    # sf::st_transform(CRS_UTM) |>
     sf::st_write(dsn = gdb_path, layer = layer_name, driver = "OpenFileGDB",
                  append = FALSE, quiet = TRUE)
 })

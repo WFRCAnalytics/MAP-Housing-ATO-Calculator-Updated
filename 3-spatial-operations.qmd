@@ -253,11 +253,10 @@ A helper function to join City/County codes to any target table (Parcel or H3).
 attach_admin_data <- function(conn, target_table, point_table) {
 
   message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
-  fp_municipal_bound   <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
-  fp_county_bound <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
+  fp_municipal_bound <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
+  fp_county_bound    <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
 
   # 1. Load Admin Layers (Fixed Geometry)
-  #    We use ST_Union_Agg to flatten potential overlaps and speed up joins
   DBI::dbExecute(conn, glue::glue("
     CREATE OR REPLACE TEMP TABLE layer_muni AS
     SELECT
@@ -274,26 +273,34 @@ attach_admin_data <- function(conn, target_table, point_table) {
     FROM read_parquet('{fp_county_bound}')
   "))
 
-  # 2. RESET COLUMNS (Drop if exists to prevent crashes)
+  # 2. Add Columns
   for (col in c("CommCode", "COUNTYNBR")) {
     DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS {col}"))
     DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN {col} VARCHAR"))
   }
 
-  # 3. Update City
+  # 3. Update City (Spatial Join on Point Table -> Update Target by RowID)
   DBI::dbExecute(conn, glue::glue("
     UPDATE {target_table}
-    SET CommCode = m.CommCode
-    FROM layer_muni m
-    WHERE ST_Intersects(ST_Centroid({target_table}.geom), m.geom);
+    SET CommCode = match.CommCode
+    FROM (
+        SELECT pt.rowid, m.CommCode
+        FROM {point_table} pt, layer_muni m
+        WHERE ST_Intersects(pt.geom, m.geom)
+    ) match
+    WHERE {target_table}.rowid = match.rowid
   "))
 
-  # 4. Update County/FIPS
+  # 4. Update County (Spatial Join on Point Table -> Update Target by RowID)
   DBI::dbExecute(conn, glue::glue("
     UPDATE {target_table}
-    SET COUNTYNBR = c.COUNTYNBR
-    FROM layer_county c
-    WHERE ST_Intersects(ST_Centroid({target_table}.geom), c.geom);
+    SET COUNTYNBR = match.COUNTYNBR
+    FROM (
+        SELECT pt.rowid, c.COUNTYNBR
+        FROM {point_table} pt, layer_county c
+        WHERE ST_Intersects(pt.geom, c.geom)
+    ) match
+    WHERE {target_table}.rowid = match.rowid
   "))
 
   DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
@@ -535,10 +542,11 @@ We attach the raw job access numbers from the TAZ layer. The normalization (divi
 ```{r}
 #| label: func-job-join
 
+fp_taz_access <- here::here(dirs$processed, "access", "TAZ_AccessToOpportunities_OY2023.parquet")
+
 attach_job_access <- function(conn, target_table, point_table) {
 
   message(glue::glue("💼 Attaching Job Access to {target_table}..."))
-  fp_taz_access <- here::here(dirs$processed, "access", "TAZ_AccessToOpportunities_OY2023.parquet")
 
   # 1. Load TAZ & SAFE Transform
   DBI::dbExecute(conn, glue::glue("
@@ -622,10 +630,20 @@ amenity_config <- tibble::tribble(
   "AG",      "isochrone", iso_walk("Grocery.parquet"),              "1=1", "value", NA,
   "AM",      "isochrone", iso_walk("Community_Centers.parquet"),    "1=1", "value", NA,
   "AE_K12",  "isochrone", iso_walk("Schools_PreK12.parquet"),       "1=1", "value", NA,
-  "AE_High", "isochrone", iso_bike("Schools_HigherEd.parquet"),    "1=1", "value", NA,
+  "AE_High", "isochrone", iso_bike("Schools_HigherEd.parquet"),     "1=1", "value", NA,
 
   # --- BUFFER ---
-  "TA",      "buffer",    trans("Bikeways.parquet"),                "1=1", NA,      c(0.25, 0.5, 0.75, 1.5, 3.0)
+  "TA_class1", "buffer", trans("Bikeways.parquet"),
+  "facility1 LIKE '%(1A)%' OR facility1 LIKE '%(1B)%'",
+  NA, c(0.25, 0.5, 0.75, 1.5, 3.0),
+
+  "TA_class2", "buffer", trans("Bikeways.parquet"),
+  "facility1 LIKE '%(2A)%' OR facility1 LIKE '%(2B)%' OR facility1 LIKE '%2C%'",
+  NA, c(0.25, 0.5, 0.75, 1.5, 3.0),
+
+  "TA_trails", "buffer", trans("Bikeways.parquet"),
+  "facility1 LIKE '%Trails%'",
+  NA, c(0.25, 0.5, 0.75, 1.5, 3.0)
 )
 ```
 
@@ -714,18 +732,10 @@ process_layers <- function(conn, point_table, config) {
 
   } else if (type == "buffer") {
     # BUFFER: The Ultra-Fast Method (ST_DWithin)
-    # No buffers created. Just distance checks using the index.
+    # Sorted Distance Loop (Fastest for Nearest Bin)
+    dists <- dists <- sort(unlist(config$buffer_opts), decreasing = FALSE)
 
-    dists_miles <- config$buffer_opts
-
-    # Safety: Ensure it is a vector (handles if it comes wrapped in a list)
-    if (is.list(dists_miles)) dists_miles <- unlist(dists_miles)
-
-    # Sort ASCENDING (Smallest first)
-    # We find the closest points first, then SKIP them in later loops.
-    sorted_miles <- sort(dists_miles, decreasing = FALSE)
-
-    for (miles in sorted_miles) {
+    for (miles in dists) {
       meters <- miles * 1609.34
 
       message(glue::glue("   Checking buffer: {miles} miles ({round(meters)}m)"))
@@ -760,10 +770,8 @@ message("🚀 Starting Staged Processing on Points...")
 
 amenity_config |>
   purrr::pwalk(function(...) {
-    row <- list(...)
-    # Pass only the point table
-    process_layers(conn, "points_parcels", row)
-    process_layers(conn, "points_h3", row)
+    process_layers(conn, "points_parcels", list(...))
+    process_layers(conn, "points_h3", list(...))
   })
 
 message("✅ Points enriched successfully.")
@@ -813,6 +821,7 @@ We export the "Wide" tables (ID + all amenity times). We exclude the geometry to
 
 # 1. Parcels
 fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
+
 # Transform geom from UTM to WGS84 before export
 DBI::dbExecute(conn, glue::glue("
   COPY (
@@ -823,6 +832,7 @@ DBI::dbExecute(conn, glue::glue("
 
 # 2. H3
 fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
+
 # Transform geom from UTM to WGS84 before export
 DBI::dbExecute(conn, glue::glue("
   COPY (
