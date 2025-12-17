@@ -122,48 +122,39 @@ This function encapsulates the entire scoring workflow so it can be applied iden
 
 score_and_export <- function(conn, input_path, output_path, table_name) {
 
-  message(glue::glue("📊 Loading, Scoring and Normalizing {table_name}..."))
+  message(glue::glue("📊 Scoring {table_name}..."))
 
-  # 2. Load Data
-  DBI::dbExecute(conn, as.character(glue::glue(
-    "CREATE OR REPLACE VIEW raw_{table_name} AS
-     SELECT * FROM read_parquet('{input_path}')"
-  )))
+  # 1. Load Data into View (Zero Copy)
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE VIEW raw_{table_name} AS SELECT * FROM read_parquet('{input_path}')
+  "))
 
   # 2. Identify Columns
   static_cols <- c(
     "rowid", "geometry", "geom", "parcel_id", "h3_index", "CommCode", "COUNTYNBR", "BC"
   )
 
-  # 4. Identify Scorable Columns
-  all_cols <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
+  all_cols   <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
   score_cols <- setdiff(all_cols, static_cols)
 
-  if(length(score_cols) == 0) {
-    stop("❌ Error: No scorable columns found!")
-  }
+  if(length(score_cols) == 0) stop("❌ Error: No scorable columns found!")
 
-  # 3. Pass 1: Gather Statistics (Min/Max)
-  #    We build a list of SQL case statements for the final projection
+  # 3. Pass 1: Gather Normalization Stats
+  #    We build the SQL to normalize individual columns (0 to 1)
   sql_parts <- list()
 
-  message("   ⚖️ Calculating global Min/Max statistics...")
+  message("   ⚖️ Calculating Min/Max statistics...")
 
-  # 5. Iterate and Score
   for (col in score_cols) {
-    # Detect Type based on naming convention
-    # Cost: Transit Time (TT_), Access Time (AC, AH, AG, AM, AE_), Buffer Dist (TA), Freeway (TF)
-    is_cost <- grepl("^(TT_|AC|AH|AG|AM|AE_|TA|TF)", col)
+    # Detect Type: Cost (Min/Val) vs Benefit (Val/Max)
+    # Added 'TA_' explicitly to cost metrics based on your buffer config
+    is_cost <- grepl("^(TT_|AC|AH|AG|AM|AE_|TA_|TF)", col)
 
     if (is_cost) {
-      # COST: Get non-zero MIN
+      # COST: Inverse Normalization
       val <- DBI::dbGetQuery(conn, glue::glue('SELECT MIN("{col}") as m FROM raw_{table_name} WHERE "{col}" > 0'))$m
-      if (is.na(val) || val == 0) val <- 1.0 # Safety fallback
+      if (is.na(val) || val == 0) val <- 1.0 # Safety
 
-      # Build Logic:
-      # IF NULL -> 0
-      # IF <= Min (e.g. 0 distance) -> 1.0 (Perfect)
-      # ELSE -> Min / Value
       sql_parts[[col]] <- glue::glue('
         CASE
           WHEN "{col}" IS NULL THEN 0.0
@@ -173,13 +164,10 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
       ')
 
     } else {
-      # BENEFIT: Get MAX
+      # BENEFIT: Linear Normalization
       val <- DBI::dbGetQuery(conn, glue::glue('SELECT MAX("{col}") as m FROM raw_{table_name}'))$m
       if (is.na(val) || val == 0) val <- 1.0
 
-      # Build Logic:
-      # IF NULL -> 0
-      # ELSE -> Value / Max
       sql_parts[[col]] <- glue::glue('
         CASE
           WHEN "{col}" IS NULL THEN 0.0
@@ -189,34 +177,37 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
     }
   }
 
-  # -------------------------------------------------------------------------
-  # 6. Composite Scores
-  # -------------------------------------------------------------------------
+  # 4. Define Composite Calculations
+  #    These logic blocks run on the ALREADY normalized values from step 3.
+  #    Using COALESCE(x, 0) ensures we don't get NULLs if one component is missing.
+
   composites <- list()
 
-  # Transit Score (Weighted Max)
+  # A. Transit: Weighted Max of normalized Local, Rapid, and CRT
   if (all(c("TT_Local", "TT_Rapid", "TT_CRT") %in% score_cols)) {
     composites[["TT"]] <- "GREATEST(COALESCE(TT_Local,0)*0.5, COALESCE(TT_Rapid,0)*0.8, COALESCE(TT_CRT,0)*1.0) AS TT"
   }
 
-  # Bikeways Score (Weighted Max)
-  if (all(c("TA_class1", "TA_class2", "TA_trails") %in% score_cols)) {
-    composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*0.8, COALESCE(TA_trails,0)*1.0) AS TA"
-  }
-
-  # Education Score (Weighted Max)
+  # B. Education: Weighted Max of K12 and HigherEd
   if (all(c("AE_K12", "AE_High") %in% score_cols)) {
     composites[["AE"]] <- "GREATEST(COALESCE(AE_K12,0)*0.8, COALESCE(AE_High,0)*1.0) AS AE"
   }
 
-  # 5. Pass 2: Execute Single-Pass Projection & Export
+  # C. Active Transport (Bikeways): Weighted Max of normalized buffer scores
+  #    Matches your updated config: Class 1 (Trails), Class 2 (Lanes), etc.
+  if (all(c("TA_class1", "TA_class2", "TA_trails") %in% score_cols)) {
+     composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*0.8, COALESCE(TA_trails,0)*1.0) AS TA"
+  }
+
+  # 5. Pass 2: Execute Pipeline
   message(glue::glue("💾 Projecting & Saving to {output_path}..."))
 
-  # Construct the massive query
   select_static <- paste(intersect(all_cols, static_cols), collapse = ", ")
   select_scores <- paste(unlist(sql_parts), collapse = ", \n      ")
-  select_comps  <- if(length(composites) > 0) paste(",", paste(unlist(composites), collapse = ", ")) else ""
+  select_comps  <- if(length(composites) > 0) paste(",", paste(unlist(composites), collapse = ", \n      ")) else ""
 
+  # The CTE 'scored_base' normalizes the data.
+  # The outer SELECT calculates composites on those normalized values.
   query <- glue::glue("
     COPY (
       WITH scored_base AS (
