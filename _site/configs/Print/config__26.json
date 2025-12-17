@@ -1,0 +1,9 @@
+{
+  "serviceURL": "https://print.ugrc.utah.gov/v2/6/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task",
+  "defaultTitle": "Housing Suitability",
+  "defaultAuthor": "",
+  "defaultCopyright": "",
+  "defaultFormat": "PDF",
+  "defaultLayout": "Tabloid ANSI B Landscape",
+  "copyrightEditable": true
+}

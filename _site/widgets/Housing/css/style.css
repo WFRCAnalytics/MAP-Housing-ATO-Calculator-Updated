@@ -1,0 +1,327 @@
+th, td {
+  padding: 2px;
+}
+
+div.selectedWidget {
+  cursor: pointer;
+  color: #005fa2; /*sCTextOn*/
+  background-color: #90EE90; /*sCTabOn*/
+  padding: 5px;
+  padding-right: 1px;
+}
+
+div.selectedWidget:hover {
+  color: #005fa2;;
+  background-color: lightblue;
+}
+
+div.unselectedWidget {
+  cursor: pointer;
+  color: #ffffff; /*cCTextOff*/
+  background-color: #bbbbbb;  /*sCTabOff*/
+  padding: 5px;
+  padding-right: 1px;
+}
+
+div.unselectedWidget:hover {
+  color: white;
+  background-color: lightblue;
+}
+div.selectedToggle {
+  cursor: pointer;
+  font-size: 100%;
+  color: #005fa2; /*sCTextOn*/
+  background-color: #90EE90; /*sCTabOn*/
+  padding: 1px;
+}
+
+div.community:hover {
+  color: #FFFFFF;
+  background-color: #FF0000;
+  cursor: pointer;
+}
+
+
+div.selectedToggle:hover {
+  color: #005fa2;;
+  background-color: lightblue;
+}
+
+div.unselectedToggle {
+  cursor: pointer;
+  font-size: 100%;
+  color: #ffffff; /*cCTextOff*/
+  background-color: #bbbbbb;  /*sCTabOff*/
+  padding: 1px;
+}
+
+div.unselectedToggle:hover {
+  color: white;
+  background-color: lightblue;
+}
+
+div.toggleVolSelected {
+  cursor: pointer;
+  font-size: 80%;
+  color: #005fa2; /*sCTextOn*/
+  background-color: #90EE90; /*sCTabOn*/
+}
+
+div.toggleVolSelected:hover {
+  color: #005fa2;;
+  background-color: lightblue;
+}
+
+div.toggleVolUnselected {
+  cursor: pointer;
+  font-size: 80%;
+  color: #ffffff; /*cCTextOff*/
+  background-color: #bbbbbb;  /*sCTabOff*/
+}
+
+div.toggleVolUnselected:hover {
+  color: white;
+  background-color: lightblue;
+}
+
+div.tabcontrol {
+  position: relative;
+  left: 30px;
+  cursor: pointer;
+}
+
+div.pictureVOL {
+  width:25px; /*width of your image*/
+  height:25px; /*height of your image*/
+  background-image:url('../images/icon_VOL_blue.png');
+  margin:0; /* If you want no margin */
+  padding:0; /*if your want to padding */
+  /*display:inline;*/
+}
+
+div.pictureSE {
+  width:25px; /*width of your image*/
+  height:25px; /*height of your image*/
+  background-image:url('../images/icon_SE_white.png');
+  margin:0; /* If you want no margin */
+  padding:0; /*if your want to padding */
+  /*display:inline;*/
+}
+
+div.pictureUTP {
+  width:25px; /*width of your image*/
+  height:25px; /*height of your image*/
+  background-image:url('../images/icon_UTP_white.png');
+  margin:0; /* If you want no margin */
+  padding:0; /*if your want to padding */
+  /*display:inline;*/
+}
+
+div.clickablepointer {
+  cursor: pointer;
+}
+
+/*
+.wide .dojoxCheckedMultiSelectWrapper {
+  width: 323px;
+}
+*/
+
+p.normal {
+   font-weight: normal;
+}
+
+p.light {
+   font-weight: lighter;
+}
+
+p.thick {
+   font-weight: bold;
+}
+
+p.thicker {
+   font-weight: 900;
+	font-size: 120%;
+}
+
+div.fromcell {
+	font-weight: bold;
+	font-size: 110%;
+	background-color:rgba(229,102,102,0.3);
+	padding: 0.25em;
+	line-height:22px;
+}
+
+div.tocell {
+	font-weight: bold;
+	font-size: 110%;
+	background-color:rgba(102,102,229,0.3);
+	padding: 0.25em;
+	line-height:22px;
+}
+
+div.fromcell.label {
+	background-color:rgb(255,255,255);
+}
+
+div.tocell.label {
+	background-color:rgb(255,255,255);
+}
+
+table.settings {
+	//border: 1px solid black;
+	background-color: rgba(185,185,185,0.3);
+}
+
+.right {
+   position: right;
+}
+
+div.thicker {
+   font-weight: 900;
+	font-size: 120%;
+}
+
+div.qTableResults {
+	font-weight: normal;
+	text-align: right;
+	font-size: 110%;
+}
+
+div.qTableResults.Total {
+	font-weight: bold;
+}
+
+div.qTableResultsShare {
+	font-weight: normal;
+	text-align: right;
+	font-size: 110%;
+}
+
+div.qTableResultsShare.Total {
+	font-weight: normal;
+}
+
+div.qTableRowLabel{
+   font-weight: normal;
+	text-align: Left;
+	font-size: 110%;
+}
+
+div.qTableRowLabel.NonMotorized{
+	font-size: 105%;
+}
+
+div.qTableRowLabel.AllModes{
+	font-weight: bold;
+}
+
+div.qTableHeaderLabel{
+   font-weight: bold;
+	font-size: 105%;
+	text-decoration: underline;
+}
+	
+div.qTableYearRow{
+	font-weight: bold;
+	font-size: 110%;
+	text-align: center;
+	background-color:#dddddd;
+	padding:0.5em;
+}
+
+hr {
+   display: block;
+   height: 1px;
+   border: 0;
+   border-top: 1px solid #ccc;
+   margin: 1em 0;
+   padding: 0;
+}
+
+td.resultrow {
+	height:25px;	
+}
+
+td.resultrow .heading{
+	height:35px;	
+}
+
+td.resultrow.share {
+	width:60px;
+}
+
+td.resultrow.number {
+	width:100px;
+}
+
+td.resultrow.label {
+	width:105px;
+}
+
+tr.results_color {
+   background-color: #dddddd;
+}
+
+table.resultstable {
+	width: 100%;
+	border: none;
+	border-collapse:collapse;
+}
+
+//table.resultstable tr:nth-child(odd) td{
+//        background:#ccc;
+//}
+//table.resultstable tr:nth-child(even) td{
+//        background:#fff;
+//}
+
+br {
+  display: block;
+  margin: 15px 0;
+}
+
+div.scrollable {
+   border: 1px solid #999;
+   padding: 10px;
+   position: absolute;
+   top: 10px;
+   right: 10px;
+   bottom: 10px;
+   left: 10px;
+   overflow: auto;
+}
+
+.wfrc-filter table {
+  width: 100%; }
+  .wfrc-filter table tr {
+   height: 23px; }
+  .wfrc-filter table .indent {
+   margin-left: 15px; }
+  .wfrc-filter table .legend-swatch {
+   width: 50px;
+   height: 15px;
+   float: right;
+   margin-right: 30px; }
+  .wfrc-filter table td.vertical {
+   width: 35%;
+   position: relative; }
+  .wfrc-filter table .vertical-swatch-container {
+   top: 0px;
+   bottom: 0px;
+   left: 0px;
+   right: 0px;
+   position: absolute;
+   display: flex;
+   justify-content: center; }
+  .wfrc-filter table .vertical-swatch {
+   height: 100%;
+   width: 14%; }
+  .wfrc-filter table img.question-mark {
+   float: right; }
+  .wfrc-filter table button {
+   margin-top: 10px;
+   width: 50%; }
+
+.wfrc-filter .tooltip-table {
+  width: 170px; }

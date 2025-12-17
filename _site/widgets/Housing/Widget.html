@@ -1,0 +1,416 @@
+<div>
+  <br />
+  <table width="425px;">
+    <tr>
+      <td width="295px;">
+        <p class="thicker">Step 1: Select Cities</p>
+      </td>
+      <td valign="right">
+        <div id="ATO_Zoom" style="display: flex; justify-content: flex-end">&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAutoZoom"
+            name="AutoZoom" data-dojo-type="dijit/form/CheckBox" checked /><label for="chkAutoZoom"><small>&nbsp;Auto
+              Zoom&nbsp;&nbsp;</small></div></label>
+      </td>
+    </tr>
+  </table>
+  <table>
+    <tr>
+      <td width="20px;">
+        &nbsp;
+      </td>
+      <td width="405px;">
+        <div id="communitiesText" class="thicker"></div>
+        <div id="addText"></div>
+      </td>
+    </tr>
+  </table>
+  <hr />
+  <table>
+    <tr>
+      <td width="405px;">
+        <p class="thicker">Step 2: Filter by Land Use <small>(optional)</small></p>
+      </td>
+      <td width = "200px;">
+        <div id="cmbLandUseFilter"></div>
+      </td>
+    </tr>
+  </table>
+  <hr />
+  <br />
+  <div>
+    <table width="425px;">
+      <tr>
+        <td colspan="3">
+          <p class="thicker">Step 3: Customize Accessibility Factors & Priorities</p>
+          <br />
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan="2" width="400px;">
+          <p class="thicker">Please indicate your priority level for each of the following measures of accessibility.</p>
+        </td>
+      </tr>
+      <tr>
+        <td width="10px;">
+          <p class="thicker">&nbsp;</p>
+        </td>
+        <td class="thicker">
+          <p class="thicker">Places</p>
+        </td>
+        <td>
+          <div id="divCentersExpand" class="clickablepointer" data-dojo-attach-event="onClick: _expandCenters"
+            style="color:green">Collapse</div>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan="2" width="400px;">
+          <div id="centerschoices">
+            <table>
+              <tbody>
+                <tr id="centerheader_reg">
+                  <td></td>
+                  <td><i>Show</i></td>
+                  <td><i>Measure</i></td>
+                  <td><i>Low Priority&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;High Priority</i></td>
+                </tr>
+                <tr id="rowCM">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkCM" /></td>
+                  <td width="150px;"><label for="chkCM">
+                      <p class="thick ">Metropolitan Centers</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderCM"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowCU">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkCU" /></td>
+                  <td width="150px;"><label for="chkCU">
+                      <p class="thick ">Urban Centers</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderCU"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowCC">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkCC" /></td>
+                  <td width="150px;"><label for="chkCC">
+                      <p class="thick ">City Centers</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderCC"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowCN">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkCN" /></td>
+                  <td width="150px;"><label for="chkCN">
+                      <p class="thick ">Neighborhood Centers</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderCN"></div></td>
+                  </td>
+                </tr>
+                <tr id="noneCM" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Metropolitan Centers in selected communities.</i></td>
+                </tr>
+                <tr id="noneCU" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Urban Centers in selected communities.</i></td>
+                </tr>
+                <tr id="noneCC" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No City Centers in selected communities.</i></td>
+                </tr>
+                <tr id="noneCN" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Neighborhood Centers in selected communities.</i></td>
+                </tr>
+                <tr>
+                  <td>&nbsp;</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td width="10px;">
+          <p class="thicker">&nbsp;</p>
+        </td>
+        <td class="thicker">
+          <p class="thicker">Access to Employment</p>
+        </td>
+        <td valign="right">
+          <div id="divATOExpand" class="clickablepointer" data-dojo-attach-event="onClick: _expandATO"
+            style="color:green">Collapse</div>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan="2" width="400px;">
+          <div id="atochoices">
+            <table>
+              <th>
+              <td><i>Show</i></td>
+              <td><i>Measure</i></td>
+              <td><i>Low Priority&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;High Priority</i></td>
+              </th>
+              <tbody>
+                <tr id="rowAA">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAA" /></td>
+                  <td width="150px;"><label for="chkAA">
+                      <p class="thick ">Auto Access to Jobs</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderAA"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowAT">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAT" /></td>
+                  <td><label for="chkAT">
+                      <p class="thick ">Transit Access to Jobs</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderAT"></div></td>
+                  </td>
+                </tr>
+                <tr id="noneAA" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Auto Access to Jobs in selected communities.</i></td>
+                </tr>
+                <tr id="noneAT" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Transit Access to Jobs in selected communities.</i></td>
+                </tr>
+                <tr>
+                  <td>&nbsp;</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td width="10px;">
+          <p class="thicker">&nbsp;</p>
+        </td>
+        <td class="thicker">
+          <p class="thicker">Nearby Transportation (existing + planned)</p>
+        </td>
+        <td>
+          <div id="divTransportationExpand" class="clickablepointer"
+            data-dojo-attach-event="onClick: _expandTransportation" style="color:green">Collapse</div>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan="2" width="400px;">
+          <div id="transportationchoices">
+            <table>
+              <th>
+              <td><i>Show</i></td>
+              <td><i>Measure</i></td>
+              <td><i>Low Priority&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;High Priority</i></td>
+              </th>
+              <tbody>
+                <tr id="rowTT">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkTT" /></td>
+                  <td width="150px;"><label for="chkTT">
+                      <p class="thick ">Transit</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderTT"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowTF">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkTF" /></td>
+                  <td><label for="chkTF">
+                      <p class="thick ">Freeways</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderTF"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowTA">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkTA" /> </td>
+                  <td><label for="chkTA">
+                      <p class="thick ">Active Transportation</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderTA"></div></td>
+                  </td>
+                </tr>
+                <tr id="noneTT" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Transit in selected communities.</i></td>
+                </tr>
+                <tr id="noneTF" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Freeway Facilities in selected communities.</i></td>
+                </tr>
+                <tr id="noneTA" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No Active Transportation Facilities in selected communities.</i></td>
+                </tr>
+                <tr>
+                  <td>&nbsp;</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td width="10px;">
+          <p class="thicker">&nbsp;</p>
+        </td>
+        <td class="thicker">
+          <p class="thicker">Nearby Community Necessities</p>
+        </td>
+        <td>
+          <div id="divAmenitiesExpand" class="clickablepointer" data-dojo-attach-event="onClick: _expandAmenities"
+            style="color:green">Collapse</div>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan="2" width="400px;">
+          <div id="amenitieschoices">
+            <table>
+              <th>
+              <td><i>Show</i></td>
+              <td><i>Measure</i></td>
+              <td><i>Low Priority&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;High Priority</i></td>
+              </th>
+              <tbody>
+                <tr id="rowAC">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAC" /></td>
+                  <td width="150px;"><label for="chkAC">
+                      <p class="thick">Child Care</p>
+                    </label></td>
+                  <td width="200px;">
+                    <div id="horizsliderAC"></div></td>
+                  </td>
+                </tr>
+
+                <tr id="rowAH">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAH" /></td>
+                  <td><label for="chkAH">
+                      <p class="thick">Health Care</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderAH"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowAE">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAE" /></td>
+                  <td><label for="chkAE">
+                      <p class="thick">Schools</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderAE"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowAG">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAG" /></td>
+                  <td><label for="chkAG">
+                      <p class="thick">Grocery</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderAG"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowAM">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAM" /></td>
+                  <td><label for="chkAM">
+                      <p class="thick">Community Centers</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderAM"></div></td>
+                  </td>
+                </tr>
+                <tr id="rowAP">
+                  <td>&nbsp;</td>
+                  <td>&nbsp;&nbsp;&nbsp;<input type="checkbox" id="chkAP" /></td>
+                  <td><label for="chkAP">
+                      <p class="thick">10-Min Walk to Parks</p>
+                    </label></td>
+                  <td>
+                    <div id="horizsliderAP"></div></td>
+                  </td>
+                </tr>
+                <tr id="noneAC" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No proximity to Child Care in selected communities.</i></td>
+                </tr>
+                <tr id="noneAH" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No proximity to Health Care in selected communities.</i></td>
+                </tr>
+                <tr id="noneAE" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No proximity to Schools in selected communities.</i></td>
+                </tr>
+                <tr id="noneAG" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No proximity to Grocery in selected communities.</i></td>
+                </tr>
+                <tr id="noneAM" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No proximity to Community Centers in selected communities.</i></td>
+                </tr>
+                <tr id="noneAP" style="display:none;">
+                  <td></td>
+                  <td colspan="3"><i>No 10-Minute Walk to Parks in selected communities.</i></td>
+                </tr>
+                <tr>
+                  <td>&nbsp;</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td colspan=3>
+          <div id="showlegend" data-dojo-attach-event="onClick: _showLegend" class="clickablepointer"
+            style="color:green; display: flex; justify-content: flex-end">Show Legend</div>
+        </td>
+      </tr>
+    </table>
+    <br />
+    <div id="oppzones" style="display:none;">
+      <table width="325px;">
+        <tr>
+          <td width="240px;">
+            <p class="thicker">Limit results to opportunity zones:</p>
+          </td>
+          <td width="85px;">
+            <select id="opportunityzones" data-dojo-type="dijit/form/Select">
+              <option value="Y">Yes</option>
+              <option value="N" selected>No </option>
+            </select>
+          </td>
+        </tr>
+      </table>
+      <br />
+    </div>
+    <div id="turnoffall" data-dojo-attach-event="onClick: _turnoffall" class="clickablepointer" style="color:gray;" >Set
+      all priorities to none.</div>
+  </div>
+</div>

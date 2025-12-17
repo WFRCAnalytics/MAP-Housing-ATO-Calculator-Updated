@@ -1,0 +1,34 @@
+{
+  "splash": {
+    "splashContent": "<p style=\"text-align: center;\"><span style=\"text-align: left; font-size: medium; color: rgb(59, 59, 59); white-space: pre-wrap; caret-color: rgb(59, 59, 59);\">The </span><span style=\"text-align: left; color: rgb(59, 59, 59); font-size: medium; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\">Housing </span><span style=\"text-align: left; color: rgb(59, 59, 59); font-size: medium; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\">ATO</span><span style=\"text-align: left; color: rgb(59, 59, 59); font-size: medium; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\"> Calculator</span><font color=\"#3b3b3b\" size=\"3\" style=\"text-align: left;\"><span style=\"white-space: pre-wrap;\"> can assist housing and land use planning efforts. This tool is intended to be used as a conversation starter, a helpful visualization tool, and a data-informed guide about planning for housing based on access to opportunities. Users choose what factors are important to their community and prioritize them. The tool produces a heat map of locations that have the most accessibility to the least accessibility to opportunities based on the user's prioritization.</span></font><br /></p><p style=\"text-align: center;\"><font color=\"#3b3b3b\" size=\"3\" style=\"text-align: left;\"><span style=\"white-space: pre-wrap;\"><br /></span></font></p><div align=\"center\"><span style=\"font-size: medium; color: rgb(59, 59, 59); text-align: start; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\">Please email Bill Hereth (bhereth@wfrc.org) with any questions, comments, or issues.</span><br /></div><div align=\"center\"><span style=\"color: rgb(59, 59, 59); text-align: start; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\"><font size=\"3\"><br /></font></span></div><div align=\"center\"><font size=\"3\"><span style=\"color: rgb(59, 59, 59); text-align: start; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\">This tool was built off of the Weber Housing Location Explorer. For more information about the methodology, please visit the story map at </span><a href=\"http://bit.ly/weberhousing\" style=\"\" target=\"_blank\">http://bit.ly/weberhousing</a><span style=\"color: rgb(59, 59, 59); text-align: start; white-space: pre-wrap; caret-color: rgb(59, 59, 59);\">. </span></font></div>",
+    "requireConfirm": false,
+    "confirm": {
+      "text": "",
+      "color": "#ffffff",
+      "transparency": 0
+    },
+    "showOption": false,
+    "confirmEverytime": true,
+    "contentVertical": "middle",
+    "size": {
+      "mode": "wh",
+      "wh": {
+        "w": 550,
+        "h": 425
+      }
+    },
+    "background": {
+      "mode": "color",
+      "image": null,
+      "type": "fill",
+      "fileName": "No%20file%20chosen",
+      "color": "#87cefa",
+      "transparency": 0
+    },
+    "button": {
+      "color": "#518dca",
+      "transparency": 0,
+      "text": "OK"
+    }
+  }
+}
