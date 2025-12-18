@@ -10,7 +10,10 @@ library(RColorBrewer)
 library(shinyjs)
 library(utils)
 
-# 1. Global Setup
+# ==============================================================================
+# 1. GLOBAL SETUP & DATA LOADING
+# ==============================================================================
+
 data_path <- "../_output/h3_scored.parquet"
 if (!file.exists(data_path)) {
   data_path <- "h3_scored.parquet"
@@ -322,7 +325,9 @@ sliderWithLayer <- function(inputId, label) {
   )
 }
 
+# ==============================================================================
 # 2. UI
+# ==============================================================================
 ui <- bslib::page_navbar(
   title = shiny::div(
     style = "display: flex; align-items: center;",
@@ -360,7 +365,92 @@ ui <- bslib::page_navbar(
       .maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }
       .shiny-input-container { width: 100% !important; margin-bottom: 0px !important; }
       .form-group { margin-bottom: 5px !important; }
-    "
+
+      /* --- SPLASH SCREEN STYLES --- */
+      .modal-content {
+        border: none;
+        border-radius: 12px;
+        box-shadow: 0 15px 35px rgba(0,0,0,0.25);
+        overflow: hidden;
+      }
+      .splash-header {
+        background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%);
+        color: white;
+        padding: 30px 25px;
+        text-align: center;
+        position: relative;
+      }
+      .splash-header h2 {
+        font-family: 'Oswald', sans-serif;
+        color: white;
+        margin: 0;
+        letter-spacing: 1px;
+      }
+      .splash-body {
+        padding: 25px 35px;
+        font-family: 'Open Sans', sans-serif;
+        color: #444;
+      }
+      .feature-grid {
+        display: flex;
+        gap: 20px;
+        margin: 25px 0;
+        text-align: center;
+      }
+      .feature-item {
+        flex: 1;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        transition: transform 0.2s;
+      }
+      .feature-item:hover {
+        transform: translateY(-3px);
+        background: #f0f4f8;
+      }
+      .feature-icon {
+        font-size: 1.8rem;
+        color: #e8572d; /* Orange accent */
+        margin-bottom: 10px;
+      }
+      .feature-title {
+        font-weight: 700;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        color: #233A57;
+        margin-bottom: 5px;
+      }
+      .instruction-box {
+        background-color: #eef6fc;
+        border-left: 4px solid #377EB8;
+        padding: 15px;
+        margin: 20px 0;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .splash-footer {
+        background-color: #f1f1f1;
+        padding: 15px 35px;
+        font-size: 0.85rem;
+        border-top: 1px solid #ddd;
+      }
+      .btn-get-started {
+        background-color: #233A57;
+        color: white;
+        font-family: 'Oswald', sans-serif;
+        font-size: 1.1rem;
+        padding: 10px 40px;
+        border-radius: 30px;
+        border: none;
+        transition: all 0.3s;
+        width: 100%;
+      }
+      .btn-get-started:hover {
+        background-color: #e8572d; /* Orange hover */
+        color: white;
+        transform: scale(1.02);
+      }
+      "
     ))
   ),
 
@@ -458,7 +548,7 @@ ui <- bslib::page_navbar(
         class = "d-flex align-items-center w-100",
 
         # 2. Left Side (Title)
-        # 'me-auto' (margin-end: auto) pushes all subsequent items (the controls) to the far right
+        # 'me-auto' pushes all subsequent items (the controls) to the far right
         shiny::span(
           "Housing Accessibility Map",
           class = "me-auto",
@@ -480,9 +570,7 @@ ui <- bslib::page_navbar(
               class = "control-label m-0",
               style = "font-size: 1rem; font-weight: 700; color: #233A57; white-space: nowrap;"
             ),
-            # CRITICAL FIX: Wrap input in a fixed-width div.
-            # Your global CSS forces inputs to 100% width. By setting this wrapper to 70px,
-            # the 100% fills only this wrapper, preventing the "gap".
+            # Fixed width wrapper to prevent 'width: 100%' expansion
             shiny::div(
               style = "width: 70px;",
               shiny::numericInput(
@@ -496,7 +584,6 @@ ui <- bslib::page_navbar(
           ),
 
           # --- 3D Toggle ---
-          # Wrap in a div to ensure it doesn't get stretched by flexbox
           shiny::div(
             style = "white-space: nowrap;",
             shinyWidgets::materialSwitch(
@@ -514,8 +601,147 @@ ui <- bslib::page_navbar(
   )
 )
 
-# 3. Server Logic
+# ==============================================================================
+# 3. SERVER LOGIC
+# ==============================================================================
 server <- function(input, output, session) {
+  # --- SPLASH SCREEN ---
+  shiny::showModal(shiny::modalDialog(
+    title = NULL,
+    easyClose = FALSE,
+    size = "l",
+    footer = NULL,
+
+    # Custom HTML Content
+    shiny::div(
+      # 1. Hero Header
+      shiny::div(
+        class = "splash-header",
+        shiny::div(
+          style = "font-size: 3rem; margin-bottom: 10px;",
+          shiny::icon("house-chimney-user")
+        ),
+        shiny::h2("Housing ATO Calculator")
+      ),
+
+      # 2. Body Content
+      shiny::div(
+        class = "splash-body",
+        shiny::p(
+          "The Housing Access to Opportunities (ATO) Calculator is designed to assist housing and land use planning efforts across the Wasatch Front.",
+          style = "font-size: 1.1rem; text-align: center; margin-bottom: 20px;"
+        ),
+
+        # Three Pillars Icons
+        shiny::div(
+          class = "feature-grid",
+          shiny::div(
+            class = "feature-item",
+            shiny::div(class = "feature-icon", shiny::icon("comments")),
+            shiny::div(class = "feature-title", "Conversation Starter"),
+            shiny::div(
+              "Facilitate discussions about housing needs.",
+              style = "font-size:0.8rem;"
+            )
+          ),
+          shiny::div(
+            class = "feature-item",
+            shiny::div(class = "feature-icon", shiny::icon("map-location-dot")),
+            shiny::div(class = "feature-title", "Visualization Tool"),
+            shiny::div(
+              "Explore spatial data interactively.",
+              style = "font-size:0.8rem;"
+            )
+          ),
+          shiny::div(
+            class = "feature-item",
+            shiny::div(class = "feature-icon", shiny::icon("chart-pie")),
+            shiny::div(class = "feature-title", "Data-Informed Guide"),
+            shiny::div(
+              "Plan based on access metrics.",
+              style = "font-size:0.8rem;"
+            )
+          )
+        ),
+
+        # How it works box
+        shiny::div(
+          class = "instruction-box",
+          shiny::icon("circle-info"),
+          shiny::tags$strong(" How it works:"),
+          shiny::br(),
+          "1. Start by selecting your ",
+          shiny::tags$strong("community"),
+          " (one or more) from the sidebar.",
+          shiny::br(),
+          "2. Optionally, filter the map by specific ",
+          shiny::tags$strong("land use"),
+          " types.",
+          shiny::br(),
+          "3. Finally, adjust the sliders to ",
+          shiny::tags$strong("prioritize the accessibility factors"),
+          " that matter most to you.",
+          shiny::p(
+            "The tool will generate a heat map highlighting locations ranging from the ",
+            shiny::tags$strong("most accessibility"),
+            " to the ",
+            shiny::tags$strong("least accessibility"),
+            " based on your specific inputs.",
+            style = "margin-top: 8px; margin-bottom: 0;"
+          )
+        ),
+
+        # Get Started Button
+        shiny::div(
+          style = "text-align: center; margin-top: 25px;",
+          shiny::actionButton(
+            "close_splash",
+            "GET STARTED",
+            class = "btn-get-started",
+            onclick = "setTimeout(function(){ $('.modal').modal('hide'); }, 200);"
+          )
+        )
+      ),
+
+      # 3. Footer / Attribution
+      shiny::div(
+        class = "splash-footer",
+        shiny::fluidRow(
+          shiny::column(
+            6,
+            shiny::tags$strong("Questions or Comments?"),
+            shiny::br(),
+            shiny::a(
+              href = "mailto:analytics@wfrc.utah.gov",
+              shiny::icon("envelope"),
+              " WFRC Analytics Team (analytics@wfrc.utah.gov)",
+              style = "color: #233A57; text-decoration: none;"
+            )
+          ),
+          shiny::column(
+            6,
+            style = "text-align: right;",
+            shiny::span("Built off the Weber Housing Location Explorer."),
+            shiny::br(),
+            shiny::a(
+              "View Methodology Story Map",
+              href = "http://bit.ly/weberhousing",
+              target = "_blank",
+              style = "color: #377EB8; font-weight: bold;"
+            )
+          )
+        )
+      )
+    )
+  ))
+
+  # Close Modal Observer
+  shiny::observeEvent(input$close_splash, {
+    shiny::removeModal()
+  })
+
+  # --- MAIN APP LOGIC ---
+
   all_sliders <- names(layer_defs)
 
   shiny::observeEvent(input$reset_all, {
