@@ -188,7 +188,6 @@ bc_map <- c(
 )
 
 # --- LAYER CONFIGURATION ---
-# Defines URL, Query, Geometry Type, and Color for each factor
 layer_defs <- list(
   # Places
   "w_CM" = list(
@@ -198,19 +197,19 @@ layer_defs <- list(
     color = "#a62966"
   ),
   "w_CU" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/1",
     query = "CenterType = 'Urban Center'",
     type = "polygon",
     color = "#e8572d"
   ),
   "w_CC" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/2",
     query = "CenterType = 'City Center'",
     type = "polygon",
     color = "#f3a13e"
   ),
   "w_CN" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/3",
     query = "CenterType = 'Neighborhood Center'",
     type = "polygon",
     color = "#f8dc26"
@@ -243,7 +242,7 @@ layer_defs <- list(
   ),
   "w_TA" = list(
     url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
-    query = "Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(1C)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%Trail%'",
+    query = "Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%(2C)%' or Facility1 like '%Trail%'",
     type = "line",
     color = "#2ca25f"
   ),
@@ -261,7 +260,6 @@ layer_defs <- list(
     color = "#377EB8"
   ),
   "w_AE" = list(
-    # Special Case: Two URLs for Education
     urls = c(
       "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0",
       "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0"
@@ -290,7 +288,7 @@ layer_defs <- list(
   )
 )
 
-# --- HELPER: Slider with shinyjs Icon Toggle (NO Checkbox) ---
+# --- HELPER: Slider with shinyjs Icon Toggle ---
 sliderWithLayer <- function(inputId, label) {
   shiny::tagList(
     shiny::div(
@@ -346,33 +344,19 @@ ui <- bslib::page_navbar(
     shinyWidgets::chooseSliderSkin("Flat", color = "#2c3e50"),
     tags$style(shiny::HTML(
       "
-      /* TYPOGRAPHY */
       body { font-family: Arial, 'Open Sans', sans-serif; }
       h1, h2, h3, h4, h5 { font-family: 'Oswald', sans-serif; font-weight: 700; color: #233A57; text-transform: uppercase; }
-
-      /* NAVBAR */
       .navbar { background-color: #233A57 !important; padding: 0px 15px !important; min-height: 40px !important; height: auto !important; }
       .navbar > .container-fluid { padding: 7.5px 0 !important; min-height: 45px !important; display: flex; align-items: center; }
       .navbar-brand { font-family: 'Oswald', sans-serif; font-weight: 700; color: white !important; font-size: 1.5rem; text-transform: uppercase; padding: 0 !important; margin: 0 !important; display: flex; align-items: center; height: 40px; }
       .navbar-nav { display: none !important; }
-
-      /* CONTROLS */
-      .control-label, .shiny-input-container label, .step-header {
-        font-family: 'Oswald', sans-serif; font-weight: 500; color: #233A57; text-transform: uppercase; font-size: 1rem;
-      }
-      .accordion-button {
-        font-family: 'Oswald', sans-serif; font-weight: 500; color: #5a87c6; text-transform: uppercase; font-size: 0.9rem !important;
-      }
-      .accordion-body .control-label {
-        font-size: 0.85rem !important; color: #444;
-      }
+      .control-label, .shiny-input-container label, .step-header { font-family: 'Oswald', sans-serif; font-weight: 500; color: #233A57; text-transform: uppercase; font-size: 1rem; }
+      .accordion-button { font-family: 'Oswald', sans-serif; font-weight: 500; color: #5a87c6; text-transform: uppercase; font-size: 0.9rem !important; }
+      .accordion-body .control-label { font-size: 0.85rem !important; color: #444; }
       .card-header .form-group { margin: 0 !important; }
-
-      /* LAYER TOGGLE ICON */
       .layer-toggle-btn { color: #ccc; cursor: pointer; font-size: 1.1rem; transition: color 0.3s; margin-left: 8px; }
       .layer-toggle-btn:hover { color: #5a87c6; }
       .layer-toggle-btn.active { color: #2c3e50; }
-
       .maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }
       .shiny-input-container { width: 100% !important; margin-bottom: 0px !important; }
       .form-group { margin-bottom: 5px !important; }
@@ -391,7 +375,6 @@ ui <- bslib::page_navbar(
       options = list(`actions-box` = TRUE, `live-search` = TRUE),
       multiple = TRUE
     ),
-
     shinyWidgets::pickerInput(
       "land_use_group",
       "Step 2: Filter by Land Use (Optional)",
@@ -399,7 +382,6 @@ ui <- bslib::page_navbar(
       selected = "All Land Uses",
       multiple = TRUE
     ),
-
     tags$div(
       class = "mb-2",
       tags$div(
@@ -408,13 +390,11 @@ ui <- bslib::page_navbar(
       ),
       tags$p(
         HTML(
-          "Please indicate your priority level for each of the following measures of accessibility.<br>
-        Toggle layers using the icon on the right."
+          "Please indicate your priority level for each of the following measures of accessibility.<br>Toggle layers using the icon on the right."
         ),
         style = "font-size: 0.9em; color: #6c757d; margin-top: 5px;"
       )
     ),
-
     bslib::accordion(
       open = FALSE,
       bslib::accordion_panel(
@@ -460,7 +440,6 @@ ui <- bslib::page_navbar(
         class = "btn-outline-primary w-50 btn-sm"
       )
     ),
-
     shiny::hr(),
     shinyWidgets::materialSwitch(
       "oz_filter",
@@ -475,18 +454,49 @@ ui <- bslib::page_navbar(
     bslib::card(
       full_screen = TRUE,
       bslib::card_header(
+        # Use justify-content-between to push items to far edges
         class = "d-flex justify-content-between align-items-center w-100",
+
+        # Left Side (Title)
         shiny::span(
           "Housing Accessibility Map",
           style = "font-family: 'Oswald'; font-size: 1.5rem; color: #233A57;"
         ),
-        shiny::div(shinyWidgets::materialSwitch(
-          "map_3d",
-          "3D View",
-          value = TRUE,
-          status = "primary",
-          inline = TRUE
-        ))
+
+        # Right Side (Controls Container)
+        shiny::div(
+          # Force Flex layout, align center, right align content, gap, MARGIN-LEFT: AUTO
+          style = "display: flex; align-items: center; justify-content: flex-end; gap: 15px; margin-left: auto;",
+
+          # Z-Scale Input Group (HORIZONTAL)
+          shiny::div(
+            style = "display: flex; align-items: center; gap: 8px;",
+            # UPDATED: font-size set to 1rem to match 3D View text
+            tags$label(
+              "Z-SCALE:",
+              `for` = "z_mult",
+              class = "control-label",
+              style = "margin-bottom: 0px; white-space: nowrap; font-size: 1rem; font-weight: 700; color: #233A57;"
+            ),
+            shiny::numericInput(
+              "z_mult",
+              label = NULL,
+              value = 2,
+              min = 0.5,
+              step = 0.5,
+              width = "65px"
+            )
+          ),
+
+          # 3D Toggle
+          shinyWidgets::materialSwitch(
+            "map_3d",
+            "3D View",
+            value = TRUE,
+            status = "primary",
+            inline = TRUE
+          )
+        )
       ),
       mapgl::maplibreOutput("map", height = "100%")
     )
@@ -506,6 +516,10 @@ server <- function(input, output, session) {
     for (id in all_sliders) {
       shiny::updateSliderInput(session, id, value = 1)
     }
+  })
+
+  shiny::observe({
+    shinyjs::toggleState("z_mult", condition = input$map_3d)
   })
 
   target_bc_codes <- shiny::reactive({
@@ -537,22 +551,15 @@ server <- function(input, output, session) {
         df[[c]][is.na(df[[c]])] <- 0
       }
 
-      # FIX: Drop geometry for math operations to prevent errors
       df_calc <- sf::st_drop_geometry(df)
       weighted_sum <- rowSums(
         df_calc[, cols, drop = FALSE] *
           weights[col(df_calc[, cols, drop = FALSE])]
       )
-
       df$score <- if (total_weight == 0) 0 else weighted_sum / total_weight
-
       df$bc_name <- bc_map[df$BC]
       df$bc_name[is.na(df$bc_name)] <- "Unknown"
 
-      # --- Tooltip Generation Using Layer Config Colors ---
-      # This ensures exact matches between Tooltip Bars and Map Symbols
-
-      # Retrieve colors dynamically
       c_ac <- layer_defs$w_AC$color
       c_ah <- layer_defs$w_AH$color
       c_ae <- layer_defs$w_AE$color
@@ -562,7 +569,6 @@ server <- function(input, output, session) {
       c_tt <- layer_defs$w_TT$color
       c_tf <- layer_defs$w_TF$color
       c_ta <- layer_defs$w_TA$color
-
       MAX_H <- 40
 
       df$tooltip_html <- paste0(
@@ -650,7 +656,6 @@ server <- function(input, output, session) {
     return(df)
   })
 
-  # Initialize Map - Load sources
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
       style = mapgl::carto_style("positron"),
@@ -658,27 +663,21 @@ server <- function(input, output, session) {
       zoom = 10,
       pitch = 45
     )
-
-    # Pre-load Sources
     for (lid in names(layer_defs)) {
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
-
       for (i in seq_along(urls)) {
         q <- utils::URLencode(def$query)
         full_url <- paste0(
           urls[i],
           "/query?where=",
           q,
-          # "&resultRecordCount=3000",
           "&outFields=*&f=geojson"
         )
         suffix <- if (length(urls) > 1) paste0("_", i) else ""
-        source_id <- paste0("src_", lid, suffix)
-
         m <- mapgl::add_source(
           m,
-          id = source_id,
+          id = paste0("src_", lid, suffix),
           type = "geojson",
           data = full_url
         )
@@ -687,7 +686,6 @@ server <- function(input, output, session) {
     m
   })
 
-  # --- Dynamic Layer Toggles ---
   layer_states <- shiny::reactiveValues()
   for (lid in names(layer_defs)) {
     layer_states[[lid]] <- FALSE
@@ -696,7 +694,6 @@ server <- function(input, output, session) {
   lapply(names(layer_defs), function(lid) {
     shiny::observeEvent(input[[paste0("toggle_", lid)]], {
       layer_states[[lid]] <- !layer_states[[lid]]
-
       if (layer_states[[lid]]) {
         shinyjs::addClass(id = paste0("btn_", lid), class = "active")
       } else {
@@ -713,7 +710,6 @@ server <- function(input, output, session) {
         layer_id <- paste0("lay_", lid, suffix)
 
         if (layer_states[[lid]]) {
-          # ADD LAYER (Defaults to TOP of stack)
           if (def$type == "polygon") {
             proxy |>
               mapgl::add_fill_layer(
@@ -737,7 +733,6 @@ server <- function(input, output, session) {
                 line_width = 2
               )
           } else if (def$type == "point") {
-            # Symbol as Circle with matching color
             proxy |>
               mapgl::add_circle_layer(
                 id = layer_id,
@@ -749,7 +744,6 @@ server <- function(input, output, session) {
               )
           }
         } else {
-          # REMOVE LAYER
           proxy |> mapgl::clear_layer(layer_id)
           if (def$type == "polygon") {
             proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
@@ -767,6 +761,13 @@ server <- function(input, output, session) {
 
     if (nrow(dat) > 0) {
       if (input$map_3d) {
+        # --- DYNAMIC EXTRUSION LOGIC ---
+        extrusion_val <- if (is.numeric(input$z_mult)) {
+          input$z_mult * 1000
+        } else {
+          2000
+        }
+
         proxy |>
           mapgl::add_fill_extrusion_layer(
             "h3_layer_3d",
@@ -779,7 +780,7 @@ server <- function(input, output, session) {
             fill_extrusion_height = mapgl::interpolate(
               column = "score",
               values = c(0, 1),
-              stops = c(0, 2000)
+              stops = c(0, extrusion_val)
             ),
             fill_extrusion_opacity = 0.9,
             tooltip = "tooltip_html"
