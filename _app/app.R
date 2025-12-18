@@ -454,47 +454,58 @@ ui <- bslib::page_navbar(
     bslib::card(
       full_screen = TRUE,
       bslib::card_header(
-        # Use justify-content-between to push items to far edges
-        class = "d-flex justify-content-between align-items-center w-100",
+        # 1. Main Header Container: Flex row, vertically centered
+        class = "d-flex align-items-center w-100",
 
-        # Left Side (Title)
+        # 2. Left Side (Title)
+        # 'me-auto' (margin-end: auto) pushes all subsequent items (the controls) to the far right
         shiny::span(
           "Housing Accessibility Map",
+          class = "me-auto",
           style = "font-family: 'Oswald'; font-size: 1.5rem; color: #233A57;"
         ),
 
-        # Right Side (Controls Container)
+        # 3. Right Side (Controls Container)
         shiny::div(
-          # Force Flex layout, align center, right align content, gap, MARGIN-LEFT: AUTO
-          style = "display: flex; align-items: center; justify-content: flex-end; gap: 15px; margin-left: auto;",
+          class = "d-flex align-items-center",
+          style = "gap: 20px;", # Adds space between Z-Scale and 3D Switch
 
-          # Z-Scale Input Group (HORIZONTAL)
+          # --- Z-Scale Input Group ---
           shiny::div(
-            style = "display: flex; align-items: center; gap: 8px;",
-            # UPDATED: font-size set to 1rem to match 3D View text
+            class = "d-flex align-items-center",
+            style = "gap: 8px;",
             tags$label(
               "Z-SCALE:",
               `for` = "z_mult",
-              class = "control-label",
-              style = "margin-bottom: 0px; white-space: nowrap; font-size: 1rem; font-weight: 700; color: #233A57;"
+              class = "control-label m-0",
+              style = "font-size: 1rem; font-weight: 700; color: #233A57; white-space: nowrap;"
             ),
-            shiny::numericInput(
-              "z_mult",
-              label = NULL,
-              value = 2,
-              min = 0.5,
-              step = 0.5,
-              width = "65px"
+            # CRITICAL FIX: Wrap input in a fixed-width div.
+            # Your global CSS forces inputs to 100% width. By setting this wrapper to 70px,
+            # the 100% fills only this wrapper, preventing the "gap".
+            shiny::div(
+              style = "width: 70px;",
+              shiny::numericInput(
+                "z_mult",
+                label = NULL,
+                value = 2,
+                min = 0.5,
+                step = 0.5
+              )
             )
           ),
 
-          # 3D Toggle
-          shinyWidgets::materialSwitch(
-            "map_3d",
-            "3D View",
-            value = TRUE,
-            status = "primary",
-            inline = TRUE
+          # --- 3D Toggle ---
+          # Wrap in a div to ensure it doesn't get stretched by flexbox
+          shiny::div(
+            style = "white-space: nowrap;",
+            shinyWidgets::materialSwitch(
+              "map_3d",
+              "3D View",
+              value = TRUE,
+              status = "primary",
+              inline = TRUE
+            )
           )
         )
       ),
