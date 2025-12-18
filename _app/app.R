@@ -239,26 +239,26 @@ layer_defs <- list(
   ),
   "w_TF" = list(
     url = "https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0",
-    query = "1=1",
+    query = "exitnbr IS NULL Or exitnbr IN ('002', '1', '10', '102', '104', '11', '111', '113', '114', '115', '117', '118', '12', '120', '121', '124', '125', '126', '127', '128', '129', '13', '130', '131', '132', '133', '134', '137', '14', '15', '15A', '15B', '15C', '16', '17', '18', '2', '20', '21', '22', '23', '242', '244', '248', '25', '250', '253', '257', '26', '260', '261', '263', '265', '269', '27', '271', '272', '273', '275', '276', '278', '279', '282', '284', '288', '289', '29', '291', '292', '293', '295', '297', '298', '3', '300', '301', '303', '304', '305', '305A', '305B', '305C', '305D', '306', '307', '308', '309', '310', '311', '312', '313', '314', '315', '316', '317', '319', '321', '322', '324', '325', '328', '330', '331', '332', '334', '335', '338', '339', '340', '341', '342', '343', '344', '346', '349', '351', '357', '362', '363', '365', '372', '395', '396', '397', '4', '404', '405', '5', '6', '7', '70', '8', '81', '85', '87', '9')",
     type = "point",
     color = "#000000"
   ),
   "w_TA" = list(
     url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
-    query = "Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%(2C)%' or Facility1 like '%Trail%'",
+    query = "(Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%(2C)%' or Facility1 like '%Trail%') AND COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'MORGAN', 'TOOELE', 'UTAH', 'SUMMIT', 'WASATCH')",
     type = "line",
     color = "#2ca25f"
   ),
   # Necessities
   "w_AC" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Child_Care_Centers/FeatureServer/0",
-    query = "1=1",
+    query = "COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'MORGAN', 'TOOELE', 'UTAH', 'SUMMIT', 'WASATCH')",
     type = "point",
     color = "#E41A1C"
   ),
   "w_AH" = list(
     url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0",
-    query = "1=1",
+    query = "COUNTY IN ('Box Elder', 'Weber', 'Davis', 'Salt Lake', 'Morgan', 'Tooele', 'Utah', 'Summit', 'Wasatch')",
     type = "point",
     color = "#377EB8"
   ),
@@ -279,7 +279,7 @@ layer_defs <- list(
   ),
   "w_AM" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Community_Centers/FeatureServer/0",
-    query = "1=1",
+    query = "County IN ('Box Elder', 'Weber', 'Davis', 'Salt Lake', 'Morgan', 'Tooele', 'Utah', 'Summit', 'Wasatch')",
     type = "point",
     color = "#FF7F00"
   ),
@@ -289,6 +289,25 @@ layer_defs <- list(
     type = "polygon",
     color = "#A65628"
   )
+)
+
+# --- NAME MAPPING ---
+layer_names <- c(
+  "w_CM" = "Metropolitan Centers",
+  "w_CU" = "Urban Centers",
+  "w_CC" = "City Centers",
+  "w_CN" = "Neighborhood Centers",
+  "w_AA" = "Auto Access to Jobs",
+  "w_AT" = "Transit Access to Jobs",
+  "w_TT" = "Transit Stops",
+  "w_TF" = "Freeway Exits",
+  "w_TA" = "Active Transportation",
+  "w_AC" = "Childcare Centers",
+  "w_AH" = "Healthcare Facilities",
+  "w_AE" = "Education Institutions",
+  "w_AG" = "Grocery Stores",
+  "w_AM" = "Community Centers",
+  "w_AP" = "10-min Walk to Parks"
 )
 
 # --- HELPER: Slider with shinyjs Icon Toggle ---
@@ -335,7 +354,6 @@ ui <- bslib::page_navbar(
     "Wasatch Front Housing ATO Calculator"
   ),
   theme = bslib::bs_theme(preset = "flatly"),
-
   header = tags$head(
     useShinyjs(),
     tags$link(
@@ -365,95 +383,22 @@ ui <- bslib::page_navbar(
       .maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }
       .shiny-input-container { width: 100% !important; margin-bottom: 0px !important; }
       .form-group { margin-bottom: 5px !important; }
-
-      /* --- SPLASH SCREEN STYLES --- */
-      .modal-content {
-        border: none;
-        border-radius: 12px;
-        box-shadow: 0 15px 35px rgba(0,0,0,0.25);
-        overflow: hidden;
-      }
-      .splash-header {
-        background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%);
-        color: white;
-        padding: 30px 25px;
-        text-align: center;
-        position: relative;
-      }
-      .splash-header h2 {
-        font-family: 'Oswald', sans-serif;
-        color: white;
-        margin: 0;
-        letter-spacing: 1px;
-      }
-      .splash-body {
-        padding: 25px 35px;
-        font-family: 'Open Sans', sans-serif;
-        color: #444;
-      }
-      .feature-grid {
-        display: flex;
-        gap: 20px;
-        margin: 25px 0;
-        text-align: center;
-      }
-      .feature-item {
-        flex: 1;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 8px;
-        transition: transform 0.2s;
-      }
-      .feature-item:hover {
-        transform: translateY(-3px);
-        background: #f0f4f8;
-      }
-      .feature-icon {
-        font-size: 1.8rem;
-        color: #e8572d; /* Orange accent */
-        margin-bottom: 10px;
-      }
-      .feature-title {
-        font-weight: 700;
-        font-size: 0.9rem;
-        text-transform: uppercase;
-        color: #233A57;
-        margin-bottom: 5px;
-      }
-      .instruction-box {
-        background-color: #eef6fc;
-        border-left: 4px solid #377EB8;
-        padding: 15px;
-        margin: 20px 0;
-        font-size: 0.95rem;
-        line-height: 1.5;
-      }
-      .splash-footer {
-        background-color: #f1f1f1;
-        padding: 15px 35px;
-        font-size: 0.85rem;
-        border-top: 1px solid #ddd;
-      }
-      .btn-get-started {
-        background-color: #233A57;
-        color: white;
-        font-family: 'Oswald', sans-serif;
-        font-size: 1.1rem;
-        padding: 10px 40px;
-        border-radius: 30px;
-        border: none;
-        transition: all 0.3s;
-        width: 100%;
-      }
-      .btn-get-started:hover {
-        background-color: #e8572d; /* Orange hover */
-        color: white;
-        transform: scale(1.02);
-      }
-      "
+      .modal-content { border: none; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); overflow: hidden; }
+      .splash-header { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); color: white; padding: 30px 25px; text-align: center; position: relative; }
+      .splash-header h2 { font-family: 'Oswald', sans-serif; color: white; margin: 0; letter-spacing: 1px; }
+      .splash-body { padding: 25px 35px; font-family: 'Open Sans', sans-serif; color: #444; }
+      .feature-grid { display: flex; gap: 20px; margin: 25px 0; text-align: center; }
+      .feature-item { flex: 1; padding: 15px; background: #f8f9fa; border-radius: 8px; transition: transform 0.2s; }
+      .feature-item:hover { transform: translateY(-3px); background: #f0f4f8; }
+      .feature-icon { font-size: 1.8rem; color: #e8572d; margin-bottom: 10px; }
+      .feature-title { font-weight: 700; font-size: 0.9rem; text-transform: uppercase; color: #233A57; margin-bottom: 5px; }
+      .instruction-box { background-color: #eef6fc; border-left: 4px solid #377EB8; padding: 15px; margin: 20px 0; font-size: 0.95rem; line-height: 1.5; }
+      .splash-footer { background-color: #f1f1f1; padding: 15px 35px; font-size: 0.85rem; border-top: 1px solid #ddd; }
+      .btn-get-started { background-color: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.1rem; padding: 10px 40px; border-radius: 30px; border: none; transition: all 0.3s; width: 100%; }
+      .btn-get-started:hover { background-color: #e8572d; color: white; transform: scale(1.02); }
+    "
     ))
   ),
-
   sidebar = bslib::sidebar(
     width = 350,
     title = NULL,
@@ -470,7 +415,7 @@ ui <- bslib::page_navbar(
       "Step 2: Filter by Land Use (Optional)",
       choices = names(lu_mappings),
       selected = "All Land Uses",
-      multiple = TRUE
+      multiple = FALSE
     ),
     tags$div(
       class = "mb-2",
@@ -538,29 +483,20 @@ ui <- bslib::page_navbar(
       status = "primary"
     )
   ),
-
   bslib::nav_panel(
     "",
     bslib::card(
       full_screen = TRUE,
       bslib::card_header(
-        # 1. Main Header Container: Flex row, vertically centered
         class = "d-flex align-items-center w-100",
-
-        # 2. Left Side (Title)
-        # 'me-auto' pushes all subsequent items (the controls) to the far right
         shiny::span(
           "Housing Accessibility Map",
           class = "me-auto",
           style = "font-family: 'Oswald'; font-size: 1.5rem; color: #233A57;"
         ),
-
-        # 3. Right Side (Controls Container)
         shiny::div(
           class = "d-flex align-items-center",
-          style = "gap: 20px;", # Adds space between Z-Scale and 3D Switch
-
-          # --- Z-Scale Input Group ---
+          style = "gap: 20px;",
           shiny::div(
             class = "d-flex align-items-center",
             style = "gap: 8px;",
@@ -570,7 +506,6 @@ ui <- bslib::page_navbar(
               class = "control-label m-0",
               style = "font-size: 1rem; font-weight: 700; color: #233A57; white-space: nowrap;"
             ),
-            # Fixed width wrapper to prevent 'width: 100%' expansion
             shiny::div(
               style = "width: 70px;",
               shiny::numericInput(
@@ -582,14 +517,12 @@ ui <- bslib::page_navbar(
               )
             )
           ),
-
-          # --- 3D Toggle ---
           shiny::div(
             style = "white-space: nowrap;",
             shinyWidgets::materialSwitch(
               "map_3d",
               "3D View",
-              value = TRUE,
+              value = FALSE,
               status = "primary",
               inline = TRUE
             )
@@ -611,137 +544,120 @@ server <- function(input, output, session) {
     easyClose = FALSE,
     size = "l",
     footer = NULL,
-
-    # Custom HTML Content
     shiny::div(
-      # 1. Hero Header
+      class = "splash-header",
       shiny::div(
-        class = "splash-header",
-        shiny::div(
-          style = "margin-bottom: 15px;",
-          shiny::img(src = "logo.png", style = "height: 60px; width: auto;")
-        ),
-        shiny::h2("Housing ATO Calculator")
+        style = "margin-bottom: 15px;",
+        shiny::img(src = "logo.png", style = "height: 60px; width: auto;")
       ),
-
-      # 2. Body Content
+      shiny::h2("Housing ATO Calculator")
+    ),
+    shiny::div(
+      class = "splash-body",
+      shiny::p(
+        "The Housing Access to Opportunities (ATO) Calculator is designed to assist housing and land use planning efforts across the Wasatch Front.",
+        style = "font-size: 1.1rem; text-align: center; margin-bottom: 20px;"
+      ),
       shiny::div(
-        class = "splash-body",
-        shiny::p(
-          "The Housing Access to Opportunities (ATO) Calculator is designed to assist housing and land use planning efforts across the Wasatch Front.",
-          style = "font-size: 1.1rem; text-align: center; margin-bottom: 20px;"
-        ),
-
-        # Three Pillars Icons
+        class = "feature-grid",
         shiny::div(
-          class = "feature-grid",
+          class = "feature-item",
+          shiny::div(class = "feature-icon", shiny::icon("comments")),
+          shiny::div(class = "feature-title", "Conversation Starter"),
           shiny::div(
-            class = "feature-item",
-            shiny::div(class = "feature-icon", shiny::icon("comments")),
-            shiny::div(class = "feature-title", "Conversation Starter"),
-            shiny::div(
-              "Facilitate discussions about housing needs.",
-              style = "font-size:0.8rem;"
-            )
-          ),
-          shiny::div(
-            class = "feature-item",
-            shiny::div(class = "feature-icon", shiny::icon("map-location-dot")),
-            shiny::div(class = "feature-title", "Visualization Tool"),
-            shiny::div(
-              "Explore spatial data interactively.",
-              style = "font-size:0.8rem;"
-            )
-          ),
-          shiny::div(
-            class = "feature-item",
-            shiny::div(class = "feature-icon", shiny::icon("chart-pie")),
-            shiny::div(class = "feature-title", "Data-Informed Guide"),
-            shiny::div(
-              "Plan based on access metrics.",
-              style = "font-size:0.8rem;"
-            )
+            "Facilitate discussions about housing needs.",
+            style = "font-size:0.8rem;"
           )
         ),
-
-        # How it works box
         shiny::div(
-          class = "instruction-box",
-          shiny::icon("circle-info"),
-          shiny::tags$strong(" How it works:"),
-          shiny::br(),
-          "1. Start by selecting your ",
-          shiny::tags$strong("community"),
-          " (one or more) from the sidebar.",
-          shiny::br(),
-          "2. Optionally, filter the map by specific ",
-          shiny::tags$strong("land use"),
-          " types.",
-          shiny::br(),
-          "3. Finally, adjust the sliders to ",
-          shiny::tags$strong("prioritize the accessibility factors"),
-          " that matter most to you.",
-          shiny::p(
-            "The tool will generate a heat map highlighting locations ranging from the ",
-            shiny::tags$strong("most accessibility"),
-            " to the ",
-            shiny::tags$strong("least accessibility"),
-            " based on your specific inputs.",
-            style = "margin-top: 8px; margin-bottom: 0;"
+          class = "feature-item",
+          shiny::div(class = "feature-icon", shiny::icon("map-location-dot")),
+          shiny::div(class = "feature-title", "Visualization Tool"),
+          shiny::div(
+            "Explore spatial data interactively.",
+            style = "font-size:0.8rem;"
           )
         ),
-
-        # Get Started Button
         shiny::div(
-          style = "text-align: center; margin-top: 25px;",
-          shiny::actionButton(
-            "close_splash",
-            "GET STARTED",
-            class = "btn-get-started",
-            onclick = "setTimeout(function(){ $('.modal').modal('hide'); }, 200);"
+          class = "feature-item",
+          shiny::div(class = "feature-icon", shiny::icon("chart-pie")),
+          shiny::div(class = "feature-title", "Data-Informed Guide"),
+          shiny::div(
+            "Plan based on access metrics.",
+            style = "font-size:0.8rem;"
           )
         )
       ),
-
-      # 3. Footer / Attribution
       shiny::div(
-        class = "splash-footer",
-        shiny::fluidRow(
-          shiny::column(
-            6,
-            shiny::tags$strong("Questions or Comments?"),
-            shiny::br(),
-            shiny::a(
-              href = "mailto:analytics@wfrc.utah.gov",
-              shiny::icon("envelope"),
-              " WFRC Analytics Team (analytics@wfrc.utah.gov)",
-              style = "color: #233A57; text-decoration: none;"
-            )
-          ),
-          shiny::column(
-            6,
-            style = "text-align: right;",
-            shiny::span("Built off the Weber Housing Location Explorer."),
-            shiny::br(),
-            shiny::a(
-              "View Methodology Story Map",
-              href = "http://bit.ly/weberhousing",
-              target = "_blank",
-              style = "color: #377EB8; font-weight: bold;"
-            )
+        class = "instruction-box",
+        shiny::icon("circle-info"),
+        shiny::tags$strong(" How it works:"),
+        shiny::br(),
+        "1. Start by selecting your ",
+        shiny::tags$strong("community"),
+        " (one or more) from the sidebar.",
+        shiny::br(),
+        "2. Optionally, filter the map by specific ",
+        shiny::tags$strong("land use"),
+        " types.",
+        shiny::br(),
+        "3. Finally, adjust the sliders to ",
+        shiny::tags$strong("prioritize the accessibility factors"),
+        " that matter most to you.",
+        shiny::p(
+          "The tool will generate a heat map highlighting locations ranging from the ",
+          shiny::tags$strong("most accessibility"),
+          " to the ",
+          shiny::tags$strong("least accessibility"),
+          " based on your specific inputs.",
+          style = "margin-top: 8px; margin-bottom: 0;"
+        )
+      ),
+      shiny::div(
+        style = "text-align: center; margin-top: 25px;",
+        shiny::actionButton(
+          "close_splash",
+          "GET STARTED",
+          class = "btn-get-started",
+          onclick = "setTimeout(function(){ $('.modal').modal('hide'); }, 200);"
+        )
+      )
+    ),
+    shiny::div(
+      class = "splash-footer",
+      shiny::fluidRow(
+        shiny::column(
+          6,
+          shiny::tags$strong("Questions or Comments?"),
+          shiny::br(),
+          shiny::a(
+            href = "mailto:analytics@wfrc.utah.gov",
+            shiny::icon("envelope"),
+            " WFRC Analytics Team (analytics@wfrc.utah.gov)",
+            style = "color: #233A57; text-decoration: none;"
+          )
+        ),
+        shiny::column(
+          6,
+          style = "text-align: right;",
+          shiny::span("Built off the Weber Housing Location Explorer."),
+          shiny::br(),
+          shiny::a(
+            "View Methodology Story Map",
+            href = "http://bit.ly/weberhousing",
+            target = "_blank",
+            style = "color: #377EB8; font-weight: bold;"
           )
         )
       )
     )
   ))
-
-  # Close Modal Observer
   shiny::observeEvent(input$close_splash, {
     shiny::removeModal()
   })
 
-  # --- MAIN APP LOGIC ---
-
+  # --- 1. STATE TRACKING ---
+  active_ref_layers <- shiny::reactiveVal(list())
   all_sliders <- names(layer_defs)
 
   shiny::observeEvent(input$reset_all, {
@@ -754,11 +670,31 @@ server <- function(input, output, session) {
       shiny::updateSliderInput(session, id, value = 1)
     }
   })
-
   shiny::observe({
     shinyjs::toggleState("z_mult", condition = input$map_3d)
   })
 
+  # --- HELPER: Update Layer Control ---
+  refresh_layer_control <- function(proxy, is_3d, ref_layers_list) {
+    heatmap_id <- if (is_3d) "h3_layer_3d" else "h3_layer_2d"
+    control_list <- list(
+      "Major Roads" = "lay_roads_tile",
+      "Heatmap" = heatmap_id
+    )
+    if (length(ref_layers_list) > 0) {
+      control_list <- c(control_list, ref_layers_list)
+    }
+
+    proxy |>
+      mapgl::clear_controls("layers") |>
+      mapgl::add_layers_control(
+        position = "top-right",
+        layers = control_list,
+        collapsible = TRUE
+      )
+  }
+
+  # --- 2. DATA PROCESSING ---
   target_bc_codes <- shiny::reactive({
     shiny::req(input$land_use_group)
     unique(unlist(lu_mappings[input$land_use_group]))
@@ -787,7 +723,6 @@ server <- function(input, output, session) {
         }
         df[[c]][is.na(df[[c]])] <- 0
       }
-
       df_calc <- sf::st_drop_geometry(df)
       weighted_sum <- rowSums(
         df_calc[, cols, drop = FALSE] *
@@ -816,8 +751,7 @@ server <- function(input, output, session) {
         "</div>",
         "<div style='font-size:12px; color:#666; margin-top:2px;'>Type: ",
         df$bc_name,
-        "</div>",
-        "</div>",
+        "</div></div>",
         "<div style='font-size:10px; font-weight:bold; color:#999; margin-bottom:4px;'>NECESSITIES</div>",
         "<div style='display: flex; gap: 6px; height: 55px; align-items: flex-end; justify-content: space-between; margin-bottom: 12px;'>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
@@ -886,20 +820,39 @@ server <- function(input, output, session) {
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ta,
         ";'><i class='fa-solid fa-bicycle'></i></div></div>",
-        "</div>",
-        "</div>"
+        "</div></div>"
       )
     }
     return(df)
   })
 
+  # --- 3. MAP INITIALIZATION ---
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
       style = mapgl::carto_style("positron"),
       center = c(-111.8910, 40.7608),
       zoom = 10,
-      pitch = 45
-    )
+      pitch = 0
+    ) |>
+      mapgl::add_raster_source(
+        id = "src_roads_tile",
+        tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+        tileSize = 256
+      ) |>
+      mapgl::add_raster_layer(
+        id = "lay_roads_tile",
+        source = "src_roads_tile",
+        raster_opacity = 0.9
+      ) |>
+      # Initial Layer Control (Just Roads)
+      mapgl::add_layers_control(
+        position = "top-right",
+        layers = list("Major Roads" = "lay_roads_tile"),
+        collapsible = TRUE
+      )
+
+    # CRITICAL FIX: Pre-load ALL data sources here.
+    # This prevents the "Source already exists" error when toggling layers on/off.
     for (lid in names(layer_defs)) {
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
@@ -912,17 +865,20 @@ server <- function(input, output, session) {
           "&outFields=*&f=geojson"
         )
         suffix <- if (length(urls) > 1) paste0("_", i) else ""
-        m <- mapgl::add_source(
-          m,
-          id = paste0("src_", lid, suffix),
-          type = "geojson",
-          data = full_url
-        )
+
+        # Add source immediately (but no layers yet)
+        m <- m |>
+          mapgl::add_source(
+            id = paste0("src_", lid, suffix),
+            type = "geojson",
+            data = full_url
+          )
       }
     }
     m
   })
 
+  # --- 4. REFERENCE LAYER TOGGLE LOGIC ---
   layer_states <- shiny::reactiveValues()
   for (lid in names(layer_defs)) {
     layer_states[[lid]] <- FALSE
@@ -931,6 +887,7 @@ server <- function(input, output, session) {
   lapply(names(layer_defs), function(lid) {
     shiny::observeEvent(input[[paste0("toggle_", lid)]], {
       layer_states[[lid]] <- !layer_states[[lid]]
+
       if (layer_states[[lid]]) {
         shinyjs::addClass(id = paste0("btn_", lid), class = "active")
       } else {
@@ -940,15 +897,22 @@ server <- function(input, output, session) {
       proxy <- mapgl::maplibre_proxy("map")
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
+      current_ids <- character()
 
       for (i in seq_along(urls)) {
         suffix <- if (length(urls) > 1) paste0("_", i) else ""
         source_id <- paste0("src_", lid, suffix)
         layer_id <- paste0("lay_", lid, suffix)
 
+        current_ids <- c(current_ids, layer_id)
+        if (def$type == "polygon") {
+          current_ids <- c(current_ids, paste0(layer_id, "_ol"))
+        }
+
         if (layer_states[[lid]]) {
+          # ADD LAYER (Source already exists from init)
           if (def$type == "polygon") {
-            proxy |>
+            proxy <- proxy |>
               mapgl::add_fill_layer(
                 id = layer_id,
                 source = source_id,
@@ -962,7 +926,7 @@ server <- function(input, output, session) {
                 line_width = 1
               )
           } else if (def$type == "line") {
-            proxy |>
+            proxy <- proxy |>
               mapgl::add_line_layer(
                 id = layer_id,
                 source = source_id,
@@ -970,7 +934,7 @@ server <- function(input, output, session) {
                 line_width = 2
               )
           } else if (def$type == "point") {
-            proxy |>
+            proxy <- proxy |>
               mapgl::add_circle_layer(
                 id = layer_id,
                 source = source_id,
@@ -980,16 +944,32 @@ server <- function(input, output, session) {
                 circle_stroke_color = "#fff"
               )
           }
+          proxy <- proxy |> mapgl::move_layer("lay_roads_tile")
         } else {
-          proxy |> mapgl::clear_layer(layer_id)
+          # REMOVE LAYER (Keep Source)
+          proxy <- proxy |> mapgl::clear_layer(layer_id)
           if (def$type == "polygon") {
-            proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
+            proxy <- proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
           }
         }
       }
+
+      # UPDATE ACTIVE LIST
+      current_list <- active_ref_layers()
+      human_name <- if (lid %in% names(layer_names)) layer_names[[lid]] else lid
+
+      if (layer_states[[lid]]) {
+        current_list[[human_name]] <- current_ids
+      } else {
+        current_list[[human_name]] <- NULL
+      }
+      active_ref_layers(current_list)
+
+      refresh_layer_control(proxy, shiny::isolate(input$map_3d), current_list)
     })
   })
 
+  # --- 5. HEATMAP RENDERER ---
   shiny::observe({
     dat <- filtered_data()
     proxy <- mapgl::maplibre_proxy("map") |>
@@ -998,14 +978,12 @@ server <- function(input, output, session) {
 
     if (nrow(dat) > 0) {
       if (input$map_3d) {
-        # --- DYNAMIC EXTRUSION LOGIC ---
         extrusion_val <- if (is.numeric(input$z_mult)) {
           input$z_mult * 1000
         } else {
           2000
         }
-
-        proxy |>
+        proxy <- proxy |>
           mapgl::add_fill_extrusion_layer(
             "h3_layer_3d",
             dat,
@@ -1024,7 +1002,7 @@ server <- function(input, output, session) {
           ) |>
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 45)
       } else {
-        proxy |>
+        proxy <- proxy |>
           mapgl::add_fill_layer(
             "h3_layer_2d",
             dat,
@@ -1038,6 +1016,18 @@ server <- function(input, output, session) {
           ) |>
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
       }
+
+      current_refs <- shiny::isolate(active_ref_layers())
+      if (length(current_refs) > 0) {
+        for (ref_ids in current_refs) {
+          for (rid in ref_ids) {
+            proxy <- proxy |> mapgl::move_layer(rid)
+          }
+        }
+      }
+      proxy <- proxy |> mapgl::move_layer("lay_roads_tile")
+
+      refresh_layer_control(proxy, input$map_3d, current_refs)
     }
   })
 }
