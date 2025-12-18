@@ -831,7 +831,7 @@ server <- function(input, output, session) {
     m <- mapgl::maplibre(
       style = mapgl::carto_style("positron"),
       center = c(-111.8910, 40.7608),
-      zoom = 10,
+      zoom = 8,
       pitch = 0
     ) |>
       mapgl::add_raster_source(
@@ -917,13 +917,13 @@ server <- function(input, output, session) {
                 id = layer_id,
                 source = source_id,
                 fill_color = def$color,
-                fill_opacity = 0.4
+                fill_opacity = 0.7
               ) |>
               mapgl::add_line_layer(
                 id = paste0(layer_id, "_ol"),
                 source = source_id,
                 line_color = def$color,
-                line_width = 1
+                line_width = 1.5
               )
           } else if (def$type == "line") {
             proxy <- proxy |>
