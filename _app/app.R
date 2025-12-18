@@ -391,7 +391,7 @@ ui <- bslib::page_navbar(
       options = list(`actions-box` = TRUE, `live-search` = TRUE),
       multiple = TRUE
     ),
-    shiny::hr(),
+
     shinyWidgets::pickerInput(
       "land_use_group",
       "Step 2: Filter by Land Use (Optional)",
@@ -399,7 +399,7 @@ ui <- bslib::page_navbar(
       selected = "All Land Uses",
       multiple = TRUE
     ),
-    shiny::hr(),
+
     tags$div(
       class = "mb-2",
       tags$div(
@@ -407,23 +407,11 @@ ui <- bslib::page_navbar(
         class = "step-header"
       ),
       tags$p(
-        "Toggle layers using the icon on the right.",
+        HTML(
+          "Please indicate your priority level for each of the following measures of accessibility.<br>
+        Toggle layers using the icon on the right."
+        ),
         style = "font-size: 0.9em; color: #6c757d; margin-top: 5px;"
-      )
-    ),
-    shiny::div(
-      class = "d-flex gap-2 justify-content-between mb-2",
-      shiny::actionButton(
-        "reset_all",
-        "Reset All (0)",
-        icon = shiny::icon("ban"),
-        class = "btn-outline-secondary w-50 btn-sm"
-      ),
-      shiny::actionButton(
-        "max_all",
-        "Max All (1)",
-        icon = shiny::icon("check-double"),
-        class = "btn-outline-primary w-50 btn-sm"
       )
     ),
 
@@ -457,6 +445,22 @@ ui <- bslib::page_navbar(
         sliderWithLayer("w_AP", "10-min Walk to Parks")
       )
     ),
+    shiny::div(
+      class = "d-flex gap-2 justify-content-between mb-2",
+      shiny::actionButton(
+        "reset_all",
+        "Reset All (0)",
+        icon = shiny::icon("ban"),
+        class = "btn-outline-secondary w-50 btn-sm"
+      ),
+      shiny::actionButton(
+        "max_all",
+        "Max All (1)",
+        icon = shiny::icon("check-double"),
+        class = "btn-outline-primary w-50 btn-sm"
+      )
+    ),
+
     shiny::hr(),
     shinyWidgets::materialSwitch(
       "oz_filter",
