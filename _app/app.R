@@ -618,8 +618,8 @@ server <- function(input, output, session) {
       shiny::div(
         class = "splash-header",
         shiny::div(
-          style = "font-size: 3rem; margin-bottom: 10px;",
-          shiny::icon("house-chimney-user")
+          style = "margin-bottom: 15px;",
+          shiny::img(src = "logo.png", style = "height: 60px; width: auto;")
         ),
         shiny::h2("Housing ATO Calculator")
       ),
