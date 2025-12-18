@@ -165,32 +165,54 @@ lu_mappings <- list(
   )
 )
 
+# Full names for Land Use codes
+bc_map <- c(
+  "AG" = "Agriculture",
+  "EM" = "Empty/Vacant",
+  "OS" = "Open Space",
+  "CH" = "Church/Religious",
+  "SF" = "Single Family",
+  "MF" = "Multi-Family",
+  "GQ" = "Group Quarters",
+  "GO" = "Government",
+  "ED" = "Education",
+  "HE" = "Health",
+  "RE" = "Retail",
+  "OF" = "Office",
+  "IN" = "Industrial",
+  "OT" = "Other",
+  "UT" = "Utilities",
+  "NB" = "No Build",
+  "NO" = "None"
+)
+
 # 2. UI
 ui <- page_navbar(
   title = div(
-    style = "display: flex; align-items: center;", # Flex align for logo/text
+    style = "display: flex; align-items: center;",
     img(src = "logo.png", style = "height:35px; margin-right:10px;"),
     "Wasatch Front Housing ATO Calculator"
   ),
   theme = bs_theme(preset = "flatly"),
 
   header = tags$head(
-    # 1. Google Fonts
+    # 1. Fonts
     tags$link(
       rel = "stylesheet",
       href = "https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;700&display=swap"
     ),
-
-    # 2. Slider Skin
+    # 2. FontAwesome
+    tags$link(
+      rel = "stylesheet",
+      href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
+    ),
+    # 3. Slider Skin
     chooseSliderSkin("Flat", color = "#2c3e50"),
-
-    # 3. Custom CSS
+    # 4. Custom CSS
     tags$style(HTML(
       "
-      /* --- TYPOGRAPHY --- */
-      body {
-        font-family: Arial, 'Open Sans', sans-serif;
-      }
+      /* TYPOGRAPHY */
+      body { font-family: Arial, 'Open Sans', sans-serif; }
       h1, h2, h3, h4, h5, .h1, .h2, .h3, .h4, .h5 {
         font-family: 'Oswald', sans-serif;
         font-weight: 700;
@@ -198,46 +220,36 @@ ui <- page_navbar(
         text-transform: uppercase;
       }
 
-      /* --- NAVBAR STYLING --- */
+      /* NAVBAR */
       .navbar {
         background-color: #233A57 !important;
-        /* ZERO padding, Min height removed to allow tight fit */
-        padding: 7.5px 15px !important;
+        padding: 0px 15px !important;
         min-height: 40px !important;
         height: auto !important;
       }
-
-      /* Force the inner container to have no padding */
       .navbar > .container-fluid {
-         padding-top: 7.5 !important;
-         padding-bottom: 7.5 !important;
+         padding-top: 7.5px !important;
+         padding-bottom: 7.5px !important;
          min-height: 45px !important;
          display: flex;
          align-items: center;
       }
-
-      /* Navbar Brand (Title/Logo Area) */
       .navbar-brand {
         font-family: 'Oswald', sans-serif;
         font-weight: 700;
         color: white !important;
         font-size: 1.5rem;
         text-transform: uppercase;
-        /* Remove default bootstrap padding/margins */
         padding-top: 0px !important;
         padding-bottom: 0px !important;
         margin-right: 0 !important;
         display: flex;
         align-items: center;
-        height: 40px; /* Explicit height matching min-height */
+        height: 40px;
       }
+      .navbar-nav { display: none !important; }
 
-      /* HIDE NAVBAR TABS (User Request) */
-      .navbar-nav {
-        display: none !important;
-      }
-
-      /* --- SIDEBAR & INPUTS --- */
+      /* CONTROLS */
       .control-label, .shiny-input-container label, .step-header {
         font-family: 'Oswald', sans-serif;
         font-weight: 500;
@@ -245,8 +257,6 @@ ui <- page_navbar(
         text-transform: uppercase;
         font-size: 1rem;
       }
-
-      /* Accordion Headers */
       .accordion-button {
         font-family: 'Oswald', sans-serif;
         font-weight: 500;
@@ -254,36 +264,25 @@ ui <- page_navbar(
         text-transform: uppercase;
         font-size: 0.9rem !important;
       }
-
-      /* Slider Labels inside Accordion */
       .accordion-body .control-label {
         font-size: 0.85rem !important;
         color: #444;
       }
-
-      /* --- ALIGNMENT FIXES --- */
       .card-header .form-group {
         margin-bottom: 0 !important;
         margin-top: 0 !important;
       }
-
-      /* Button Styling */
       .btn-outline-secondary, .btn-outline-primary {
         font-family: 'Oswald', sans-serif;
         text-transform: uppercase;
         font-weight: 600;
       }
-
-      /* Tooltip */
       .maplibregl-popup-content {
         padding: 0 !important;
         border-radius: 4px;
         overflow: hidden;
       }
-
-      .shiny-input-container {
-        width: 100% !important;
-      }
+      .shiny-input-container { width: 100% !important; }
     "
     ))
   ),
@@ -301,13 +300,17 @@ ui <- page_navbar(
       multiple = TRUE
     ),
 
+    hr(),
+
     pickerInput(
       "land_use_group",
       "Step 2: Filter by Land Use (Optional)",
       choices = names(lu_mappings),
       selected = "All Land Uses",
-      multiple = FALSE
+      multiple = TRUE
     ),
+
+    hr(),
 
     tags$div(
       class = "mb-2",
@@ -339,7 +342,6 @@ ui <- page_navbar(
 
     accordion(
       open = FALSE,
-
       accordion_panel(
         "Places (Centers)",
         sliderInput("w_CM", "Metropolitan Centers", 0, 1, 0.5, step = 0.1),
@@ -347,20 +349,17 @@ ui <- page_navbar(
         sliderInput("w_CC", "City Centers", 0, 1, 0.5, step = 0.1),
         sliderInput("w_CN", "Neighborhood Centers", 0, 1, 0.5, step = 0.1)
       ),
-
       accordion_panel(
         "Employment",
         sliderInput("w_AA", "Auto Access to Jobs", 0, 1, 0.5, step = 0.1),
         sliderInput("w_AT", "Transit Access to Jobs", 0, 1, 0.5, step = 0.1)
       ),
-
       accordion_panel(
         "Transportation",
         sliderInput("w_TT", "Transit Stops", 0, 1, 0.5, step = 0.1),
         sliderInput("w_TF", "Freeway Exits", 0, 1, 0.5, step = 0.1),
         sliderInput("w_TA", "Active Transportation", 0, 1, 0.5, step = 0.1)
       ),
-
       accordion_panel(
         "Necessities",
         sliderInput("w_AC", "Childcare Centers", 0, 1, 0.5, step = 0.1),
@@ -373,7 +372,6 @@ ui <- page_navbar(
     ),
 
     hr(),
-
     materialSwitch(
       "oz_filter",
       "Limit to Opportunity Zones (OZ)",
@@ -478,7 +476,10 @@ server <- function(input, output, session) {
     if (nrow(df) > 0) {
       cols <- names(weights)
       for (c in cols) {
-        if (!c %in% names(df)) df[[c]] <- 0
+        if (!c %in% names(df)) {
+          df[[c]] <- 0
+        }
+        df[[c]][is.na(df[[c]])] <- 0
       }
 
       weighted_sum <-
@@ -504,70 +505,150 @@ server <- function(input, output, session) {
         df$score <- weighted_sum / total_weight
       }
 
+      # FIX: Map BC code to Name
+      df$bc_name <- bc_map[df$BC]
+      df$bc_name[is.na(df$bc_name)] <- "Unknown"
+
       # --- CREATE TOOLTIP HTML ---
+      # Colors
       c_ac <- "#E41A1C"
       c_ah <- "#377EB8"
       c_ae <- "#4DAF4A"
       c_ag <- "#984EA3"
       c_am <- "#FF7F00"
       c_ap <- "#A65628"
+      c_tt <- "#666666"
+      c_tf <- "#000000"
+      c_ta <- "#2ca25f"
+
+      # Constants for bar calc
+      MAX_H <- 40 # Max bar height in pixels
 
       df$tooltip_html <- paste0(
-        "<div style='font-family: sans-serif; padding: 10px; background: white; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);'>",
-        "<div style='margin-bottom:8px; font-weight:bold; font-size:14px; border-bottom:1px solid #eee; padding-bottom:4px; color:#333;'>",
-        "Score: ",
+        "<div style='font-family: sans-serif; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); min-width: 200px;'>",
+
+        # HEADER
+        "<div style='margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:6px;'>",
+        "<div style='font-weight:bold; font-size:16px; color:#233A57;'>Score: ",
         round(df$score, 2),
         "</div>",
-        "<div style='display: flex; gap: 6px; height: 60px; align-items: flex-end; justify-content: space-between;'>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 15px;'>",
+        "<div style='font-size:12px; color:#666; margin-top:2px;'>Type: ",
+        df$bc_name,
+        "</div>",
+        "</div>",
+
+        # NECESSITIES ROW
+        "<div style='font-size:10px; font-weight:bold; color:#999; margin-bottom:4px;'>NECESSITIES</div>",
+        "<div style='display: flex; gap: 6px; height: 55px; align-items: flex-end; justify-content: space-between; margin-bottom: 12px;'>",
+
+        # Use Fixed Pixel Height Logic: round(val * MAX_H)
+
+        # AC
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
         "<div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ac,
-        "; height:",
-        round(df$AC * 100),
-        "%;'></div>",
-        "<div style='font-size:14px; line-height:1; margin-top:2px;'>🧸</div>",
+        "; min-height: 1px; height:",
+        round(df$AC * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_ac,
+        ";'><i class='fa-solid fa-baby'></i></div>",
         "</div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 15px;'>",
+        # AH
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
         "<div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ah,
-        "; height:",
-        round(df$AH * 100),
-        "%;'></div>",
-        "<div style='font-size:14px; line-height:1; margin-top:2px;'>🏥</div>",
+        "; min-height: 1px; height:",
+        round(df$AH * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_ah,
+        ";'><i class='fa-solid fa-heart-pulse'></i></div>",
         "</div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 15px;'>",
+        # AE
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
         "<div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ae,
-        "; height:",
-        round(df$AE * 100),
-        "%;'></div>",
-        "<div style='font-size:14px; line-height:1; margin-top:2px;'>🎓</div>",
+        "; min-height: 1px; height:",
+        round(df$AE * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_ae,
+        ";'><i class='fa-solid fa-graduation-cap'></i></div>",
         "</div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 15px;'>",
+        # AG
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
         "<div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ag,
-        "; height:",
-        round(df$AG * 100),
-        "%;'></div>",
-        "<div style='font-size:14px; line-height:1; margin-top:2px;'>🛒</div>",
+        "; min-height: 1px; height:",
+        round(df$AG * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_ag,
+        ";'><i class='fa-solid fa-cart-shopping'></i></div>",
         "</div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 15px;'>",
+        # AM
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
         "<div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_am,
-        "; height:",
-        round(df$AM * 100),
-        "%;'></div>",
-        "<div style='font-size:14px; line-height:1; margin-top:2px;'>🏛️</div>",
+        "; min-height: 1px; height:",
+        round(df$AM * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_am,
+        ";'><i class='fa-solid fa-building'></i></div>",
         "</div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 15px;'>",
+        # AP
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
         "<div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ap,
-        "; height:",
-        round(df$AP * 100),
-        "%;'></div>",
-        "<div style='font-size:14px; line-height:1; margin-top:2px;'>🌳</div>",
+        "; min-height: 1px; height:",
+        round(df$AP * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_ap,
+        ";'><i class='fa-solid fa-tree'></i></div>",
         "</div>",
         "</div>",
+
+        # TRANSPORTATION ROW
+        "<div style='font-size:10px; font-weight:bold; color:#999; margin-bottom:4px;'>TRANSPORTATION</div>",
+        "<div style='display: flex; gap: 10px; height: 55px; align-items: flex-end; justify-content: flex-start;'>",
+        # TT
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
+        "<div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_tt,
+        "; min-height: 1px; height:",
+        round(df$TT * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_tt,
+        ";'><i class='fa-solid fa-bus'></i></div>",
+        "</div>",
+        # TF
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
+        "<div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_tf,
+        "; min-height: 1px; height:",
+        round(df$TF * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_tf,
+        ";'><i class='fa-solid fa-road'></i></div>",
+        "</div>",
+        # TA
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'>",
+        "<div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_ta,
+        "; min-height: 1px; height:",
+        round(df$TA * MAX_H),
+        "px;'></div>",
+        "<div style='font-size:12px; margin-top:2px; color:",
+        c_ta,
+        ";'><i class='fa-solid fa-bicycle'></i></div>",
+        "</div>",
+        "</div>",
+
         "</div>"
       )
     }
@@ -577,10 +658,10 @@ server <- function(input, output, session) {
 
   output$map <- renderMaplibre({
     maplibre(
-      style = carto_style("voyager"),
+      style = carto_style("dark-matter"),
       center = c(-111.8910, 40.7608),
       zoom = 10,
-      pitch = 0
+      pitch = 45
     )
   })
 
