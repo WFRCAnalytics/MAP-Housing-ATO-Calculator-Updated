@@ -197,19 +197,19 @@ layer_defs <- list(
     color = "#a62966"
   ),
   "w_CU" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/1",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'Urban Center'",
     type = "polygon",
     color = "#e8572d"
   ),
   "w_CC" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/2",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'City Center'",
     type = "polygon",
     color = "#f3a13e"
   ),
   "w_CN" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/3",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'Neighborhood Center'",
     type = "polygon",
     color = "#f8dc26"
