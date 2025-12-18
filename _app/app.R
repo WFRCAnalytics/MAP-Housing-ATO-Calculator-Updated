@@ -188,31 +188,32 @@ bc_map <- c(
 )
 
 # --- LAYER CONFIGURATION ---
+# Defines URL, Query, Geometry Type, and Color for each factor
 layer_defs <- list(
   # Places
   "w_CM" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'Metropolitan Center'",
     type = "polygon",
-    color = "#E41A1C"
+    color = "#a62966"
   ),
   "w_CU" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/1",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'Urban Center'",
     type = "polygon",
-    color = "#377EB8"
+    color = "#e8572d"
   ),
   "w_CC" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/2",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'City Center'",
     type = "polygon",
-    color = "#4DAF4A"
+    color = "#f3a13e"
   ),
   "w_CN" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/3",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'Neighborhood Center'",
     type = "polygon",
-    color = "#984EA3"
+    color = "#f8dc26"
   ),
   # Employment
   "w_AA" = list(
@@ -242,7 +243,7 @@ layer_defs <- list(
   ),
   "w_TA" = list(
     url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
-    query = "Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%(2C)%' or Facility1 like '%Trail%'",
+    query = "Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(1C)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%Trail%'",
     type = "line",
     color = "#2ca25f"
   ),
@@ -260,6 +261,7 @@ layer_defs <- list(
     color = "#377EB8"
   ),
   "w_AE" = list(
+    # Special Case: Two URLs for Education
     urls = c(
       "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0",
       "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0"
@@ -290,8 +292,8 @@ layer_defs <- list(
 
 # --- HELPER: Slider with shinyjs Icon Toggle (NO Checkbox) ---
 sliderWithLayer <- function(inputId, label) {
-  tagList(
-    div(
+  shiny::tagList(
+    shiny::div(
       class = "d-flex justify-content-between align-items-center mb-1",
       tags$label(
         label,
@@ -307,10 +309,10 @@ sliderWithLayer <- function(inputId, label) {
           paste0("toggle_", inputId)
         ),
         title = "Toggle Reference Layer",
-        icon("layer-group")
+        shiny::icon("layer-group")
       )
     ),
-    sliderInput(
+    shiny::sliderInput(
       inputId,
       label = NULL,
       min = 0,
@@ -323,13 +325,13 @@ sliderWithLayer <- function(inputId, label) {
 }
 
 # 2. UI
-ui <- page_navbar(
-  title = div(
+ui <- bslib::page_navbar(
+  title = shiny::div(
     style = "display: flex; align-items: center;",
-    img(src = "logo.png", style = "height:35px; margin-right:10px;"),
+    shiny::img(src = "logo.png", style = "height:35px; margin-right:10px;"),
     "Wasatch Front Housing ATO Calculator"
   ),
-  theme = bs_theme(preset = "flatly"),
+  theme = bslib::bs_theme(preset = "flatly"),
 
   header = tags$head(
     useShinyjs(),
@@ -341,8 +343,8 @@ ui <- page_navbar(
       rel = "stylesheet",
       href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
     ),
-    chooseSliderSkin("Flat", color = "#2c3e50"),
-    tags$style(HTML(
+    shinyWidgets::chooseSliderSkin("Flat", color = "#2c3e50"),
+    tags$style(shiny::HTML(
       "
       /* TYPOGRAPHY */
       body { font-family: Arial, 'Open Sans', sans-serif; }
@@ -378,10 +380,10 @@ ui <- page_navbar(
     ))
   ),
 
-  sidebar = sidebar(
+  sidebar = bslib::sidebar(
     width = 350,
     title = NULL,
-    pickerInput(
+    shinyWidgets::pickerInput(
       "comm_code",
       "Step 1: Select Cities",
       choices = city_choices,
@@ -389,15 +391,15 @@ ui <- page_navbar(
       options = list(`actions-box` = TRUE, `live-search` = TRUE),
       multiple = TRUE
     ),
-    hr(),
-    pickerInput(
+    shiny::hr(),
+    shinyWidgets::pickerInput(
       "land_use_group",
       "Step 2: Filter by Land Use (Optional)",
       choices = names(lu_mappings),
       selected = "All Land Uses",
       multiple = TRUE
     ),
-    hr(),
+    shiny::hr(),
     tags$div(
       class = "mb-2",
       tags$div(
@@ -409,43 +411,43 @@ ui <- page_navbar(
         style = "font-size: 0.9em; color: #6c757d; margin-top: 5px;"
       )
     ),
-    div(
+    shiny::div(
       class = "d-flex gap-2 justify-content-between mb-2",
-      actionButton(
+      shiny::actionButton(
         "reset_all",
         "Reset All (0)",
-        icon = icon("ban"),
+        icon = shiny::icon("ban"),
         class = "btn-outline-secondary w-50 btn-sm"
       ),
-      actionButton(
+      shiny::actionButton(
         "max_all",
         "Max All (1)",
-        icon = icon("check-double"),
+        icon = shiny::icon("check-double"),
         class = "btn-outline-primary w-50 btn-sm"
       )
     ),
 
-    accordion(
+    bslib::accordion(
       open = FALSE,
-      accordion_panel(
+      bslib::accordion_panel(
         "Places (Centers)",
         sliderWithLayer("w_CM", "Metropolitan Centers"),
         sliderWithLayer("w_CU", "Urban Centers"),
         sliderWithLayer("w_CC", "City Centers"),
         sliderWithLayer("w_CN", "Neighborhood Centers")
       ),
-      accordion_panel(
+      bslib::accordion_panel(
         "Employment",
         sliderWithLayer("w_AA", "Auto Access to Jobs"),
         sliderWithLayer("w_AT", "Transit Access to Jobs")
       ),
-      accordion_panel(
+      bslib::accordion_panel(
         "Transportation",
         sliderWithLayer("w_TT", "Transit Stops"),
         sliderWithLayer("w_TF", "Freeway Exits"),
         sliderWithLayer("w_TA", "Active Transportation")
       ),
-      accordion_panel(
+      bslib::accordion_panel(
         "Necessities",
         sliderWithLayer("w_AC", "Childcare Centers"),
         sliderWithLayer("w_AH", "Healthcare Facilities"),
@@ -455,8 +457,8 @@ ui <- page_navbar(
         sliderWithLayer("w_AP", "10-min Walk to Parks")
       )
     ),
-    hr(),
-    materialSwitch(
+    shiny::hr(),
+    shinyWidgets::materialSwitch(
       "oz_filter",
       "Limit to Opportunity Zones (OZ)",
       value = FALSE,
@@ -464,17 +466,17 @@ ui <- page_navbar(
     )
   ),
 
-  nav_panel(
+  bslib::nav_panel(
     "",
-    card(
+    bslib::card(
       full_screen = TRUE,
-      card_header(
+      bslib::card_header(
         class = "d-flex justify-content-between align-items-center w-100",
-        span(
-          "Housing Suitability Map",
+        shiny::span(
+          "Housing Accessibility Map",
           style = "font-family: 'Oswald'; font-size: 1.5rem; color: #233A57;"
         ),
-        div(materialSwitch(
+        shiny::div(shinyWidgets::materialSwitch(
           "map_3d",
           "3D View",
           value = TRUE,
@@ -482,7 +484,7 @@ ui <- page_navbar(
           inline = TRUE
         ))
       ),
-      maplibreOutput("map", height = "100%")
+      mapgl::maplibreOutput("map", height = "100%")
     )
   )
 )
@@ -491,35 +493,35 @@ ui <- page_navbar(
 server <- function(input, output, session) {
   all_sliders <- names(layer_defs)
 
-  observeEvent(input$reset_all, {
+  shiny::observeEvent(input$reset_all, {
     for (id in all_sliders) {
-      updateSliderInput(session, id, value = 0)
+      shiny::updateSliderInput(session, id, value = 0)
     }
   })
-  observeEvent(input$max_all, {
+  shiny::observeEvent(input$max_all, {
     for (id in all_sliders) {
-      updateSliderInput(session, id, value = 1)
+      shiny::updateSliderInput(session, id, value = 1)
     }
   })
 
-  target_bc_codes <- reactive({
-    req(input$land_use_group)
+  target_bc_codes <- shiny::reactive({
+    shiny::req(input$land_use_group)
     unique(unlist(lu_mappings[input$land_use_group]))
   })
 
-  filtered_data <- reactive({
-    req(input$comm_code, target_bc_codes())
-    weights <- setNames(
+  filtered_data <- shiny::reactive({
+    shiny::req(input$comm_code, target_bc_codes())
+    weights <- stats::setNames(
       sapply(all_sliders, function(x) input[[x]]),
       substring(all_sliders, 3)
     )
     total_weight <- sum(weights)
 
     df <- ds_h3 |>
-      filter(CommCode %in% !!input$comm_code) |>
-      filter(BC %in% !!target_bc_codes())
+      dplyr::filter(CommCode %in% !!input$comm_code) |>
+      dplyr::filter(BC %in% !!target_bc_codes())
     if (input$oz_filter) {
-      df <- df |> filter(OZ == 1)
+      df <- df |> dplyr::filter(OZ == 1)
     }
 
     if (nrow(df) > 0) {
@@ -531,7 +533,7 @@ server <- function(input, output, session) {
         df[[c]][is.na(df[[c]])] <- 0
       }
 
-      # FIX 1: Drop geometry only for calculation to prevent rowSums error
+      # FIX: Drop geometry for math operations to prevent errors
       df_calc <- sf::st_drop_geometry(df)
       weighted_sum <- rowSums(
         df_calc[, cols, drop = FALSE] *
@@ -543,16 +545,20 @@ server <- function(input, output, session) {
       df$bc_name <- bc_map[df$BC]
       df$bc_name[is.na(df$bc_name)] <- "Unknown"
 
-      # Tooltip
-      c_ac <- "#E41A1C"
-      c_ah <- "#377EB8"
-      c_ae <- "#4DAF4A"
-      c_ag <- "#984EA3"
-      c_am <- "#FF7F00"
-      c_ap <- "#A65628"
-      c_tt <- "#666666"
-      c_tf <- "#000000"
-      c_ta <- "#2ca25f"
+      # --- Tooltip Generation Using Layer Config Colors ---
+      # This ensures exact matches between Tooltip Bars and Map Symbols
+
+      # Retrieve colors dynamically
+      c_ac <- layer_defs$w_AC$color
+      c_ah <- layer_defs$w_AH$color
+      c_ae <- layer_defs$w_AE$color
+      c_ag <- layer_defs$w_AG$color
+      c_am <- layer_defs$w_AM$color
+      c_ap <- layer_defs$w_AP$color
+      c_tt <- layer_defs$w_TT$color
+      c_tf <- layer_defs$w_TF$color
+      c_ta <- layer_defs$w_TA$color
+
       MAX_H <- 40
 
       df$tooltip_html <- paste0(
@@ -640,10 +646,10 @@ server <- function(input, output, session) {
     return(df)
   })
 
-  # Initialize Map - Add all sources upfront
-  output$map <- renderMaplibre({
-    m <- maplibre(
-      style = carto_style("dark-matter"),
+  # Initialize Map - Load sources
+  output$map <- mapgl::renderMaplibre({
+    m <- mapgl::maplibre(
+      style = mapgl::carto_style("positron"),
       center = c(-111.8910, 40.7608),
       zoom = 10,
       pitch = 45
@@ -655,30 +661,36 @@ server <- function(input, output, session) {
       urls <- if (!is.null(def$urls)) def$urls else def$url
 
       for (i in seq_along(urls)) {
-        q <- URLencode(def$query)
+        q <- utils::URLencode(def$query)
         full_url <- paste0(
           urls[i],
           "/query?where=",
           q,
+          # "&resultRecordCount=3000",
           "&outFields=*&f=geojson"
         )
         suffix <- if (length(urls) > 1) paste0("_", i) else ""
         source_id <- paste0("src_", lid, suffix)
 
-        m <- add_source(m, id = source_id, type = "geojson", data = full_url)
+        m <- mapgl::add_source(
+          m,
+          id = source_id,
+          type = "geojson",
+          data = full_url
+        )
       }
     }
     m
   })
 
-  # --- DYNAMIC LAYER TOGGLE ---
-  layer_states <- reactiveValues()
+  # --- Dynamic Layer Toggles ---
+  layer_states <- shiny::reactiveValues()
   for (lid in names(layer_defs)) {
     layer_states[[lid]] <- FALSE
   }
 
   lapply(names(layer_defs), function(lid) {
-    observeEvent(input[[paste0("toggle_", lid)]], {
+    shiny::observeEvent(input[[paste0("toggle_", lid)]], {
       layer_states[[lid]] <- !layer_states[[lid]]
 
       if (layer_states[[lid]]) {
@@ -687,7 +699,7 @@ server <- function(input, output, session) {
         shinyjs::removeClass(id = paste0("btn_", lid), class = "active")
       }
 
-      proxy <- maplibre_proxy("map")
+      proxy <- mapgl::maplibre_proxy("map")
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
 
@@ -697,16 +709,16 @@ server <- function(input, output, session) {
         layer_id <- paste0("lay_", lid, suffix)
 
         if (layer_states[[lid]]) {
-          # ADD LAYER (pointing to pre-loaded source)
+          # ADD LAYER (Defaults to TOP of stack)
           if (def$type == "polygon") {
             proxy |>
-              add_fill_layer(
+              mapgl::add_fill_layer(
                 id = layer_id,
                 source = source_id,
                 fill_color = def$color,
                 fill_opacity = 0.4
               ) |>
-              add_line_layer(
+              mapgl::add_line_layer(
                 id = paste0(layer_id, "_ol"),
                 source = source_id,
                 line_color = def$color,
@@ -714,53 +726,53 @@ server <- function(input, output, session) {
               )
           } else if (def$type == "line") {
             proxy |>
-              add_line_layer(
+              mapgl::add_line_layer(
                 id = layer_id,
                 source = source_id,
                 line_color = def$color,
                 line_width = 2
               )
           } else if (def$type == "point") {
+            # Symbol as Circle with matching color
             proxy |>
-              add_circle_layer(
+              mapgl::add_circle_layer(
                 id = layer_id,
                 source = source_id,
                 circle_color = def$color,
-                circle_radius = 4,
+                circle_radius = 5,
                 circle_stroke_width = 1,
                 circle_stroke_color = "#fff"
               )
           }
         } else {
           # REMOVE LAYER
-          proxy |> clear_layer(layer_id)
+          proxy |> mapgl::clear_layer(layer_id)
           if (def$type == "polygon") {
-            proxy |> clear_layer(paste0(layer_id, "_ol"))
+            proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
           }
         }
       }
     })
   })
 
-  observe({
+  shiny::observe({
     dat <- filtered_data()
-    proxy <- maplibre_proxy("map") |>
-      clear_layer("h3_layer_3d") |>
-      clear_layer("h3_layer_2d")
+    proxy <- mapgl::maplibre_proxy("map") |>
+      mapgl::clear_layer("h3_layer_3d") |>
+      mapgl::clear_layer("h3_layer_2d")
 
     if (nrow(dat) > 0) {
       if (input$map_3d) {
-        # FIX 2: Use NAMED arguments for interpolate
         proxy |>
-          add_fill_extrusion_layer(
+          mapgl::add_fill_extrusion_layer(
             "h3_layer_3d",
             dat,
-            fill_extrusion_color = interpolate(
+            fill_extrusion_color = mapgl::interpolate(
               column = "score",
               values = c(0, 0.2, 0.4, 0.6, 0.8, 1),
               stops = RColorBrewer::brewer.pal(6, "YlGnBu")
             ),
-            fill_extrusion_height = interpolate(
+            fill_extrusion_height = mapgl::interpolate(
               column = "score",
               values = c(0, 1),
               stops = c(0, 2000)
@@ -768,13 +780,13 @@ server <- function(input, output, session) {
             fill_extrusion_opacity = 0.9,
             tooltip = "tooltip_html"
           ) |>
-          fit_bounds(dat, animate = TRUE, pitch = 45)
+          mapgl::fit_bounds(dat, animate = TRUE, pitch = 45)
       } else {
         proxy |>
-          add_fill_layer(
+          mapgl::add_fill_layer(
             "h3_layer_2d",
             dat,
-            fill_color = interpolate(
+            fill_color = mapgl::interpolate(
               column = "score",
               values = c(0, 0.2, 0.4, 0.6, 0.8, 1),
               stops = RColorBrewer::brewer.pal(6, "YlGnBu")
@@ -782,10 +794,10 @@ server <- function(input, output, session) {
             fill_opacity = 0.8,
             tooltip = "tooltip_html"
           ) |>
-          fit_bounds(dat, animate = TRUE, pitch = 0)
+          mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
       }
     }
   })
 }
 
-shinyApp(ui, server)
+shiny::shinyApp(ui, server)
