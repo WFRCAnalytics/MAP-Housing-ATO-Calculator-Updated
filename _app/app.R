@@ -829,11 +829,27 @@ server <- function(input, output, session) {
   # --- 3. MAP INITIALIZATION ---
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
-      style = mapgl::carto_style("positron"),
+      style = mapgl::carto_style("voyager"),
       center = c(-111.8910, 40.7608),
       zoom = 8,
       pitch = 0
     ) |>
+      mapgl::add_navigation_control(
+        position = "top-left"
+      ) |>
+      mapgl::add_scale_control(
+        position = "bottom-left",
+        unit = "imperial"
+      ) |>
+      mapgl::add_geolocate_control(
+        position = "top-left"
+      ) |>
+      mapgl::add_geocoder_control(
+        position = "top-left"
+      ) |>
+      mapgl::add_reset_control(
+        position = "top-left"
+      ) |>
       mapgl::add_raster_source(
         id = "src_roads_tile",
         tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
@@ -842,13 +858,15 @@ server <- function(input, output, session) {
       mapgl::add_raster_layer(
         id = "lay_roads_tile",
         source = "src_roads_tile",
-        raster_opacity = 0.9
+        raster_opacity = 0.9,
+        visibility = "none"
       ) |>
       # Initial Layer Control (Just Roads)
       mapgl::add_layers_control(
         position = "top-right",
         layers = list("Major Roads" = "lay_roads_tile"),
-        collapsible = TRUE
+        collapsible = TRUE,
+        active_color = "#233A57"
       )
 
     # CRITICAL FIX: Pre-load ALL data sources here.
