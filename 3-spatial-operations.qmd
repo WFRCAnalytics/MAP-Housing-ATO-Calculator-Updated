@@ -159,202 +159,66 @@ We start by loading the Parcels and H3 grids. We immediately join Administrative
 
 Check Desired format here: https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/HousingSuitability_Centers2025_gdb/FeatureServer/0
 
-## Load H3 Grid
+```{r}
+#| label: target-paths
 
-We load H3 first to get the resolution, then use that resolution to load Parcels with the correct H3 index pre-calculated.
+# Inputs
+fp_h3_grid        <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
+fp_parcels_pts    <- here::here(sub_dirs$parcels, "REMM_BY_parcels_points.parquet")
+fp_remm_parcels   <- here::here(sub_dirs$parcels, "REMM_BY_parcels.parquet")
+fp_remm_buildings <- here::here(sub_dirs$parcels, "REMM_BY_buildings.parquet")
+```
 
 ```{r}
-#| label: load-h3
+#| label: load-targets
+#| description: "Load lightweight targets (Index/Centroid)."
 
-fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-
-# 1. Load Polygons (UTM)
-#    Note: H3 WKB is usually WGS84, so we must transform to UTM.
+# A. H3: Read Index -> Calc Centroid on-the-fly
+#    We ignore the stored polygon geometry to save RAM.
 DBI::dbExecute(conn, glue::glue("
-  CREATE OR REPLACE TABLE targets_h3 AS
+  CREATE OR REPLACE TABLE points_h3 AS
   SELECT
-    CAST(h3_index AS UBIGINT) as h3_index, -- Strict type safety
-    ST_Transform(ST_GeomFromWKB(geometry), '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    h3_index,
+    ST_Transform(
+      ST_Point(h3_cell_to_lng(h3_index), h3_cell_to_lat(h3_index)),
+      '{CRS_WGS}', '{CRS_UTM}', always_xy := true
+    ) as geom
   FROM read_parquet('{fp_h3_grid}')
 "))
-DBI::dbExecute(conn, "CREATE INDEX idx_h3_geom ON targets_h3 USING RTREE (geom)")
-
-# 2. OPTIMIZATION: Create & Index Points
-message("📍 Pre-calculating H3 Points (PointOnSurface)...")
-DBI::dbExecute(conn, "
-  CREATE OR REPLACE TABLE points_h3 AS
-  SELECT rowid, h3_index, ST_Centroid(geom) as geom
-  FROM targets_h3
-")
 DBI::dbExecute(conn, "CREATE INDEX idx_h3_utm ON points_h3 USING RTREE (geom)")
-DBI::dbExecute(conn, "CREATE INDEX idx_h3_id ON points_h3 (h3_index)")
 
-message("✅ H3 Grid loaded & indexed")
-```
-
-```{r}
-# -----------------------------------------------------------------------------
-# 2. GET RESOLUTION
-# -----------------------------------------------------------------------------
-# We need this 'res' variable for the next steps
-res <- DBI::dbGetQuery(conn, "SELECT h3_get_resolution(h3_index) as res FROM targets_h3 LIMIT 1")$res
-message(glue::glue("ℹ️ Detected Grid Resolution: {res}"))
-```
-
-## Load Parcels
-
-```{r}
-#| label: load-parcels
-
-fp_remm_parcels <- here::here(sub_dirs$parcels, "REMM_BY_parcels.parquet")
-
-# 1. Load Polygons (UTM)
+# B. Parcels: Read Points directly
 DBI::dbExecute(conn, glue::glue("
-  CREATE OR REPLACE TABLE targets_parcels AS
+  CREATE OR REPLACE TABLE points_parcels AS
   SELECT
     parcel_id,
-
-    -- 1. Calculate H3 Index DIRECTLY from raw WGS84 Centroid
-    CAST(h3_latlng_to_cell(
-      ST_Y(ST_Centroid(geometry)),
-      ST_X(ST_Centroid(geometry)),
-      {res}
-    ) AS UBIGINT) as h3_index,
-
-    -- 2. Transform to UTM for storage/buffer ops
-    ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom
-  FROM read_parquet('{fp_remm_parcels}')
-  WHERE ST_IsValid(geometry)
+    ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+  FROM read_parquet('{fp_parcels_pts}')
 "))
-
-# 2. OPTIMIZATION: Create & Index Points (Point-On-Surface)
-#    ST_PointOnSurface guarantees the point is INSIDE the polygon (unlike Centroid).
-#    This handles U-shaped parcels correctly.
-DBI::dbExecute(conn, "
-  CREATE OR REPLACE TABLE points_parcels AS
-  SELECT rowid, h3_index, ST_PointOnSurface(geom) as geom
-  FROM targets_parcels
-")
 DBI::dbExecute(conn, "CREATE INDEX idx_pp_utm ON points_parcels USING RTREE (geom)")
-DBI::dbExecute(conn, "CREATE INDEX idx_pp_h3 ON points_parcels (h3_index)")
+```
 
-message("✅ Parcels loaded & indexed")
+```{r}
+#| label: detect-res
+
+# AUTO-DETECT RESOLUTION
+# We take the first index from the table and ask DuckDB for its resolution.
+res <- DBI::dbGetQuery(conn, "SELECT h3_get_resolution(h3_index) as r FROM points_h3 LIMIT 1")$r
+
+if (is.na(res) || length(res) == 0) {
+  stop("❌ Could not detect H3 resolution. Is the H3 grid empty?")
+}
+message(glue::glue("✅ Auto-detected H3 Resolution: {res}"))
 ```
 
 # Part 2: Static Attributes (Admin & Land Use)
-
-## Attach Administrative Data
-
-A helper function to join City/County codes to any target table (Parcel or H3).
-
-```{r}
-#| label: func-admin-join
-
-attach_admin_data <- function(conn, target_table, point_table) {
-
-  message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
-  fp_municipal_bound <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
-  fp_county_bound    <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
-
-  # 1. Load Admin Layers (Fixed Geometry)
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TEMP TABLE layer_muni AS
-    SELECT
-      ugrcode as CommCode,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
-    FROM read_parquet('{fp_municipal_bound}')
-  "))
-
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TEMP TABLE layer_county AS
-    SELECT
-      countynbr as COUNTYNBR,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
-    FROM read_parquet('{fp_county_bound}')
-  "))
-
-  # 2. Add Columns
-  for (col in c("CommCode", "COUNTYNBR")) {
-    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS {col}"))
-    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN {col} VARCHAR"))
-  }
-
-  # 3. Update City (Spatial Join on Point Table -> Update Target by RowID)
-  DBI::dbExecute(conn, glue::glue("
-    UPDATE {target_table}
-    SET CommCode = match.CommCode
-    FROM (
-        SELECT pt.rowid, m.CommCode
-        FROM {point_table} pt, layer_muni m
-        WHERE ST_Intersects(pt.geom, m.geom)
-    ) match
-    WHERE {target_table}.rowid = match.rowid
-  "))
-
-  # 4. Update County (Spatial Join on Point Table -> Update Target by RowID)
-  DBI::dbExecute(conn, glue::glue("
-    UPDATE {target_table}
-    SET COUNTYNBR = match.COUNTYNBR
-    FROM (
-        SELECT pt.rowid, c.COUNTYNBR
-        FROM {point_table} pt, layer_county c
-        WHERE ST_Intersects(pt.geom, c.geom)
-    ) match
-    WHERE {target_table}.rowid = match.rowid
-  "))
-
-  DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
-}
-```
-
-```{r}
-#| label: run-admin-join
-
-# Pass the pre-calculated point tables we created in Part 1
-attach_admin_data(conn, "targets_parcels", "points_parcels")
-attach_admin_data(conn, "targets_h3", "points_h3")
-```
 
 ## Building Codes (BC)
 
 We join the REMM buildings table. Since `building_type` contains full strings (e.g., "Single Family Res"), we create a mapping table to translate them to abbreviations (e.g., "SF").
 
 ```{r}
-#| label: building-codes
-
-# -----------------------------------------------------------------------------
-# 1. Load Buildings & Store as UTM (Projected)
-# -----------------------------------------------------------------------------
-message("🏗️ Loading Building Centroids (Spatial)...")
-
-fp_remm_buildings <- here::here(sub_dirs$parcels, "REMM_BY_buildings.parquet")
-
-# Create Temp Table with BOTH UTM Geom and H3 Index
-# Load -> Centroid -> Transform (UTM) -> Index
-DBI::dbExecute(conn, glue::glue("
-  CREATE OR REPLACE TEMP TABLE points_buildings AS
-  SELECT
-    parcel_id,
-    building_type,
-    building_sqft,
-
-    -- 1. H3 Index (Integer Match)
-    CAST(h3_latlng_to_cell(
-      ST_Y(ST_Centroid(geometry)),
-      ST_X(ST_Centroid(geometry)),
-      {res}
-    ) AS UBIGINT) as h3_index,
-
-    -- 2. UTM Geometry (Spatial Match)
-    ST_Transform(ST_Centroid(geometry), '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
-
-  FROM read_parquet('{fp_remm_buildings}')
-  WHERE ST_IsValid(geometry)
-"))
-
-# Index both columns for speed
-DBI::dbExecute(conn, "CREATE INDEX idx_b_utm ON points_buildings USING RTREE (geom)")
-DBI::dbExecute(conn, "CREATE INDEX idx_b_h3 ON points_buildings (h3_index)")
+#| label: bc-mapping
 
 # Create Mapping Table (Full Name -> Abbreviation)
 bc_mapping <- tibble::tribble(
@@ -381,133 +245,96 @@ bc_mapping <- tibble::tribble(
   # Note: NA values are handled in the join below
 )
 DBI::dbWriteTable(conn, "bc_map", bc_mapping, overwrite = TRUE)
+```
 
-# -----------------------------------------------------------------------------
-# 2. PARCELS: Attribute Join (Parcel ID Match)
-# -----------------------------------------------------------------------------
-message("🏗️ Attaching Building Codes to Parcels (Attribute Match)...")
+### BC for Parcels
 
-# Join Abbreviation to Parcels
-# Note: QUALIFY ROW_NUMBER() handles cases where a parcel has multiple buildings
-# Note: We prioritize the LARGEST building on the parcel using building_sqft
+```{r}
+#| label: bc-assign-parcel
+
+# --- A. PARCELS: Attribute Match (ID Join) ---
 DBI::dbExecute(conn, "
-  ALTER TABLE targets_parcels ADD COLUMN BC VARCHAR;
-
-  UPDATE targets_parcels
-  SET BC = COALESCE(mapped.abbr, 'OT') -- Handle NA/Unknown as 'OT'
+  ALTER TABLE points_parcels ADD COLUMN BC VARCHAR;
+  UPDATE points_parcels
+  SET BC = COALESCE(mapped.abbr, 'OT')
   FROM (
-    SELECT
-      b.parcel_id,
-      m.abbr
-    FROM points_buildings b
+    SELECT b.parcel_id, m.abbr
+    FROM read_parquet('{fp_remm_buildings}') b
     JOIN bc_map m ON b.building_type = m.full_name
-
-    -- Order by square footage descending to pick the main building
-    QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY b.parcel_id
-      ORDER BY b.building_sqft DESC
-    ) = 1
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY b.parcel_id ORDER BY b.building_sqft DESC) = 1
   ) mapped
-  WHERE targets_parcels.parcel_id = mapped.parcel_id
+  WHERE points_parcels.parcel_id = mapped.parcel_id
 ")
 
-# -----------------------------------------------------------------------------
-# 3. H3: Hybrid Approach
-#    Pass A: Building Aggregation (Handles small parcels / mixed use)
-#    Pass B: Spatial Backfill (Handles large parcels / empty lots)
-# -----------------------------------------------------------------------------
-message("🏗️ Aggregating Building Codes to H3 (Index Match)...")
+DBI::dbExecute(conn, "UPDATE points_parcels SET BC = 'OT' WHERE BC IS NULL")
+```
 
-# --- Pass A: Aggregation via Index Match (Existing Logic) ---
+### BC for H3
+
+```{r}
+#| label: bc-assign-h3
+
+message("🏗️ Calculating Building Codes (BC) for h3...")
+
+# --- B. H3: Index Match (Direct Building Join) ---
+# We calculate the H3 index of every building on the fly to match them to our grid.
 DBI::dbExecute(conn, glue::glue("
-  ALTER TABLE targets_h3 ADD COLUMN IF NOT EXISTS BC VARCHAR;
+  ALTER TABLE points_h3 ADD COLUMN BC VARCHAR;
 
-  UPDATE targets_h3
-  SET BC = agg.mode_bc
-  FROM (
-    SELECT
-      b.h3_index,
-      MODE(COALESCE(m.abbr, 'OT')) as mode_bc
-    FROM points_buildings b
-    LEFT JOIN bc_map m ON b.building_type = m.full_name
-    GROUP BY b.h3_index
-  ) agg
-  WHERE targets_h3.h3_index = agg.h3_index
+  -- 1. Create Lookup of H3 Indices from Buildings
+  CREATE OR REPLACE TEMP TABLE h3_build_map AS
+  SELECT
+    CAST(h3_latlng_to_cell(ST_Y(ST_Centroid(geometry)), ST_X(ST_Centroid(geometry)), {res}) AS UBIGINT) as h3_index,
+    MODE(COALESCE(m.abbr, 'OT')) as mode_bc
+  FROM read_parquet('{fp_remm_buildings}') b
+  LEFT JOIN bc_map m ON b.building_type = m.full_name
+  GROUP BY 1;
+
+  -- 2. Update Target
+  UPDATE points_h3
+  SET BC = map.mode_bc
+  FROM h3_build_map map
+  WHERE points_h3.h3_index = map.h3_index;
 "))
 
-# --- Pass B: Spatial Backfill (Gap Filling) ---
-# Check: If BC is still NULL, sample the Parcel Polygon at the H3 Center.
-# This fixes large parcels where the H3 cell is far from the building centroid.
+# --- C. H3: Spatial Gap Fill (Temporary Polygon Load) ---
+# We load the heavy polygons ONLY for this specific query, then drop them.
+message("  ↳ Filling H3 gaps using Parcel Polygons (Temporary Load)...")
 
-message("  ↳ Filling gaps using Parcel Polygons...")
+# Join BC from points_parcels to the raw polygon file to create a temp fill layer
+DBI::dbExecute(conn, glue::glue("
+  CREATE OR REPLACE TEMP TABLE temp_poly_fill AS
+  SELECT
+    pts.BC,
+    ST_Transform(raw.geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+  FROM read_parquet('{fp_remm_parcels}') raw
+  JOIN points_parcels pts ON raw.parcel_id = pts.parcel_id
+  WHERE pts.BC IS NOT NULL
+"))
+DBI::dbExecute(conn, "CREATE INDEX idx_temp_poly ON temp_poly_fill USING RTREE (geom)")
 
-# 1. Ensure Polygon Index Exists (Critical for spatial join speed)
-DBI::dbExecute(conn, "CREATE INDEX IF NOT EXISTS idx_tp_geom ON targets_parcels USING RTREE (geom)")
-
-# 2. Update NULLs only
+# Run the Spatial Backfill
 DBI::dbExecute(conn, "
-  UPDATE targets_h3
+  UPDATE points_h3
   SET BC = matched.BC
   FROM (
-    SELECT
-      ph.h3_index,
-      p.BC
-    FROM points_h3 ph
-    -- Spatial Join: H3 Center inside Parcel Polygon
-    JOIN targets_parcels p ON ST_Intersects(ph.geom, p.geom)
-    WHERE p.BC IS NOT NULL
+    SELECT h.h3_index, p.BC
+    FROM points_h3 h
+    JOIN temp_poly_fill p ON ST_Intersects(h.geom, p.geom)
+    WHERE h.BC IS NULL
   ) matched
-  WHERE targets_h3.h3_index = matched.h3_index
-    AND targets_h3.BC IS NULL -- Only touch rows that failed Pass A
+  WHERE points_h3.h3_index = matched.h3_index
 ")
 
-# --- Pass C: Spatial Voting (KNN Mode) ---
-# Logic: If a cell is empty, look at its 6 immediate neighbors.
-# If 4 or more neighbors have data, we assume this is a "glitch" or hole -> FILL IT.
-# If 3 or fewer neighbors have data, we assume this is a coastline/edge -> LEAVE IT.
-message("  ↳ Pass C: Filling holes using Grid Adjacency (Threshold >= 4)...")
+# CLEAN UP IMMEDIATELY
+DBI::dbExecute(conn, "DROP TABLE temp_poly_fill")
+message("  ↳ Temporary polygons dropped. Memory freed.")
 
-DBI::dbExecute(conn, "
-  UPDATE targets_h3
-  SET BC = fill.mode_bc
-  FROM (
-    SELECT
-      t.h3_index,
-      MODE(n.BC) as mode_bc
-    FROM targets_h3 t
-    -- 1. Get the 6 immediate neighbors (k=1) for the empty cell
-    CROSS JOIN LATERAL (
-      SELECT unnest(h3_grid_disk(t.h3_index, 1)) as neighbor_h3
-    ) grid
-    -- 2. Join back to the main table to check the neighbor's value
-    JOIN targets_h3 n ON grid.neighbor_h3 = n.h3_index
+# --- D. Final Cleanup ---
+DBI::dbExecute(conn, "UPDATE points_h3 SET BC = 'OT' WHERE BC IS NULL")
+DBI::dbExecute(conn, "DROP TABLE bc_map; DROP TABLE h3_build_map;")
 
-    WHERE t.BC IS NULL          -- Target must be empty
-      AND n.BC IS NOT NULL      -- Neighbor must have data
-      AND t.h3_index != n.h3_index -- Exclude the cell itself
-
-    GROUP BY t.h3_index
-    -- 3. THE RULE: Only fill if surrounded by at least 4 valid cells
-    HAVING COUNT(*) >= 4
-  ) fill
-  WHERE targets_h3.h3_index = fill.h3_index
-")
-
-# --- Pass D: Final Cleanup (Catch-All) ---
-# Logic: If it is STILL null after Pass C, it means it is either:
-# 1. Genuinely empty (surrounded by < 4 valid neighbors)
-# 2. A remote area with no data
-# We force these to 'OT' (Other).
-message("  ↳ Pass D: Setting remaining NULLs to 'OT'...")
-
-DBI::dbExecute(conn, "
-  UPDATE targets_h3
-  SET BC = 'OT'
-  WHERE BC IS NULL
-")
-
-# Cleanup
-DBI::dbExecute(conn, "DROP TABLE points_buildings; DROP TABLE bc_map;")
+message("✅ Targets Ready: Points Loaded, BC Calculated.")
 ```
 
 ```{r}
@@ -521,7 +348,7 @@ DBI::dbGetQuery(conn, "
     COUNT(BC) as filled,
     COUNT(*) - COUNT(BC) as missing,
     ROUND(100.0 * (COUNT(*) - COUNT(BC)) / COUNT(*), 2) as missing_pct
-  FROM targets_h3
+  FROM points_h3
 ")
 
 # Check Parcels (for comparison)
@@ -531,8 +358,63 @@ parcel_stats <- DBI::dbGetQuery(conn, "
     COUNT(BC) as filled,
     COUNT(*) - COUNT(BC) as missing,
     ROUND(100.0 * (COUNT(*) - COUNT(BC)) / COUNT(*), 2) as missing_pct
-  FROM targets_parcels
+  FROM points_parcels
 ")
+```
+
+## Attach Administrative Data
+
+A helper function to join City/County codes to any target table (Parcel or H3).
+
+```{r}
+#| label: func-admin-join
+
+# Updated to work on a SINGLE table (the point table)
+attach_admin_data <- function(conn, table_name) {
+
+  message(glue::glue("🏛️ Attaching Admin Data to {table_name}..."))
+  fp_municipal_bound <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
+  fp_county_bound    <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
+
+  # 1. Load Admin Layers (Fixed Geometry)
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TEMP TABLE layer_muni AS
+    SELECT ugrcode as CommCode, ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    FROM read_parquet('{fp_municipal_bound}')
+  "))
+
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TEMP TABLE layer_county AS
+    SELECT countynbr as COUNTYNBR, ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    FROM read_parquet('{fp_county_bound}')
+  "))
+
+  # 2. Add Columns & Update
+  for (col in c("CommCode", "COUNTYNBR")) {
+    DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} DROP COLUMN IF EXISTS {col}"))
+    DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN {col} VARCHAR"))
+  }
+
+  DBI::dbExecute(conn, glue::glue("
+    UPDATE {table_name} SET CommCode = m.CommCode
+    FROM layer_muni m WHERE ST_Intersects({table_name}.geom, m.geom)
+  "))
+
+  DBI::dbExecute(conn, glue::glue("
+    UPDATE {table_name} SET COUNTYNBR = c.COUNTYNBR
+    FROM layer_county c WHERE ST_Intersects({table_name}.geom, c.geom)
+  "))
+
+  DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
+}
+```
+
+```{r}
+#| label: run-admin-join
+
+# Pass the pre-calculated point tables
+attach_admin_data(conn, "points_parcels")
+attach_admin_data(conn, "points_h3")
 ```
 
 ## Attach Job Access (AA, AT)
@@ -542,42 +424,32 @@ We attach the raw job access numbers from the TAZ layer. The normalization (divi
 ```{r}
 #| label: func-job-join
 
+#| label: func-job-join
+
 fp_taz_access <- here::here(dirs$processed, "access", "TAZ_AccessToOpportunities_OY2023.parquet")
 
-attach_job_access <- function(conn, target_table, point_table) {
+attach_job_access <- function(conn, table_name) {
 
-  message(glue::glue("💼 Attaching Job Access to {target_table}..."))
+  message(glue::glue("💼 Attaching Job Access to {table_name}..."))
 
-  # 1. Load TAZ & SAFE Transform
   DBI::dbExecute(conn, glue::glue("
     CREATE OR REPLACE TEMP TABLE taz_access AS
     SELECT
       ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom,
-      job_by_auto,
-      job_by_tran
+      job_by_auto, job_by_tran
     FROM read_parquet('{fp_taz_access}')
     WHERE ST_IsValid(geometry)
   "))
   DBI::dbExecute(conn, "CREATE INDEX idx_taz_geom ON taz_access USING RTREE (geom)")
 
-  # 2. RESET COLUMNS (Drop if exists)
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AA\""))
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AT\""))
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS \"AA\" DOUBLE"))
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS \"AT\" DOUBLE"))
 
-  # 3. Add Columns
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AA\" DOUBLE"))
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AT\" DOUBLE"))
-
-  # 4. Spatial Join
   DBI::dbExecute(conn, glue::glue("
-    UPDATE {target_table}
-    SET \"AA\" = match.job_by_auto, \"AT\" = match.job_by_tran
-    FROM (
-      SELECT tp.rowid, t.job_by_auto, t.job_by_tran
-      FROM {point_table} tp, taz_access t
-      WHERE ST_Intersects(tp.geom, t.geom)
-    ) match
-    WHERE {target_table}.rowid = match.rowid;
+    UPDATE {table_name}
+    SET \"AA\" = t.job_by_auto, \"AT\" = t.job_by_tran
+    FROM taz_access t
+    WHERE ST_Intersects({table_name}.geom, t.geom)
   "))
 
   DBI::dbExecute(conn, "DROP TABLE taz_access;")
@@ -588,8 +460,8 @@ attach_job_access <- function(conn, target_table, point_table) {
 #| label: run-job-join
 
 # Run with pre-calculated points
-attach_job_access(conn, "targets_parcels", "points_parcels")
-attach_job_access(conn, "targets_h3", "points_h3")
+attach_job_access(conn, "points_parcels")
+attach_job_access(conn, "points_h3")
 ```
 
 # Part 3: Amenity Operations Engine
@@ -777,41 +649,6 @@ amenity_config |>
 message("✅ Points enriched successfully.")
 ```
 
-```{r}
-#| label: transfer-attributes
-
-message("📦 Transferring attributes from Points to Polygons...")
-
-transfer_columns <- function(conn, target_poly, source_point, config) {
-
-  config |>
-    purrr::pwalk(function(...) {
-      row <- list(...)
-      col <- row$col_name
-
-      message(glue::glue("  ↳ Transferring {col}..."))
-
-      # 1. RESET COLUMN on Target (Drop if exists)
-      DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly} DROP COLUMN IF EXISTS {col}"))
-      DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly} ADD COLUMN {col} DOUBLE"))
-
-      # 2. Update Target from Source using RowID
-      DBI::dbExecute(conn, glue::glue("
-        UPDATE {target_poly}
-        SET {col} = source.{col}
-        FROM {source_point} source
-        WHERE {target_poly}.rowid = source.rowid
-      "))
-    })
-}
-
-# Run Transfer
-transfer_columns(conn, "targets_parcels", "points_parcels", amenity_config)
-transfer_columns(conn, "targets_h3", "points_h3", amenity_config)
-
-message("🏁 All Data Transferred. Processing Complete.")
-```
-
 # Export
 
 We export the "Wide" tables (ID + all amenity times). We exclude the geometry to keep the files lightweight for the next scoring step.
@@ -819,25 +656,23 @@ We export the "Wide" tables (ID + all amenity times). We exclude the geometry to
 ```{r}
 #| label: export
 
-# 1. Parcels
+# 1. Parcels (Points only - lighter and sufficient for scoring)
 fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
 
-# Transform geom from UTM to WGS84 before export
 DBI::dbExecute(conn, glue::glue("
   COPY (
     SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
-    FROM targets_parcels
+    FROM points_parcels
   ) TO '{fp_out_parcels}' (FORMAT PARQUET)
 "))
 
-# 2. H3
+# 2. H3 (Points only)
 fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
 
-# Transform geom from UTM to WGS84 before export
 DBI::dbExecute(conn, glue::glue("
   COPY (
     SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
-    FROM targets_h3
+    FROM points_h3
   ) TO '{fp_out_h3}' (FORMAT PARQUET)
 "))
 

@@ -409,75 +409,74 @@ if (file.exists(fp_h3_grid)) {
 
 ```{r}
 #| label: gen-h3-grid
+#| description: "Generate H3 Polygons for downstream analysis."
 
-# 1. Define Inputs/Outputs
+# file paths
 fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
 fp_h3_grid        <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-H3_RES            <- 10 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
+H3_RES            <- 11 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
 
-# The input boundary should now be EPSG:4326 from the previous step.
-# We define it explicitly here for the 3-argument ST_Transform.
-BOUNDARY_CRS      <- CRS_WGS
-
+# --- 1. Generate H3 Grid (With Geometry) ---
 if (file.exists(fp_h3_grid)) {
-  message("✅ H3 Grid already exists: ", fp_h3_grid)
+  message("✅ H3 Grid already exists.")
 } else {
-
   conn <- DBI::dbConnect(duckdb::duckdb())
   on.exit(DBI::dbDisconnect(conn, shutdown = TRUE))
+  DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial; INSTALL h3 FROM community; LOAD h3; CALL register_geoarrow_extensions();")
 
-  DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
-  DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
-  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
-
-  # Fix: Removed curly braces from comments to prevent glue parsing errors
-  query_h3 <- glue::glue("
+  message("🏗️ Generating H3 Grid (Polygons)...")
+  # We save the geometry here so the file is a valid spatial layer for GIS/Mapping.
+  # Step 3 will choose to ignore this column to save memory.
+  DBI::dbExecute(conn, glue::glue("
     COPY (
       WITH boundary_parts AS (
-        -- 1. Read Boundary & FORCE Transform to 4326
-        --    ST_Transform(geom, source_crs, target_crs)
-        SELECT
-          unnest(
-            ST_Dump(
-              ST_Transform(geometry, '{BOUNDARY_CRS}', 'EPSG:4326')
-            )
-          ) as d
+        SELECT unnest(ST_Dump(ST_Transform(geometry, '{CRS_WGS}', 'EPSG:4326'))) as d
         FROM read_parquet('{fp_boundary_wftdm}')
       ),
-
       h3_indices AS (
-        SELECT
-          -- 2. Generate H3 Indices (Polyfill)
-          --    ST_AsText creates the WKT needed by H3
-          unnest(h3_polygon_wkt_to_cells(ST_AsText(d.geom), {H3_RES})) as h3_index
+        SELECT unnest(h3_polygon_wkt_to_cells(ST_AsText(d.geom), {H3_RES})) as h3_index
         FROM boundary_parts
       )
-
       SELECT DISTINCT
-        h3_index,
-        -- 3. Convert Index back to Geometry
-        --    H3 boundaries are naturally 4326
+        CAST(h3_index AS UBIGINT) as h3_index,
         h3_cell_to_boundary_wkb(h3_index) as geometry
       FROM h3_indices
-
     ) TO '{fp_h3_grid}' (FORMAT PARQUET)
-  ")
-
-  tryCatch({
-    DBI::dbExecute(conn, query_h3)
-    message("✅ H3 Grid saved to: ", fp_h3_grid)
-  }, error = function(e) {
-    stop("❌ H3 Generation Failed: ", e$message)
-  })
+  "))
+  message("✅ H3 Grid saved: ", fp_h3_grid)
 }
 ```
 
 ```{r}
-#| eval: false
+#| label: gen-parcel-point
+#| description: "Generate Parcel Points for downstream analysis."
 
-arrow::read_parquet(fp_h3_grid) |>
-  sf::st_as_sf(crs = CRS_WGS) |>
-  mapgl::maplibre_view()
+# file paths
+fp_remm_parcels   <- here::here(sub_dirs$parcels, "REMM_BY_parcels.parquet")
+fp_parcels_pts    <- here::here(sub_dirs$parcels, "REMM_BY_parcels_points.parquet")
+
+# --- 2. Generate Parcel Points (Optimization) ---
+if (file.exists(fp_parcels_pts)) {
+  message("✅ Parcel Points already exist.")
+} else {
+  conn <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(conn, shutdown = TRUE), add = TRUE)
+  DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial; CALL register_geoarrow_extensions();")
+
+  message("📍 Converting Parcels to Points...")
+  # We use PointOnSurface to guarantee the point is inside the parcel (handles U-shapes).
+  # We do this heavy calc ONCE here.
+  DBI::dbExecute(conn, glue::glue("
+    COPY (
+      SELECT
+        parcel_id,
+        ST_AsWKB(ST_PointOnSurface(geometry)) as geometry
+      FROM read_parquet('{fp_remm_parcels}')
+      WHERE ST_IsValid(geometry)
+    ) TO '{fp_parcels_pts}' (FORMAT PARQUET)
+  "))
+  message("✅ Parcel Points saved: ", fp_parcels_pts)
+}
 ```
 
 ## Set Isochrone Inputs and Configuration
