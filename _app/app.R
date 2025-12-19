@@ -412,7 +412,7 @@ ui <- bslib::page_navbar(
     ),
     shinyWidgets::pickerInput(
       "land_use_group",
-      "Step 2: Filter by Land Use (Optional)",
+      "Step 2: Filter by Land Use",
       choices = names(lu_mappings),
       selected = "All Land Uses",
       multiple = FALSE
@@ -690,7 +690,8 @@ server <- function(input, output, session) {
       mapgl::add_layers_control(
         position = "top-right",
         layers = control_list,
-        collapsible = TRUE
+        collapsible = TRUE,
+        active_color = "#233A57"
       )
   }
 
@@ -829,7 +830,8 @@ server <- function(input, output, session) {
   # --- 3. MAP INITIALIZATION ---
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
-      style = mapgl::carto_style("voyager"),
+      # style = mapgl::carto_style("voyager"),
+      style = mapgl::openfreemap_style("liberty"),
       center = c(-111.8910, 40.7608),
       zoom = 8,
       pitch = 0
