@@ -70,14 +70,24 @@ library(fs)
 #| label: setup-dirs
 
 dirs <- list(
-  results = here::here("_output")
+  results   = here::here("_output"),
+  processed = here::here("_data/processed"),
+  base      = here::here("_data/processed", "base_layers"),
+  parcels   = here::here("_data/processed", "parcels_taz")
 )
 
-# Input Paths (From Step 3)
+# 1. INPUTS (Enriched Points from Step 3)
+fp_pts_parcels_enriched <- here::here(dirs$results, "parcels_pt_enriched.parquet")
+fp_pts_h3_enriched      <- here::here(dirs$results, "h3_pt_enriched.parquet")
+
+# 2. GEOMETRY SOURCES (Polygons from Step 2)
+fp_poly_parcels         <- here::here(dirs$parcels, "REMM_BY_parcels.parquet")
+fp_poly_h3              <- here::here(dirs$base,    "Analysis_Boundary_H3_Grid.parquet")
+
+# 3. OUTPUTS (Final Polygons)
 fp_parcels_enriched <- here::here(dirs$results, "parcels_enriched.parquet")
 fp_h3_enriched      <- here::here(dirs$results, "h3_enriched.parquet")
 
-# Output Paths
 fp_parcels_scored   <- here::here(dirs$results, "parcels_scored.parquet")
 fp_h3_scored        <- here::here(dirs$results, "h3_scored.parquet")
 ```
@@ -101,6 +111,9 @@ conn <- DBI::dbConnect(duckdb::duckdb())
 
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
 DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+
+# Set safe memory limits
+DBI::dbExecute(conn, "SET memory_limit = '40GB'; SET threads = 16;")
 ```
 
 # Scoring & Weighting
@@ -120,127 +133,167 @@ This function encapsulates the entire scoring workflow so it can be applied iden
 ```{r}
 #| label: func-scoring
 
-score_and_export <- function(conn, input_path, output_path, table_name) {
+score_points <- function(conn, input_path, table_name) {
 
   message(glue::glue("📊 Scoring {table_name}..."))
 
-  # 1. Load Data into View (Zero Copy)
+  # 1. Load Enriched Points
   DBI::dbExecute(conn, glue::glue("
     CREATE OR REPLACE VIEW raw_{table_name} AS SELECT * FROM read_parquet('{input_path}')
   "))
 
   # 2. Identify Columns
-  static_cols <- c(
-    "rowid", "geometry", "geom", "parcel_id", "h3_index", "CommCode", "COUNTYNBR", "BC"
-  )
+  #    - Added "oid" so it is excluded from scoring.
+  #    - Added "AT", "AA" to be safe.
+  static_cols <- c("oid", "rowid", "geometry", "geom", "parcel_id", "h3_index", "CommCode", "COUNTYNBR", "BC")
 
-  all_cols   <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
-  score_cols <- setdiff(all_cols, static_cols)
+  all_cols    <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
+  score_cols  <- setdiff(all_cols, static_cols)
 
-  if(length(score_cols) == 0) stop("❌ Error: No scorable columns found!")
+  if(length(score_cols) == 0) stop("❌ No scorable columns found!")
 
-  # 3. Pass 1: Gather Normalization Stats
-  #    We build the SQL to normalize individual columns (0 to 1)
+  # 3. Calculate Scores (Normalization)
   sql_parts <- list()
-
-  message("   ⚖️ Calculating Min/Max statistics...")
+  message("   ⚖️ Calculating Normalization Stats...")
 
   for (col in score_cols) {
-    # Detect Type: Cost (Min/Val) vs Benefit (Val/Max)
-    # Added 'TA_' explicitly to cost metrics based on your buffer config
+    # Cost vs Benefit Detection
     is_cost <- grepl("^(TT_|AC|AH|AG|AM|AE_|TA_|TF)", col)
 
     if (is_cost) {
-      # COST: Inverse Normalization
+      # COST: Min / Value (Decay)
       val <- DBI::dbGetQuery(conn, glue::glue('SELECT MIN("{col}") as m FROM raw_{table_name} WHERE "{col}" > 0'))$m
-      if (is.na(val) || val == 0) val <- 1.0 # Safety
-
-      sql_parts[[col]] <- glue::glue('
-        CASE
-          WHEN "{col}" IS NULL THEN 0.0
-          WHEN "{col}" <= {val} THEN 1.0
-          ELSE {val} / "{col}"
-        END AS "{col}"
-      ')
-
+      if (is.na(val) || val == 0) val <- 1.0
+      sql_parts[[col]] <- glue::glue('CASE WHEN "{col}" IS NULL OR "{col}" = 0 THEN 0.0 WHEN "{col}" <= {val} THEN 1.0 ELSE {val} / "{col}" END AS "{col}"')
     } else {
-      # BENEFIT: Linear Normalization
+      # BENEFIT: Value / Max (Linear)
       val <- DBI::dbGetQuery(conn, glue::glue('SELECT MAX("{col}") as m FROM raw_{table_name}'))$m
       if (is.na(val) || val == 0) val <- 1.0
-
-      sql_parts[[col]] <- glue::glue('
-        CASE
-          WHEN "{col}" IS NULL THEN 0.0
-          ELSE "{col}" / {val}
-        END AS "{col}"
-      ')
+      sql_parts[[col]] <- glue::glue('CASE WHEN "{col}" IS NULL THEN 0.0 ELSE "{col}" / {val} END AS "{col}"')
     }
   }
 
-  # 4. Define Composite Calculations
-  #    These logic blocks run on the ALREADY normalized values from step 3.
-  #    Using COALESCE(x, 0) ensures we don't get NULLs if one component is missing.
-
+  # 4. Composite Logic (Weighted Groups)
   composites <- list()
-
-  # A. Transit: Weighted Max of normalized Local, Rapid, and CRT
   if (all(c("TT_Local", "TT_Rapid", "TT_CRT") %in% score_cols)) {
     composites[["TT"]] <- "GREATEST(COALESCE(TT_Local,0)*0.5, COALESCE(TT_Rapid,0)*0.8, COALESCE(TT_CRT,0)*1.0) AS TT"
   }
-
-  # B. Education: Weighted Max of K12 and HigherEd
   if (all(c("AE_K12", "AE_High") %in% score_cols)) {
     composites[["AE"]] <- "GREATEST(COALESCE(AE_K12,0)*0.8, COALESCE(AE_High,0)*1.0) AS AE"
   }
-
-  # C. Active Transport (Bikeways): Weighted Max of normalized buffer scores
   if (all(c("TA_class1", "TA_class2", "TA_trails") %in% score_cols)) {
      composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*1.0, COALESCE(TA_trails,0)*1.0) AS TA"
   }
 
-  # 5. Pass 2: Execute Pipeline
-  message(glue::glue("💾 Projecting & Saving to {output_path}..."))
+  # 5. Build View (WITH QUOTED COLUMNS)
+  #    We explicitly wrap static columns in double quotes to handle "AT", "AA", etc.
+  safe_static_cols <- paste0('"', intersect(all_cols, static_cols), '"')
+  select_static    <- paste(safe_static_cols, collapse = ", ")
 
-  select_static <- paste(intersect(all_cols, static_cols), collapse = ", ")
-  select_scores <- paste(unlist(sql_parts), collapse = ", \n      ")
-  select_comps  <- if(length(composites) > 0) paste(",", paste(unlist(composites), collapse = ", \n      ")) else ""
+  select_scores    <- paste(unlist(sql_parts), collapse = ", \n      ")
 
-  # The CTE 'scored_base' normalizes the data.
-  # The outer SELECT calculates composites on those normalized values.
+  # Handle composites and comma safely
+  if (length(composites) > 0) {
+    select_comps <- paste(",", paste(unlist(composites), collapse = ", \n      "))
+  } else {
+    select_comps <- ""
+  }
+
+  # Create SCORED View
+  # Note: select_comps includes the leading comma if composites exist.
   query <- glue::glue("
-    COPY (
-      WITH scored_base AS (
-        SELECT
-          {select_static},
-          {select_scores}
-        FROM raw_{table_name}
-      )
-      SELECT
-        *
-        {select_comps}
-      FROM scored_base
-    ) TO '{output_path}' (FORMAT PARQUET)
+    CREATE OR REPLACE TABLE scored_{table_name} AS
+    WITH base_norm AS (
+      SELECT {select_static}, {select_scores}
+      FROM raw_{table_name}
+    )
+    SELECT * {select_comps} FROM base_norm
   ")
 
   DBI::dbExecute(conn, query)
   DBI::dbExecute(conn, glue::glue("DROP VIEW raw_{table_name}"))
+  message("   ✅ Scores Calculated (In-Memory)")
 }
 ```
 
 ## Run Scoring
 
-### Parcels
-
 ```{r}
 #| label: run-parcels
-score_and_export(conn, fp_parcels_enriched, fp_parcels_scored, "targets_parcels")
+
+# Calculate scores for both layers (Result is stored in DuckDB tables 'scored_parcels' and 'scored_h3')
+score_points(conn, fp_pts_parcels_enriched, "parcels")
+score_points(conn, fp_pts_h3_enriched, "h3")
 ```
 
-## H3 Grid
+## Rejoin Geometry & Export
+
+This step joins the lightweight scored data back to the heavy Polygons and saves the final result.
 
 ```{r}
-#| label: run-h3
-score_and_export(conn, fp_h3_enriched, fp_h3_scored, "targets_h3")
+#| label: func-export
+
+join_and_export <- function(conn, geom_path, point_table, id_col, out_path) {
+
+  message(glue::glue("🔗 Joining {point_table} to Polygons -> {basename(out_path)}..."))
+
+  # 1. Load Polygon Geometry & Standardize
+  #    Using the 'Universal Adapter' (ST_GeomFromWKB + ST_AsWKB) ensures this works
+  #    regardless of whether the input is GeoParquet (Geometry) or Raw Parquet (Blob).
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TEMP TABLE raw_polys AS
+    SELECT
+      {id_col},
+      ST_GeomFromWKB(ST_AsWKB(geometry)) as poly_geom
+    FROM read_parquet('{geom_path}')
+  "))
+
+  # 2. Join & Export
+  #    - We select ALL attributes from the point table (pts.*)
+  #    - We EXCLUDE the point geometry column ('geom') so it doesn't conflict
+  #    - We join and transform the polygon geometry ('poly_geom') from the boundary file
+  DBI::dbExecute(conn, glue::glue("
+    COPY (
+      SELECT
+        pts.* EXCLUDE (geom, oid), -- Drop the Point geometry
+
+        -- Transform Polygon to WGS84 and export as WKB 'geometry' column
+        ST_AsWKB(ST_Transform(
+           poly.poly_geom,
+           '{CRS_UTM}', '{CRS_WGS}', always_xy := true
+        )) as geometry
+
+      FROM {point_table} pts
+      JOIN raw_polys poly ON pts.{id_col} = poly.{id_col}
+    ) TO '{out_path}' (FORMAT PARQUET)
+  "))
+
+  DBI::dbExecute(conn, "DROP TABLE raw_polys")
+}
+```
+
+```{r}
+#| label: export-scored
+
+# Join Scored Points -> Polygons
+join_and_export(conn, fp_poly_parcels, "scored_parcels", "parcel_id", fp_parcels_scored)
+join_and_export(conn, fp_poly_h3,      "scored_h3",      "h3_index",  fp_h3_scored)
+```
+
+```{r}
+#| label: export-enriched
+# We also want the RAW values (minutes/miles) attached to polygons for debugging/analysis.
+# So we reload the 'enriched' points and join them too.
+
+message("🔗 Joining Raw Enriched Data to Polygons...")
+
+# Parcels
+DBI::dbExecute(conn, glue::glue("CREATE OR REPLACE VIEW raw_pts_parcels AS SELECT * FROM read_parquet('{fp_pts_parcels_enriched}')"))
+join_and_export(conn, fp_poly_parcels, "raw_pts_parcels", "parcel_id", fp_parcels_enriched)
+
+# H3
+DBI::dbExecute(conn, glue::glue("CREATE OR REPLACE VIEW raw_pts_h3 AS SELECT * FROM read_parquet('{fp_pts_h3_enriched}')"))
+join_and_export(conn, fp_poly_h3, "raw_pts_h3", "h3_index", fp_h3_enriched)
 ```
 
 ### Export to GDB
@@ -286,18 +339,15 @@ message("✅ GDB Export Complete!")
 
 message("📦 Compressing GDB to Zip...")
 
-# Define Paths
-zip_path <- paste0(gdb_path, ".zip")
-
 # 3. Create Zip
 zip::zip(
-  zipfile = zip_path,      # Where to save the result (Absolute path works best)
+  zipfile = paste0(gdb_path, ".zip"),  # Where to save the result (Absolute path works best)
   files   = fs::path_file(gdb_path), # What to grab (Relative to 'root')
-  root    = fs::path_dir(gdb_path),      # The virtual working directory for this operation
+  root    = fs::path_dir(gdb_path),  # The virtual working directory for this operation
   mode    = "mirror"       # "mirror" is best for exact copies
 )
 
-message(glue::glue("✅ Compressed successfully: {zip_path}"))
+message(glue::glue("✅ Compressed successfully."))
 ```
 
 ## Validation

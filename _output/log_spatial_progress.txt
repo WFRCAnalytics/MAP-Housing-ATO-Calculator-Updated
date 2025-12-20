@@ -1,0 +1,77 @@
+Started at: 2025-12-19 22:22:39.548319
+2025-12-19 22:22:39.620268 - 📦 Preparing: OZ (Tol: 10m)
+2025-12-19 22:22:39.670363 -    ✅ Prepared in 0.05s
+2025-12-19 22:22:39.761432 -    🚀 Applied to points_parcels in 0.09s
+2025-12-19 22:22:39.837576 -    🚀 Applied to points_h3 in 0.07s
+2025-12-19 22:22:40.079415 - 📦 Preparing: AP (Tol: 10m)
+2025-12-19 22:22:40.109477 -    ✅ Prepared in 0.03s
+2025-12-19 22:23:03.848628 -    🚀 Applied to points_parcels in 23.74s
+2025-12-19 22:23:16.924518 -    🚀 Applied to points_h3 in 13.08s
+2025-12-19 22:23:17.139889 - 📦 Preparing: CM (Tol: 10m)
+2025-12-19 22:23:17.176369 -    ✅ Prepared in 0.04s
+2025-12-19 22:23:17.253407 -    🚀 Applied to points_parcels in 0.08s
+2025-12-19 22:23:17.29912 -    🚀 Applied to points_h3 in 0.04s
+2025-12-19 22:23:17.528614 - 📦 Preparing: CU (Tol: 10m)
+2025-12-19 22:23:17.56583 -    ✅ Prepared in 0.04s
+2025-12-19 22:23:17.652764 -    🚀 Applied to points_parcels in 0.09s
+2025-12-19 22:23:17.706997 -    🚀 Applied to points_h3 in 0.05s
+2025-12-19 22:23:17.897099 - 📦 Preparing: CC (Tol: 10m)
+2025-12-19 22:23:17.934778 -    ✅ Prepared in 0.04s
+2025-12-19 22:23:18.021133 -    🚀 Applied to points_parcels in 0.09s
+2025-12-19 22:23:18.071587 -    🚀 Applied to points_h3 in 0.05s
+2025-12-19 22:23:18.256748 - 📦 Preparing: CN (Tol: 10m)
+2025-12-19 22:23:18.293328 -    ✅ Prepared in 0.04s
+2025-12-19 22:23:18.38249 -    🚀 Applied to points_parcels in 0.09s
+2025-12-19 22:23:18.435893 -    🚀 Applied to points_h3 in 0.05s
+2025-12-19 22:23:18.618122 - 📦 Preparing: TT_Local (Tol: 25m)
+2025-12-19 22:23:20.206302 -    ✅ Prepared in 1.59s
+2025-12-19 22:23:51.963142 -    🚀 Applied to points_parcels in 31.76s
+2025-12-19 22:24:10.673112 -    🚀 Applied to points_h3 in 18.71s
+2025-12-19 22:24:10.856119 - 📦 Preparing: TT_Rapid (Tol: 25m)
+2025-12-19 22:24:10.918772 -    ✅ Prepared in 0.06s
+2025-12-19 22:24:16.773034 -    🚀 Applied to points_parcels in 5.85s
+2025-12-19 22:24:18.917177 -    🚀 Applied to points_h3 in 2.14s
+2025-12-19 22:24:19.143046 - 📦 Preparing: TT_CRT (Tol: 25m)
+2025-12-19 22:24:19.177423 -    ✅ Prepared in 0.03s
+2025-12-19 22:24:23.135141 -    🚀 Applied to points_parcels in 3.96s
+2025-12-19 22:24:25.1271 -    🚀 Applied to points_h3 in 1.99s
+2025-12-19 22:24:25.343306 - 📦 Preparing: TF (Tol: 100m)
+2025-12-19 22:24:27.512221 -    ✅ Prepared in 2.17s
+2025-12-19 22:24:35.127374 -    🚀 Applied to points_parcels in 7.61s
+2025-12-19 22:25:06.333139 -    🚀 Applied to points_h3 in 31.21s
+2025-12-19 22:25:06.561757 - 📦 Preparing: AC (Tol: 25m)
+2025-12-19 22:25:06.814412 -    ✅ Prepared in 0.25s
+2025-12-19 22:26:01.420454 -    🚀 Applied to points_parcels in 54.61s
+2025-12-19 22:26:35.136959 -    🚀 Applied to points_h3 in 33.72s
+2025-12-19 22:26:35.383615 - 📦 Preparing: AH (Tol: 100m)
+2025-12-19 22:26:42.830094 -    ✅ Prepared in 7.45s
+2025-12-19 22:26:50.859425 -    🚀 Applied to points_parcels in 8.03s
+2025-12-19 22:27:35.520247 -    🚀 Applied to points_h3 in 44.66s
+2025-12-19 22:27:35.744396 - 📦 Preparing: AG (Tol: 25m)
+2025-12-19 22:27:35.976404 -    ✅ Prepared in 0.23s
+2025-12-19 22:28:10.344011 -    🚀 Applied to points_parcels in 34.37s
+2025-12-19 22:28:30.458748 -    🚀 Applied to points_h3 in 20.11s
+2025-12-19 22:28:30.680392 - 📦 Preparing: AM (Tol: 25m)
+2025-12-19 22:28:30.750458 -    ✅ Prepared in 0.07s
+2025-12-19 22:28:55.04806 -    🚀 Applied to points_parcels in 24.3s
+2025-12-19 22:29:09.236168 -    🚀 Applied to points_h3 in 14.19s
+2025-12-19 22:29:09.458161 - 📦 Preparing: AE_K12 (Tol: 25m)
+2025-12-19 22:29:09.757086 -    ✅ Prepared in 0.3s
+2025-12-19 22:30:25.782913 -    🚀 Applied to points_parcels in 76.03s
+2025-12-19 22:31:11.550246 -    🚀 Applied to points_h3 in 45.77s
+2025-12-19 22:31:11.73653 - 📦 Preparing: AE_High (Tol: 50m)
+2025-12-19 22:31:11.79994 -    ✅ Prepared in 0.06s
+2025-12-19 22:31:16.678487 -    🚀 Applied to points_parcels in 4.88s
+2025-12-19 22:31:19.72875 -    🚀 Applied to points_h3 in 3.05s
+2025-12-19 22:31:19.95379 - 📦 Preparing: TA_class1 (Tol: 25m)
+2025-12-19 22:31:19.981307 -    ✅ Prepared in 0.03s
+2025-12-19 22:31:20.356754 -    🚀 Applied to points_parcels in 0.37s
+2025-12-19 22:31:20.56583 -    🚀 Applied to points_h3 in 0.21s
+2025-12-19 22:31:20.758781 - 📦 Preparing: TA_class2 (Tol: 25m)
+2025-12-19 22:31:20.795015 -    ✅ Prepared in 0.04s
+2025-12-19 22:31:21.121852 -    🚀 Applied to points_parcels in 0.33s
+2025-12-19 22:31:21.408345 -    🚀 Applied to points_h3 in 0.29s
+2025-12-19 22:31:21.606747 - 📦 Preparing: TA_trails (Tol: 25m)
+2025-12-19 22:31:21.668533 -    ✅ Prepared in 0.06s
+2025-12-19 22:31:22.109581 -    🚀 Applied to points_parcels in 0.44s
+2025-12-19 22:31:22.533835 -    🚀 Applied to points_h3 in 0.42s
