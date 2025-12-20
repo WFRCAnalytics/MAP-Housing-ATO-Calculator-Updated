@@ -69,3 +69,7 @@ _output/parcels_*.parquet
 _output/*.gdb
 
 *.gdb.zip
+
+# Shinyapps
+_app/h3_scored.parquet
+shinyapps.txt

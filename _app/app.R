@@ -14,10 +14,8 @@ library(utils)
 # 1. GLOBAL SETUP & DATA LOADING
 # ==============================================================================
 
-data_path <- "../_output/h3_scored.parquet"
-if (!file.exists(data_path)) {
-  data_path <- "h3_scored.parquet"
-}
+# 1. Define the target path (relative to this app.R file)
+data_path <- "h3_scored.parquet"
 
 # Load Data
 message("Loading data...")
