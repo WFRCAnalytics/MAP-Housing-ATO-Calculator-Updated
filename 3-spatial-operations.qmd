@@ -768,13 +768,20 @@ We iterate through the config and apply logic to both tables.
 
 message("🚀 Starting Staged Processing on Points...")
 
+# 1. Start Total Timer
+t_total_start <- Sys.time()
+
 amenity_config |>
   purrr::pwalk(function(...) {
     process_layers(conn, "points_parcels", list(...))
     process_layers(conn, "points_h3", list(...))
   })
 
-message("✅ Points enriched successfully.")
+# 4. End Total Timer & Log
+t_total_end <- Sys.time()
+total_duration <- round(difftime(t_total_end, t_total_start, units = "mins"), 2)
+
+message(glue::glue("✅ Points enriched successfully. Total Time: {total_duration} mins."))
 ```
 
 ```{r}

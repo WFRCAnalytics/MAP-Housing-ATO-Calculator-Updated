@@ -323,10 +323,10 @@ if (file.exists(fp_boundary_wftdm)) {
       )
 
       -- 5. FINAL SELECT: Explicit Transform
-      --    ST_Transform(geometry, source_crs, target_crs)
+      --    ST_Transform(geometry, source_crs, target_crs, always_xy := true)
       SELECT
         ST_AsWKB(
-          ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326')
+          ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326', always_xy := true)
         ) as geometry
       FROM final_union
 
@@ -435,11 +435,11 @@ if (file.exists(fp_h3_grid)) {
     COPY (
       WITH boundary_parts AS (
         -- 1. Read Boundary & FORCE Transform to 4326
-        --    ST_Transform(geom, source_crs, target_crs)
+        --    ST_Transform(geom, source_crs, target_crs, always_xy := true)
         SELECT
           unnest(
             ST_Dump(
-              ST_Transform(geometry, '{BOUNDARY_CRS}', 'EPSG:4326')
+              ST_Transform(geometry, '{BOUNDARY_CRS}', 'EPSG:4326', always_xy := true)
             )
           ) as d
         FROM read_parquet('{fp_boundary_wftdm}')
