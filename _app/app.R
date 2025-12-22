@@ -14,118 +14,34 @@ library(utils)
 # 1. GLOBAL SETUP & DATA LOADING
 # ==============================================================================
 
-# 1. Define the target path (relative to this app.R file)
-data_path <- "h3_scored.parquet"
+# 1. Define target paths
+data_path <- "data/h3_scored.parquet"
+cities_path <- "data/UtahMunicipalBoundaries_5481515892185534628.geojson"
 
-# Load Data
-message("Loading data...")
+# Load H3 Data
+message("Loading H3 data...")
 ds_h3 <- arrow::open_dataset(data_path) |>
   sf::st_as_sf(crs = 4326)
-message("Data loaded: ", nrow(ds_h3), " rows")
+message("H3 Data loaded: ", nrow(ds_h3), " rows")
 
-# --- CITY LOOKUP TABLE ---
-all_cities_map <- c(
-  "Alpine" = "ALP",
-  "Alta" = "ALA",
-  "American Fork" = "AFK",
-  "Bluffdale" = "BDL",
-  "Bountiful" = "BTF",
-  "Brigham City" = "BGM",
-  "Brighton" = "BRT",
-  "Cedar Fort" = "CDF",
-  "Cedar Hills" = "CHL",
-  "Centerville" = "CEN",
-  "Charleston" = "CHA",
-  "Clearfield" = "CLR",
-  "Clinton" = "CLI",
-  "Coalville" = "COA",
-  "Copperton" = "CMT",
-  "Cottonwood Heights" = "COT",
-  "Draper" = "DRA",
-  "Eagle Mountain" = "EAG",
-  "Elk Ridge" = "ELK",
-  "Fairfield" = "FFD",
-  "Farmington" = "FRM",
-  "Farr West" = "FRR",
-  "Fruit Heights" = "FRU",
-  "Genola" = "GEN",
-  "Goshen" = "GOS",
-  "Harrisville" = "HAR",
-  "Heber City" = "HEB",
-  "Herriman" = "HER",
-  "Highland" = "HGH",
-  "Holladay" = "HOL",
-  "Honeyville" = "HON",
-  "Hooper" = "HOO",
-  "Huntsville" = "HVL",
-  "Kamas" = "KAM",
-  "Kaysville" = "KAY",
-  "Kearns" = "KMT",
-  "Layton" = "LAY",
-  "Lehi" = "LEH",
-  "Lindon" = "LIN",
-  "Logan" = "LOG",
-  "Mapleton" = "MAP",
-  "Marriott-Slaterville" = "MSL",
-  "Midvale" = "MID",
-  "Midway" = "MWY",
-  "Millcreek" = "MLC",
-  "Morgan" = "MRG",
-  "Murray" = "MUR",
-  "North Ogden" = "NOG",
-  "North Salt Lake" = "NSL",
-  "Ogden" = "OGD",
-  "Orem" = "ORE",
-  "Park City" = "PKC",
-  "Payson" = "PAY",
-  "Perry" = "PER",
-  "Plain City" = "PLN",
-  "Pleasant Grove" = "PGR",
-  "Pleasant View" = "PVW",
-  "Provo" = "PVO",
-  "Riverdale" = "RVD",
-  "Riverton" = "RVT",
-  "Roy" = "ROY",
-  "Rush Valley" = "RUS",
-  "Salem" = "SLM",
-  "Salt Lake City" = "SLC",
-  "Sandy" = "SAN",
-  "Santaquin" = "SAQ",
-  "Saratoga Springs" = "SAR",
-  "South Jordan" = "SJC",
-  "South Ogden" = "SOG",
-  "South Salt Lake" = "SSL",
-  "South Weber" = "SWE",
-  "Spanish Fork" = "SFK",
-  "Springville" = "SPV",
-  "Stockton" = "STK",
-  "Sunset" = "SUN",
-  "Syracuse" = "SYR",
-  "Taylorsville" = "TAY",
-  "Tooele" = "TOO",
-  "Trenton" = "TRN",
-  "Uintah" = "UIN",
-  "Vernal" = "VER",
-  "Vineyard" = "VIN",
-  "Wallsburg" = "WBG",
-  "Washington Terrace" = "WTR",
-  "Wellington" = "WEL",
-  "Wellsville" = "WLV",
-  "Wendover" = "WEN",
-  "West Bountiful" = "WBO",
-  "West Haven" = "WHV",
-  "West Jordan" = "WJC",
-  "West Point" = "WPT",
-  "West Valley City" = "WVC",
-  "White City" = "WMT",
-  "Willard" = "WIL",
-  "Woodland Hills" = "WDL",
-  "Woods Cross" = "WCR"
-)
+# Load City Boundaries
+message("Loading City Boundaries...")
+if (file.exists(cities_path)) {
+  cities_sf <- sf::st_read(cities_path, quiet = TRUE) |>
+    sf::st_transform(4326)
 
+  # GENERATE CITY LOOKUP DYNAMICALLY
+  cities_sf <- cities_sf[order(cities_sf$NAME), ]
+  all_cities_map <- stats::setNames(cities_sf$UGRCODE, cities_sf$NAME)
+} else {
+  message("Warning: City boundaries file not found.")
+  cities_sf <- NULL
+  all_cities_map <- character(0)
+}
+
+# Filter choices to only those present in the H3 data
 present_codes <- unique(ds_h3$CommCode)
 city_choices <- all_cities_map[all_cities_map %in% present_codes]
-city_choices <- city_choices[order(names(city_choices))]
 
 # Internal Mappings
 lu_mappings <- list(
@@ -289,7 +205,6 @@ layer_defs <- list(
   )
 )
 
-# --- NAME MAPPING ---
 layer_names <- c(
   "w_CM" = "Metropolitan Centers",
   "w_CU" = "Urban Centers",
@@ -308,7 +223,6 @@ layer_names <- c(
   "w_AP" = "10-min Walk to Parks"
 )
 
-# --- HELPER: Slider with shinyjs Icon Toggle ---
 sliderWithLayer <- function(inputId, label) {
   shiny::tagList(
     shiny::div(
@@ -593,7 +507,7 @@ server <- function(input, output, session) {
         shiny::br(),
         "1. Start by selecting your ",
         shiny::tags$strong("community"),
-        " (one or more) from the sidebar.",
+        " (one or more) from the sidebar, or click on the map.",
         shiny::br(),
         "2. Optionally, filter the map by specific ",
         shiny::tags$strong("land use"),
@@ -654,7 +568,6 @@ server <- function(input, output, session) {
     shiny::removeModal()
   })
 
-  # --- 1. STATE TRACKING ---
   active_ref_layers <- shiny::reactiveVal(list())
   all_sliders <- names(layer_defs)
 
@@ -672,17 +585,16 @@ server <- function(input, output, session) {
     shinyjs::toggleState("z_mult", condition = input$map_3d)
   })
 
-  # --- HELPER: Update Layer Control ---
   refresh_layer_control <- function(proxy, is_3d, ref_layers_list) {
     heatmap_id <- if (is_3d) "h3_layer_3d" else "h3_layer_2d"
     control_list <- list(
       "Major Roads" = "lay_roads_tile",
-      "Heatmap" = heatmap_id
+      "Heatmap" = heatmap_id,
+      "City Boundaries" = c("lay_cities_fill", "lay_cities_line")
     )
     if (length(ref_layers_list) > 0) {
       control_list <- c(control_list, ref_layers_list)
     }
-
     proxy |>
       mapgl::clear_controls("layers") |>
       mapgl::add_layers_control(
@@ -693,12 +605,12 @@ server <- function(input, output, session) {
       )
   }
 
-  # --- 2. DATA PROCESSING ---
   target_bc_codes <- shiny::reactive({
     shiny::req(input$land_use_group)
     unique(unlist(lu_mappings[input$land_use_group]))
   })
 
+  # --- Data Processing with RESTORED Tooltip ---
   filtered_data <- shiny::reactive({
     shiny::req(input$comm_code, target_bc_codes())
     weights <- stats::setNames(
@@ -828,49 +740,67 @@ server <- function(input, output, session) {
   # --- 3. MAP INITIALIZATION ---
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
-      # style = mapgl::carto_style("voyager"),
       style = mapgl::openfreemap_style("liberty"),
       center = c(-111.8910, 40.7608),
       zoom = 8,
       pitch = 0
     ) |>
-      mapgl::add_navigation_control(
-        position = "top-left"
-      ) |>
-      mapgl::add_scale_control(
-        position = "bottom-left",
-        unit = "imperial"
-      ) |>
-      mapgl::add_geolocate_control(
-        position = "top-left"
-      ) |>
-      mapgl::add_geocoder_control(
-        position = "top-left"
-      ) |>
-      mapgl::add_reset_control(
-        position = "top-left"
-      ) |>
+      mapgl::add_navigation_control(position = "top-left") |>
+      mapgl::add_scale_control(position = "bottom-left", unit = "imperial") |>
+      mapgl::add_geolocate_control(position = "top-left") |>
+      mapgl::add_geocoder_control(position = "top-left") |>
+      mapgl::add_reset_control(position = "top-left") |>
+      # 1. ADD SOURCE FOR ROADS
       mapgl::add_raster_source(
         id = "src_roads_tile",
         tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
         tileSize = 256
-      ) |>
+      )
+
+    # 2. ADD CITY FILL (BOTTOM LAYER)
+    if (!is.null(cities_sf)) {
+      m <- m |>
+        mapgl::add_fill_layer(
+          id = "lay_cities_fill",
+          source = cities_sf,
+          fill_color = "#CCCCCC",
+          fill_opacity = 0.5
+        )
+    }
+
+    # 3. ADD ROADS (MIDDLE LAYER - On top of fill)
+    m <- m |>
       mapgl::add_raster_layer(
         id = "lay_roads_tile",
         source = "src_roads_tile",
         raster_opacity = 0.9,
         visibility = "none"
-      ) |>
-      # Initial Layer Control (Just Roads)
+      )
+
+    # 4. ADD CITY LINES (TOP LAYER - On top of roads)
+    if (!is.null(cities_sf)) {
+      m <- m |>
+        mapgl::add_line_layer(
+          id = "lay_cities_line",
+          source = cities_sf,
+          line_color = "#999999",
+          line_width = 1.5,
+          line_opacity = 0.5
+        )
+    }
+
+    # ADD LAYERS CONTROL (Grouped Cities)
+    m <- m |>
       mapgl::add_layers_control(
         position = "top-right",
-        layers = list("Major Roads" = "lay_roads_tile"),
+        layers = list(
+          "Major Roads" = "lay_roads_tile",
+          "City Boundaries" = c("lay_cities_fill", "lay_cities_line")
+        ),
         collapsible = TRUE,
         active_color = "#233A57"
       )
 
-    # CRITICAL FIX: Pre-load ALL data sources here.
-    # This prevents the "Source already exists" error when toggling layers on/off.
     for (lid in names(layer_defs)) {
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
@@ -883,8 +813,6 @@ server <- function(input, output, session) {
           "&outFields=*&f=geojson"
         )
         suffix <- if (length(urls) > 1) paste0("_", i) else ""
-
-        # Add source immediately (but no layers yet)
         m <- m |>
           mapgl::add_source(
             id = paste0("src_", lid, suffix),
@@ -896,7 +824,76 @@ server <- function(input, output, session) {
     m
   })
 
-  # --- 4. REFERENCE LAYER TOGGLE LOGIC ---
+  # 4a. Map -> Sidebar (CLEANED)
+  shiny::observeEvent(input$map_feature_click, {
+    click_data <- input$map_feature_click
+    layer_id <- if (!is.null(click_data$layerId)) {
+      click_data$layerId
+    } else {
+      click_data$layer
+    }
+
+    clicked_code <- NULL
+    if (!is.null(layer_id)) {
+      if (layer_id == "lay_cities_fill" || layer_id == "lay_cities_line") {
+        clicked_code <- click_data$properties$UGRCODE
+      } else if (layer_id %in% c("h3_layer_2d", "h3_layer_3d")) {
+        clicked_code <- click_data$properties$CommCode
+      }
+    }
+
+    if (!is.null(clicked_code) && clicked_code %in% all_cities_map) {
+      current_selection <- input$comm_code
+      if (is.null(current_selection)) {
+        current_selection <- character(0)
+      }
+      new_selection <- if (clicked_code %in% current_selection) {
+        setdiff(current_selection, clicked_code)
+      } else {
+        c(current_selection, clicked_code)
+      }
+      shinyWidgets::updatePickerInput(
+        session,
+        "comm_code",
+        selected = new_selection
+      )
+    }
+  })
+
+  # 4b. Sidebar -> Map (Visual Highlight)
+  shiny::observeEvent(
+    input$comm_code,
+    {
+      if (!is.null(cities_sf)) {
+        proxy <- mapgl::maplibre_proxy("map")
+        if (length(input$comm_code) > 0) {
+          filter_exp <- as.list(c("in", "UGRCODE", input$comm_code))
+          proxy |>
+            mapgl::set_paint_property("lay_cities_line", "line-width", 2.5) |>
+            mapgl::set_paint_property(
+              "lay_cities_line",
+              "line-color",
+              "#233A57"
+            ) |>
+            mapgl::set_paint_property("lay_cities_line", "line-opacity", 0.9) |>
+            mapgl::set_filter("lay_cities_line", filter_exp)
+        } else {
+          proxy |>
+            mapgl::set_paint_property("lay_cities_line", "line-width", 1) |>
+            mapgl::set_paint_property(
+              "lay_cities_line",
+              "line-color",
+              "#999999"
+            ) |>
+            mapgl::set_paint_property("lay_cities_line", "line-opacity", 0.5) |>
+            mapgl::set_filter("lay_cities_line", NULL)
+        }
+      }
+    },
+    ignoreNULL = FALSE
+  )
+
+  # --- 5. REFERENCE LAYER TOGGLE LOGIC ---
   layer_states <- shiny::reactiveValues()
   for (lid in names(layer_defs)) {
     layer_states[[lid]] <- FALSE
@@ -905,7 +902,6 @@ server <- function(input, output, session) {
   lapply(names(layer_defs), function(lid) {
     shiny::observeEvent(input[[paste0("toggle_", lid)]], {
       layer_states[[lid]] <- !layer_states[[lid]]
-
       if (layer_states[[lid]]) {
         shinyjs::addClass(id = paste0("btn_", lid), class = "active")
       } else {
@@ -921,14 +917,12 @@ server <- function(input, output, session) {
         suffix <- if (length(urls) > 1) paste0("_", i) else ""
         source_id <- paste0("src_", lid, suffix)
         layer_id <- paste0("lay_", lid, suffix)
-
         current_ids <- c(current_ids, layer_id)
         if (def$type == "polygon") {
           current_ids <- c(current_ids, paste0(layer_id, "_ol"))
         }
 
         if (layer_states[[lid]]) {
-          # ADD LAYER (Source already exists from init)
           if (def$type == "polygon") {
             proxy <- proxy |>
               mapgl::add_fill_layer(
@@ -937,12 +931,14 @@ server <- function(input, output, session) {
                 fill_color = def$color,
                 fill_opacity = 0.7
               ) |>
+              mapgl::move_layer(layer_id, "lay_cities_line") |>
               mapgl::add_line_layer(
                 id = paste0(layer_id, "_ol"),
                 source = source_id,
                 line_color = def$color,
                 line_width = 1.5
-              )
+              ) |>
+              mapgl::move_layer(paste0(layer_id, "_ol"), "lay_cities_line")
           } else if (def$type == "line") {
             proxy <- proxy |>
               mapgl::add_line_layer(
@@ -950,7 +946,8 @@ server <- function(input, output, session) {
                 source = source_id,
                 line_color = def$color,
                 line_width = 2
-              )
+              ) |>
+              mapgl::move_layer(layer_id, "lay_cities_line")
           } else if (def$type == "point") {
             proxy <- proxy |>
               mapgl::add_circle_layer(
@@ -960,34 +957,29 @@ server <- function(input, output, session) {
                 circle_radius = 5,
                 circle_stroke_width = 1,
                 circle_stroke_color = "#fff"
-              )
+              ) |>
+              mapgl::move_layer(layer_id, "lay_cities_line")
           }
-          proxy <- proxy |> mapgl::move_layer("lay_roads_tile")
         } else {
-          # REMOVE LAYER (Keep Source)
           proxy <- proxy |> mapgl::clear_layer(layer_id)
           if (def$type == "polygon") {
             proxy <- proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
           }
         }
       }
-
-      # UPDATE ACTIVE LIST
       current_list <- active_ref_layers()
       human_name <- if (lid %in% names(layer_names)) layer_names[[lid]] else lid
-
       if (layer_states[[lid]]) {
         current_list[[human_name]] <- current_ids
       } else {
         current_list[[human_name]] <- NULL
       }
       active_ref_layers(current_list)
-
       refresh_layer_control(proxy, shiny::isolate(input$map_3d), current_list)
     })
   })
 
-  # --- 5. HEATMAP RENDERER ---
+  # --- 6. HEATMAP RENDERER ---
   shiny::observe({
     dat <- filtered_data()
     proxy <- mapgl::maplibre_proxy("map") |>
@@ -1018,6 +1010,8 @@ server <- function(input, output, session) {
             fill_extrusion_opacity = 0.9,
             tooltip = "tooltip_html"
           ) |>
+          # MOVE H3 BELOW ROADS (So roads appear on top of heatmap)
+          mapgl::move_layer("h3_layer_3d", "lay_roads_tile") |>
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 45)
       } else {
         proxy <- proxy |>
@@ -1032,19 +1026,14 @@ server <- function(input, output, session) {
             fill_opacity = 0.8,
             tooltip = "tooltip_html"
           ) |>
+          # MOVE H3 BELOW ROADS (So roads appear on top of heatmap)
+          mapgl::move_layer("h3_layer_2d", "lay_roads_tile") |>
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
       }
+      # FORCE City Lines to TOP of everything
+      proxy <- proxy |> mapgl::move_layer("lay_cities_line")
 
       current_refs <- shiny::isolate(active_ref_layers())
-      if (length(current_refs) > 0) {
-        for (ref_ids in current_refs) {
-          for (rid in ref_ids) {
-            proxy <- proxy |> mapgl::move_layer(rid)
-          }
-        }
-      }
-      proxy <- proxy |> mapgl::move_layer("lay_roads_tile")
-
       refresh_layer_control(proxy, input$map_3d, current_refs)
     }
   })

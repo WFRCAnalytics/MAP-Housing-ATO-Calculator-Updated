@@ -71,5 +71,5 @@ _output/*.gdb
 *.gdb.zip
 
 # Shinyapps
-_app/h3_scored.parquet
+_app/data/*.parquet
 shinyapps.txt

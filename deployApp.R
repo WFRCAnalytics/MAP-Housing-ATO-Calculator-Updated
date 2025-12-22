@@ -1,8 +1,13 @@
+library(dplyr)
 library(rsconnect)
+library(arrow)
 library(tools)
 
-src <- "_output/h3_scored.parquet"
-dst <- "_app/h3_scored.parquet"
+src_h3 <- "_output/h3_scored.parquet"
+dst_h3 <- "_app/data/h3_scored.parquet"
+
+src_mun <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
+dst_mun <- "_app/data/UtahMunicipalBoundaries_5481515892185534628.geojson"
 
 # If this is the first time deploying fromt the device, you have to run the following.
 # rsconnect::setAccountInfo(name="<ACCOUNT>", token="<TOKEN>", secret="<SECRET>")
@@ -10,10 +15,47 @@ dst <- "_app/h3_scored.parquet"
 # Check Reference at: https://shiny.posit.co/r/articles/share/shinyapps/ for details.
 # Check https://www.shinyapps.io/admin/#/tokens for the ACCOUNT, TOKEN, and SECRET
 
-# Copy if destination is missing OR if the file content (checksum) has changed
-if (!file.exists(dst) || (tools::md5sum(src) != tools::md5sum(dst))) {
+# 1. Sync Parquet File
+if (!file.exists(dst_h3) || (tools::md5sum(src_h3) != tools::md5sum(dst_h3))) {
   message("Updating data file...")
-  file.copy(src, dst, overwrite = TRUE)
+  file.copy(src_h3, dst_h3, overwrite = TRUE)
+}
+
+# 2. Download Municipalities
+if (!file.exists(dst_mun)) {
+  message("Updating city boundary...")
+
+  # Extract codes from your parquet to build the filter
+  mun_codes <- arrow::open_dataset(dst_h3) |>
+    dplyr::select(CommCode) |>
+    dplyr::distinct() |>
+    dplyr::filter(!is.na(CommCode)) |>
+    dplyr::collect() |>
+    pull(CommCode)
+
+  # Construct the SQL 'IN' clause for the ArcGIS query
+  # Result: UGRCODE IN ('LEH','SLC','HOO'...)
+  where_clause <- paste0(
+    "UGRCODE IN ('",
+    paste(mun_codes, collapse = "','"),
+    "')"
+  )
+
+  # Build the Query URL
+  # f=geojson: returns the spatial data in the format you want
+  # outFields=*: gets all columns (or list specific ones to save bandwidth)
+  query_url <- URLencode(paste0(
+    src_mun,
+    "/query?",
+    "where=",
+    where_clause,
+    "&outFields=*",
+    "&f=geojson",
+    "&outSR=4326"
+  ))
+
+  # Download directly to the destination path
+  download.file(query_url, destfile = dst_mun, mode = "wb", quiet = TRUE)
 }
 
 # Deploy
