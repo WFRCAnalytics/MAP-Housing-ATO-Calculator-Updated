@@ -136,14 +136,14 @@ layer_defs <- list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
     query = "1=1",
     type = "polygon",
-    color = "#FF7F00"
-  ),
+    color = "#e7298a"
+  ), # Dark Pink
   "w_AT" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
     query = "1=1",
     type = "polygon",
-    color = "#FFFF33"
-  ),
+    color = "#7570b3"
+  ), # Slate Blue
   # Transportation
   "w_TT" = list(
     url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0",
@@ -587,6 +587,7 @@ server <- function(input, output, session) {
 
   refresh_layer_control <- function(proxy, is_3d, ref_layers_list) {
     heatmap_id <- if (is_3d) "h3_layer_3d" else "h3_layer_2d"
+    # GROUPED LAYERS
     control_list <- list(
       "Major Roads" = "lay_roads_tile",
       "Heatmap" = heatmap_id,
@@ -610,7 +611,7 @@ server <- function(input, output, session) {
     unique(unlist(lu_mappings[input$land_use_group]))
   })
 
-  # --- Data Processing with RESTORED Tooltip ---
+  # --- Data Processing with REORDERED Tooltip ---
   filtered_data <- shiny::reactive({
     shiny::req(input$comm_code, target_bc_codes())
     weights <- stats::setNames(
@@ -652,6 +653,8 @@ server <- function(input, output, session) {
       c_tt <- layer_defs$w_TT$color
       c_tf <- layer_defs$w_TF$color
       c_ta <- layer_defs$w_TA$color
+      c_aa <- layer_defs$w_AA$color
+      c_at <- layer_defs$w_AT$color
       MAX_H <- 40
 
       df$tooltip_html <- paste0(
@@ -663,8 +666,57 @@ server <- function(input, output, session) {
         "<div style='font-size:12px; color:#666; margin-top:2px;'>Type: ",
         df$bc_name,
         "</div></div>",
-        "<div style='font-size:10px; font-weight:bold; color:#999; margin-bottom:4px;'>NECESSITIES</div>",
+
+        # --- TOP ROW: TRANSPORTATION & JOB ACCESS (SWAPPED UP) ---
+        "<div style='display: flex; justify-content: space-between; margin-bottom: 4px;'>",
+        "<div style='font-size:10px; font-weight:bold; color:#999;'>TRANSPORTATION</div>",
+        "<div style='font-size:10px; font-weight:bold; color:#999; text-align: right;'>JOB ACCESS</div>",
+        "</div>",
         "<div style='display: flex; gap: 6px; height: 55px; align-items: flex-end; justify-content: space-between; margin-bottom: 12px;'>",
+        # Transport
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_tt,
+        "; min-height: 1px; height:",
+        round(df$TT * MAX_H),
+        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
+        c_tt,
+        ";'><i class='fa-solid fa-bus'></i></div></div>",
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_tf,
+        "; min-height: 1px; height:",
+        round(df$TF * MAX_H),
+        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
+        c_tf,
+        ";'><i class='fa-solid fa-road'></i></div></div>",
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_ta,
+        "; min-height: 1px; height:",
+        round(df$TA * MAX_H),
+        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
+        c_ta,
+        ";'><i class='fa-solid fa-bicycle'></i></div></div>",
+        # Buffer
+        "<div style='width: 18px;'></div>",
+        # Jobs
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_aa,
+        "; min-height: 1px; height:",
+        round(df$AA * MAX_H),
+        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
+        c_aa,
+        ";'><i class='fa-solid fa-car'></i></div></div>",
+        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
+        c_at,
+        "; min-height: 1px; height:",
+        round(df$AT * MAX_H),
+        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
+        c_at,
+        ";'><i class='fa-solid fa-train'></i></div></div>",
+        "</div>",
+
+        # --- BOTTOM ROW: NECESSITIES (SWAPPED DOWN) ---
+        "<div style='font-size:10px; font-weight:bold; color:#999; margin-bottom:4px;'>NECESSITIES</div>",
+        "<div style='display: flex; gap: 6px; height: 55px; align-items: flex-end; justify-content: space-between;'>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ac,
         "; min-height: 1px; height:",
@@ -708,30 +760,8 @@ server <- function(input, output, session) {
         c_ap,
         ";'><i class='fa-solid fa-tree'></i></div></div>",
         "</div>",
-        "<div style='font-size:10px; font-weight:bold; color:#999; margin-bottom:4px;'>TRANSPORTATION</div>",
-        "<div style='display: flex; gap: 10px; height: 55px; align-items: flex-end; justify-content: flex-start;'>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
-        c_tt,
-        "; min-height: 1px; height:",
-        round(df$TT * MAX_H),
-        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
-        c_tt,
-        ";'><i class='fa-solid fa-bus'></i></div></div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
-        c_tf,
-        "; min-height: 1px; height:",
-        round(df$TF * MAX_H),
-        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
-        c_tf,
-        ";'><i class='fa-solid fa-road'></i></div></div>",
-        "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
-        c_ta,
-        "; min-height: 1px; height:",
-        round(df$TA * MAX_H),
-        "px;'></div><div style='font-size:12px; margin-top:2px; color:",
-        c_ta,
-        ";'><i class='fa-solid fa-bicycle'></i></div></div>",
-        "</div></div>"
+
+        "</div>"
       )
     }
     return(df)
