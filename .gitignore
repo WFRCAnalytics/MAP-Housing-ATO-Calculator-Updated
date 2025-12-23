@@ -72,4 +72,5 @@ _output/*.gdb
 
 # Shinyapps
 _app/data/*.parquet
+_app/data/*.geojson
 shinyapps.txt

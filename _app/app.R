@@ -545,7 +545,7 @@ server <- function(input, output, session) {
           shiny::a(
             href = "mailto:analytics@wfrc.utah.gov",
             shiny::icon("envelope"),
-            " WFRC Analytics Team (analytics@wfrc.utah.gov)",
+            " WFRC Analytics Team",
             style = "color: #233A57; text-decoration: none;"
           )
         ),
@@ -611,7 +611,7 @@ server <- function(input, output, session) {
     unique(unlist(lu_mappings[input$land_use_group]))
   })
 
-  # --- Data Processing with REORDERED Tooltip ---
+  # --- Data Processing with RESTORED Tooltip ---
   filtered_data <- shiny::reactive({
     shiny::req(input$comm_code, target_bc_codes())
     weights <- stats::setNames(
@@ -1009,7 +1009,7 @@ server <- function(input, output, session) {
     })
   })
 
-  # --- 6. HEATMAP RENDERER ---
+  # --- 6. HEATMAP RENDERER (Uses filtered_data with embedded scoring) ---
   shiny::observe({
     dat <- filtered_data()
     proxy <- mapgl::maplibre_proxy("map") |>
@@ -1017,6 +1017,26 @@ server <- function(input, output, session) {
       mapgl::clear_layer("h3_layer_2d")
 
     if (nrow(dat) > 0) {
+      # --- DYNAMIC SCALE CALCULATION (FOR LEGEND AND MAP) ---
+      min_s <- min(dat$score, na.rm = TRUE)
+      max_s <- max(dat$score, na.rm = TRUE)
+      if (max_s == min_s) {
+        max_s <- min_s + 0.0001
+      }
+
+      # Create rounded stops for cleaner legend
+      raw_seq <- seq(min_s, max_s, length.out = 6)
+      stops_val <- unique(round(raw_seq, 2))
+
+      # Handle color palette matching
+      n_stops <- length(stops_val)
+      pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
+      if (n_stops < 6) {
+        pal_colors <- pal_colors[round(seq(1, 6, length.out = n_stops))]
+      }
+
+      target_layer <- if (input$map_3d) "h3_layer_3d" else "h3_layer_2d"
+
       if (input$map_3d) {
         extrusion_val <- if (is.numeric(input$z_mult)) {
           input$z_mult * 1000
@@ -1027,10 +1047,11 @@ server <- function(input, output, session) {
           mapgl::add_fill_extrusion_layer(
             "h3_layer_3d",
             dat,
+            # Use Dynamic Stops
             fill_extrusion_color = mapgl::interpolate(
               column = "score",
-              values = c(0, 0.2, 0.4, 0.6, 0.8, 1),
-              stops = RColorBrewer::brewer.pal(6, "YlGnBu")
+              values = stops_val,
+              stops = pal_colors
             ),
             fill_extrusion_height = mapgl::interpolate(
               column = "score",
@@ -1040,7 +1061,6 @@ server <- function(input, output, session) {
             fill_extrusion_opacity = 0.9,
             tooltip = "tooltip_html"
           ) |>
-          # MOVE H3 BELOW ROADS (So roads appear on top of heatmap)
           mapgl::move_layer("h3_layer_3d", "lay_roads_tile") |>
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 45)
       } else {
@@ -1048,20 +1068,31 @@ server <- function(input, output, session) {
           mapgl::add_fill_layer(
             "h3_layer_2d",
             dat,
+            # Use Dynamic Stops
             fill_color = mapgl::interpolate(
               column = "score",
-              values = c(0, 0.2, 0.4, 0.6, 0.8, 1),
-              stops = RColorBrewer::brewer.pal(6, "YlGnBu")
+              values = stops_val,
+              stops = pal_colors
             ),
             fill_opacity = 0.8,
             tooltip = "tooltip_html"
           ) |>
-          # MOVE H3 BELOW ROADS (So roads appear on top of heatmap)
           mapgl::move_layer("h3_layer_2d", "lay_roads_tile") |>
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
       }
-      # FORCE City Lines to TOP of everything
-      proxy <- proxy |> mapgl::move_layer("lay_cities_line")
+
+      # ADD LEGEND & FIX LAYERS
+      proxy <- proxy |>
+        mapgl::move_layer("lay_cities_line") |>
+        mapgl::add_legend(
+          legend_title = "ATO Score",
+          type = "categorical",
+          values = stops_val,
+          colors = pal_colors,
+          position = "bottom-right",
+          layer_id = target_layer,
+          add = FALSE
+        )
 
       current_refs <- shiny::isolate(active_ref_layers())
       refresh_layer_control(proxy, input$map_3d, current_refs)
