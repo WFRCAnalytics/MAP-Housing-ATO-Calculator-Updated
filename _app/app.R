@@ -24,6 +24,9 @@ ds_h3 <- arrow::open_dataset(data_path) |>
   sf::st_as_sf(crs = 4326)
 message("H3 Data loaded: ", nrow(ds_h3), " rows")
 
+# Store column names available in H3 for strict score validation in client-side expression
+available_h3_cols <- names(ds_h3)
+
 # Load City Boundaries
 message("Loading City Boundaries...")
 if (file.exists(cities_path)) {
@@ -106,6 +109,7 @@ bc_map <- c(
 
 # --- LAYER CONFIGURATION ---
 layer_defs <- list(
+  # Places
   "w_CM" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0",
     query = "CenterType = 'Metropolitan Center'",
@@ -130,6 +134,7 @@ layer_defs <- list(
     type = "polygon",
     color = "#f8dc26"
   ),
+  # Employment
   "w_AA" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
     query = "1=1",
@@ -142,6 +147,7 @@ layer_defs <- list(
     type = "polygon",
     color = "#7570b3"
   ),
+  # Transportation
   "w_TT" = list(
     url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0",
     query = "1=1",
@@ -160,6 +166,7 @@ layer_defs <- list(
     type = "line",
     color = "#2ca25f"
   ),
+  # Necessities
   "w_AC" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Child_Care_Centers/FeatureServer/0",
     query = "COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'MORGAN', 'TOOELE', 'UTAH', 'SUMMIT', 'WASATCH')",
@@ -541,7 +548,7 @@ server <- function(input, output, session) {
           shiny::a(
             href = "mailto:analytics@wfrc.utah.gov",
             shiny::icon("envelope"),
-            " WFRC Analytics Team (analytics@wfrc.utah.gov)",
+            " WFRC Analytics Team",
             style = "color: #233A57; text-decoration: none;"
           )
         ),
@@ -564,11 +571,10 @@ server <- function(input, output, session) {
     shiny::removeModal()
   })
 
-  # --- 1. STATE TRACKING & DEBOUNCING ---
   active_ref_layers <- shiny::reactiveVal(list())
   all_sliders <- names(layer_defs)
 
-  # Debounce slider inputs to prevent recalculation on every pixel slide
+  # Debounce sliders for map coloring (FAST)
   debounced_sliders <- shiny::reactive({
     sapply(all_sliders, function(x) input[[x]])
   }) |>
@@ -590,6 +596,7 @@ server <- function(input, output, session) {
 
   refresh_layer_control <- function(proxy, is_3d, ref_layers_list) {
     heatmap_id <- if (is_3d) "h3_layer_3d" else "h3_layer_2d"
+    # GROUPED LAYERS
     control_list <- list(
       "Major Roads" = "lay_roads_tile",
       "Heatmap" = heatmap_id,
@@ -613,9 +620,24 @@ server <- function(input, output, session) {
     unique(unlist(lu_mappings[input$land_use_group]))
   })
 
-  # --- 2. DATA LOADING & TOOLTIP GENERATION ---
-  base_city_data <- shiny::reactive({
+  # --- Data Processing with PERCENTAGE Tooltip ---
+  filtered_data <- shiny::reactive({
     shiny::req(input$comm_code, target_bc_codes())
+
+    weights <- shiny::isolate({
+      stats::setNames(
+        sapply(all_sliders, function(x) input[[x]]),
+        substring(all_sliders, 3)
+      )
+    })
+
+    # WITH THIS:
+    # Use the debounced values so this only fires when you stop dragging
+    # w_vec <- debounced_sliders()
+    # weights <- stats::setNames(w_vec, substring(names(w_vec), 3))
+
+    total_weight <- sum(weights)
+
     df <- ds_h3 |>
       dplyr::filter(CommCode %in% !!input$comm_code) |>
       dplyr::filter(BC %in% !!target_bc_codes())
@@ -624,6 +646,22 @@ server <- function(input, output, session) {
     }
 
     if (nrow(df) > 0) {
+      cols <- names(weights)
+      for (c in cols) {
+        if (!c %in% names(df)) {
+          df[[c]] <- 0
+        }
+        df[[c]][is.na(df[[c]])] <- 0
+      }
+      df_calc <- sf::st_drop_geometry(df)
+      weighted_sum <- rowSums(
+        df_calc[, cols, drop = FALSE] *
+          weights[col(df_calc[, cols, drop = FALSE])]
+      )
+      df$score <- if (total_weight == 0) 0 else weighted_sum / total_weight
+      df$bc_name <- bc_map[df$BC]
+      df$bc_name[is.na(df$bc_name)] <- "Unknown"
+
       c_ac <- layer_defs$w_AC$color
       c_ah <- layer_defs$w_AH$color
       c_ae <- layer_defs$w_AE$color
@@ -637,142 +675,143 @@ server <- function(input, output, session) {
       c_at <- layer_defs$w_AT$color
       MAX_H <- 40
 
-      h_ac <- round(df$AC * MAX_H)
-      h_ah <- round(df$AH * MAX_H)
-      h_ae <- round(df$AE * MAX_H)
-      h_ag <- round(df$AG * MAX_H)
-      h_am <- round(df$AM * MAX_H)
-      h_ap <- round(df$AP * MAX_H)
-      h_tt <- round(df$TT * MAX_H)
-      h_tf <- round(df$TF * MAX_H)
-      h_ta <- round(df$TA * MAX_H)
-      h_aa <- round(df$AA * MAX_H)
-      h_at <- round(df$AT * MAX_H)
-
-      bc_names <- bc_map[df$BC]
-      bc_names[is.na(bc_names)] <- "Unknown"
-
-      # Use "Dynamic Score" placeholder to keep tooltip static
       df$tooltip_html <- paste0(
         "<div style='font-family: sans-serif; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); min-width: 160px;'>",
         "<div style='margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:6px;'>",
         "<div style='font-weight:bold; font-size:16px; color:#233A57;'>Score: ",
-        "<span>0.00</span>",
+        paste0(round(df$score * 100), "%"), # UPDATED: Show Percentage in Tooltip
         "</div>",
         "<div style='font-size:12px; color:#666; margin-top:2px;'>Type: ",
-        bc_names,
+        df$bc_name,
         "</div></div>",
 
-        # TOP ROW: TRANSPORTATION & JOB ACCESS
+        # --- TOP ROW: TRANSPORTATION & JOB ACCESS (SWAPPED UP) ---
         "<div style='display: flex; justify-content: space-between; margin-bottom: 4px;'>",
         "<div style='font-size:8px; font-weight:bold; color:#999;'>TRANSPORTATION</div>",
         "<div style='font-size:8px; font-weight:bold; color:#999; text-align: right;'>JOB ACCESS</div>",
         "</div>",
         "<div style='display: flex; gap: 6px; height: 55px; align-items: flex-end; justify-content: space-between; margin-bottom: 12px;'>",
+        # Transport
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_tt,
         "; min-height: 1px; height:",
-        h_tt,
+        round(df$TT * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_tt,
         ";'><i class='fa-solid fa-bus'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_tf,
         "; min-height: 1px; height:",
-        h_tf,
+        round(df$TF * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_tf,
         ";'><i class='fa-solid fa-road'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ta,
         "; min-height: 1px; height:",
-        h_ta,
+        round(df$TA * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ta,
         ";'><i class='fa-solid fa-bicycle'></i></div></div>",
+        # Buffer
         "<div style='width: 18px;'></div>",
+        # Jobs
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_aa,
         "; min-height: 1px; height:",
-        h_aa,
+        round(df$AA * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_aa,
         ";'><i class='fa-solid fa-car'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_at,
         "; min-height: 1px; height:",
-        h_at,
+        round(df$AT * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_at,
         ";'><i class='fa-solid fa-train'></i></div></div>",
         "</div>",
 
-        # BOTTOM ROW: NECESSITIES
+        # --- BOTTOM ROW: NECESSITIES (SWAPPED DOWN) ---
         "<div style='font-size:8px; font-weight:bold; color:#999; margin-bottom:4px;'>NECESSITIES</div>",
         "<div style='display: flex; gap: 6px; height: 55px; align-items: flex-end; justify-content: space-between;'>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ac,
         "; min-height: 1px; height:",
-        h_ac,
+        round(df$AC * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ac,
         ";'><i class='fa-solid fa-baby'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ah,
         "; min-height: 1px; height:",
-        h_ah,
+        round(df$AH * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ah,
         ";'><i class='fa-solid fa-heart-pulse'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ae,
         "; min-height: 1px; height:",
-        h_ae,
+        round(df$AE * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ae,
         ";'><i class='fa-solid fa-graduation-cap'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ag,
         "; min-height: 1px; height:",
-        h_ag,
+        round(df$AG * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ag,
         ";'><i class='fa-solid fa-cart-shopping'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_am,
         "; min-height: 1px; height:",
-        h_am,
+        round(df$AM * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_am,
         ";'><i class='fa-solid fa-building'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ap,
         "; min-height: 1px; height:",
-        h_ap,
+        round(df$AP * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_ap,
         ";'><i class='fa-solid fa-tree'></i></div></div>",
-        "</div></div>"
+        "</div>",
+
+        "</div>"
       )
     }
     return(df)
   })
 
-  # --- 3. HELPER: CLIENT-SIDE SCORE EXPRESSION ---
+  # --- HELPER: CLIENT-SIDE EXPRESSION (For Instant Coloring) ---
   build_score_expr <- function(weights) {
-    names(weights) <- substring(names(weights), 3)
-    terms <- lapply(names(weights), function(col) {
-      list("*", list("get", col), as.numeric(weights[[col]]))
+    # Extract column names (e.g., "w_AC" -> "AC")
+    short_names <- substring(names(weights), 3)
+
+    # Filter to ONLY columns that exist in the H3 dataset
+    valid_indices <- which(short_names %in% available_h3_cols)
+    valid_names <- short_names[valid_indices]
+    valid_weights <- weights[valid_indices]
+
+    # Build the Numerator: (ColA * WeightA) + (ColB * WeightB)...
+    terms <- lapply(seq_along(valid_names), function(i) {
+      list("*", list("get", valid_names[i]), as.numeric(valid_weights[[i]]))
     })
     numerator <- append(list("+"), terms)
-    total_w <- sum(as.numeric(weights))
+
+    # Build the Denominator: Sum of Weights
+    total_w <- sum(as.numeric(valid_weights))
     if (total_w == 0) {
       total_w <- 1
     }
+
+    # Return Expression: Numerator / Denominator
     list("/", numerator, total_w)
   }
 
-  # --- 4. MAP INITIALIZATION ---
+  # --- 3. MAP INITIALIZATION ---
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
       style = mapgl::openfreemap_style("liberty"),
@@ -785,12 +824,14 @@ server <- function(input, output, session) {
       mapgl::add_geolocate_control(position = "top-left") |>
       mapgl::add_geocoder_control(position = "top-left") |>
       mapgl::add_reset_control(position = "top-left") |>
+      # 1. ADD SOURCE FOR ROADS
       mapgl::add_raster_source(
         id = "src_roads_tile",
         tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
         tileSize = 256
       )
 
+    # 2. ADD CITY FILL (BOTTOM LAYER)
     if (!is.null(cities_sf)) {
       m <- m |>
         mapgl::add_fill_layer(
@@ -801,6 +842,7 @@ server <- function(input, output, session) {
         )
     }
 
+    # 3. ADD ROADS (MIDDLE LAYER - On top of fill)
     m <- m |>
       mapgl::add_raster_layer(
         id = "lay_roads_tile",
@@ -809,6 +851,7 @@ server <- function(input, output, session) {
         visibility = "none"
       )
 
+    # 4. ADD CITY LINES (TOP LAYER - On top of roads)
     if (!is.null(cities_sf)) {
       m <- m |>
         mapgl::add_line_layer(
@@ -820,6 +863,7 @@ server <- function(input, output, session) {
         )
     }
 
+    # ADD LAYERS CONTROL (Grouped Cities)
     m <- m |>
       mapgl::add_layers_control(
         position = "top-right",
@@ -854,15 +898,16 @@ server <- function(input, output, session) {
     m
   })
 
-  # --- 5. OBSERVER: SLIDER CHANGES (INSTANT UPDATES) ---
+  # --- 5. FAST OBSERVER: SLIDER CHANGES (INSTANT UPDATES) ---
   shiny::observeEvent(
     debounced_sliders(),
     {
       shiny::req(input$comm_code)
-
       w <- debounced_sliders()
       score_expr <- build_score_expr(w)
 
+      # While dragging, we use a fixed 0-1 scale for speed.
+      # The map might look slightly "dim" momentarily until you release.
       stops_val <- seq(0, 1, length.out = 6)
       pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
 
@@ -881,6 +926,7 @@ server <- function(input, output, session) {
             color_expr
           )
 
+        # Instant Height Update
         extrusion_val <- if (is.numeric(input$z_mult)) {
           input$z_mult * 1000
         } else {
@@ -909,98 +955,7 @@ server <- function(input, output, session) {
     ignoreInit = TRUE
   )
 
-  # --- 6. OBSERVER: CITY CHANGE (LOADS GEOMETRY) ---
-  shiny::observeEvent(
-    list(base_city_data(), input$map_3d, input$z_mult),
-    {
-      dat <- base_city_data()
-
-      # Wait for valid data before drawing
-      if (nrow(dat) > 0) {
-        proxy <- mapgl::maplibre_proxy("map") |>
-          mapgl::clear_layer("h3_layer_3d") |>
-          mapgl::clear_layer("h3_layer_2d")
-
-        # Use current sliders for initial color calculation (avoids blank flash)
-        w <- debounced_sliders()
-        score_expr <- build_score_expr(w)
-
-        # Standardize color scale (0-1) for stability
-        stops_val <- seq(0, 1, length.out = 6)
-        pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
-
-        # Construct initial color expression
-        color_expr <- list("interpolate", list("linear"), score_expr)
-        for (i in seq_along(stops_val)) {
-          color_expr <- append(color_expr, list(stops_val[i], pal_colors[i]))
-        }
-
-        target_layer <- if (isTRUE(input$map_3d)) {
-          "h3_layer_3d"
-        } else {
-          "h3_layer_2d"
-        }
-
-        if (isTRUE(input$map_3d)) {
-          extrusion_val <- if (is.numeric(input$z_mult)) {
-            input$z_mult * 1000
-          } else {
-            2000
-          }
-          height_expr <- list(
-            "interpolate",
-            list("linear"),
-            score_expr,
-            0,
-            0,
-            1,
-            extrusion_val
-          )
-
-          proxy <- proxy |>
-            mapgl::add_fill_extrusion_layer(
-              "h3_layer_3d",
-              dat,
-              fill_extrusion_color = color_expr,
-              fill_extrusion_height = height_expr,
-              fill_extrusion_opacity = 0.9,
-              tooltip = "tooltip_html"
-            ) |>
-            mapgl::move_layer("h3_layer_3d", "lay_roads_tile") |>
-            mapgl::fit_bounds(dat, animate = TRUE, pitch = 45)
-        } else {
-          proxy <- proxy |>
-            mapgl::add_fill_layer(
-              "h3_layer_2d",
-              dat,
-              fill_color = color_expr,
-              fill_opacity = 0.8,
-              tooltip = "tooltip_html"
-            ) |>
-            mapgl::move_layer("h3_layer_2d", "lay_roads_tile") |>
-            mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
-        }
-
-        proxy <- proxy |>
-          mapgl::move_layer("lay_cities_line") |>
-          mapgl::add_legend(
-            legend_title = "ATO Score",
-            type = "categorical",
-            values = stops_val,
-            colors = pal_colors,
-            position = "bottom-right",
-            layer_id = target_layer,
-            add = FALSE
-          )
-
-        current_refs <- shiny::isolate(active_ref_layers())
-        refresh_layer_control(proxy, input$map_3d, current_refs)
-      }
-    },
-    ignoreNULL = FALSE
-  )
-
-  # 4a. Map -> Sidebar
+  # 4a. Map -> Sidebar (CLEANED)
   shiny::observeEvent(input$map_feature_click, {
     click_data <- input$map_feature_click
     layer_id <- if (!is.null(click_data$layerId)) {
@@ -1008,6 +963,7 @@ server <- function(input, output, session) {
     } else {
       click_data$layer
     }
+
     clicked_code <- NULL
     if (!is.null(layer_id)) {
       if (layer_id == "lay_cities_fill" || layer_id == "lay_cities_line") {
@@ -1016,6 +972,7 @@ server <- function(input, output, session) {
         clicked_code <- click_data$properties$CommCode
       }
     }
+
     if (!is.null(clicked_code) && clicked_code %in% all_cities_map) {
       current_selection <- input$comm_code
       if (is.null(current_selection)) {
@@ -1151,6 +1108,108 @@ server <- function(input, output, session) {
       active_ref_layers(current_list)
       refresh_layer_control(proxy, shiny::isolate(input$map_3d), current_list)
     })
+  })
+
+  # --- 6. HEATMAP RENDERER (SLOW UPDATE: LEGEND & BRIGHTNESS) ---
+  shiny::observe({
+    dat <- filtered_data()
+
+    # Note: We clear layers to force a clean redraw with the new relative scale
+    proxy <- mapgl::maplibre_proxy("map") |>
+      mapgl::clear_layer("h3_layer_3d") |>
+      mapgl::clear_layer("h3_layer_2d")
+
+    if (nrow(dat) > 0) {
+      # 1. CALCULATE RELATIVE SCALE (BRIGHTNESS)
+      # Find the actual min/max scores in the current view
+      min_s <- min(dat$score, na.rm = TRUE)
+      max_s <- max(dat$score, na.rm = TRUE)
+
+      # Prevent errors if max == min
+      if (max_s == min_s) {
+        max_s <- min_s + 0.0001
+      }
+
+      # Create stops based on ACTUAL data range (e.g., 0 to 0.77)
+      stops_val <- seq(min_s, max_s, length.out = 6)
+
+      # 2. GENERATE LEGEND LABELS (PERCENTAGE)
+      legend_labels <- paste0(round(stops_val * 100), "%")
+      pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
+
+      # 3. CONSTRUCT COLOR EXPRESSION
+      # We need to rebuild the expression to use our new dynamic stops
+      w <- shiny::isolate(debounced_sliders()) # Use current slider values
+      score_expr <- build_score_expr(w)
+
+      color_expr <- list("interpolate", list("linear"), score_expr)
+      for (i in seq_along(stops_val)) {
+        color_expr <- append(color_expr, list(stops_val[i], pal_colors[i]))
+      }
+
+      # 4. RENDER LAYER
+      target_layer <- if (input$map_3d) "h3_layer_3d" else "h3_layer_2d"
+
+      if (input$map_3d) {
+        extrusion_val <- if (is.numeric(input$z_mult)) {
+          input$z_mult * 1000
+        } else {
+          2000
+        }
+        height_expr <- list(
+          "interpolate",
+          list("linear"),
+          score_expr,
+          0,
+          0,
+          1,
+          extrusion_val
+        )
+
+        proxy <- proxy |>
+          mapgl::add_fill_extrusion_layer(
+            "h3_layer_3d",
+            dat,
+            fill_extrusion_color = color_expr,
+            fill_extrusion_height = height_expr,
+            fill_extrusion_opacity = 0.9,
+            tooltip = "tooltip_html" # REMOVE: from here
+          ) |>
+          # ADD THIS: Sets the tooltip column for hover
+          # mapgl::set_tooltip("h3_layer_3d", "tooltip_html") |>
+          mapgl::move_layer("h3_layer_3d", "lay_roads_tile") |>
+          mapgl::fit_bounds(dat, animate = TRUE, pitch = 45)
+      } else {
+        proxy <- proxy |>
+          mapgl::add_fill_layer(
+            "h3_layer_2d",
+            dat,
+            fill_color = color_expr,
+            fill_opacity = 0.8,
+            tooltip = "tooltip_html" # REMOVE from here
+          ) |>
+          # ADD THIS: Sets the tooltip column for hover
+          # mapgl::set_tooltip("h3_layer_2d", "tooltip_html") |>
+          mapgl::move_layer("h3_layer_2d", "lay_roads_tile") |>
+          mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
+      }
+
+      # 5. ADD DYNAMIC LEGEND
+      proxy |>
+        mapgl::move_layer("lay_cities_line") |>
+        mapgl::add_legend(
+          legend_title = "ATO Score",
+          type = "categorical",
+          values = legend_labels,
+          colors = pal_colors,
+          position = "bottom-right",
+          layer_id = target_layer,
+          add = FALSE
+        )
+
+      current_refs <- shiny::isolate(active_ref_layers())
+      refresh_layer_control(proxy, input$map_3d, current_refs)
+    }
   })
 }
 
