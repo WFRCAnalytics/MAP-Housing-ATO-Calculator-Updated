@@ -1,13 +1,14 @@
 library(dplyr)
 library(rsconnect)
 library(arrow)
-library(tools)
+library(geoarrow)
+library(sf)
 
 src_h3 <- "_output/h3_scored.parquet"
-dst_h3 <- "_app/data/h3_scored.parquet"
+dst_h3 <- "_app/data/h3_scored"
 
 src_mun <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
-dst_mun <- "_app/data/UtahMunicipalBoundaries_5481515892185534628.geojson"
+dst_mun <- "_app/data/UtahMunicipalBoundaries.parquet"
 
 # If this is the first time deploying fromt the device, you have to run the following.
 # rsconnect::setAccountInfo(name="<ACCOUNT>", token="<TOKEN>", secret="<SECRET>")
@@ -16,16 +17,21 @@ dst_mun <- "_app/data/UtahMunicipalBoundaries_5481515892185534628.geojson"
 # Check https://www.shinyapps.io/admin/#/tokens for the ACCOUNT, TOKEN, and SECRET
 
 # 1. Sync Parquet File
-if (!file.exists(dst_h3) || (tools::md5sum(src_h3) != tools::md5sum(dst_h3))) {
+if (!dir.exists(dst_h3)) {
   message("Updating data file...")
-  file.copy(src_h3, dst_h3, overwrite = TRUE)
+  arrow::open_dataset(src_h3) |>
+    sf::st_as_sf(crs = 4326) |>
+    arrow::write_dataset(
+      path = dst_h3,
+      partitioning = "CommCode"
+    )
 }
 
 # 2. Download Municipalities
 if (!file.exists(dst_mun)) {
   message("Updating city boundary...")
 
-  # Extract codes from your parquet to build the filter
+  # A. Extract unique CommCodes from your H3 dataset
   mun_codes <- arrow::open_dataset(dst_h3) |>
     dplyr::select(CommCode) |>
     dplyr::distinct() |>
@@ -33,29 +39,31 @@ if (!file.exists(dst_mun)) {
     dplyr::collect() |>
     pull(CommCode)
 
-  # Construct the SQL 'IN' clause for the ArcGIS query
-  # Result: UGRCODE IN ('LEH','SLC','HOO'...)
+  # B. Construct the Where Clause
   where_clause <- paste0(
     "UGRCODE IN ('",
     paste(mun_codes, collapse = "','"),
     "')"
   )
 
-  # Build the Query URL
-  # f=geojson: returns the spatial data in the format you want
-  # outFields=*: gets all columns (or list specific ones to save bandwidth)
+  # C. Build the Query URL
   query_url <- URLencode(paste0(
     src_mun,
     "/query?",
     "where=",
     where_clause,
-    "&outFields=*",
-    "&f=geojson",
-    "&outSR=4326"
+    "&outFields=UGRCODE,NAME", # Fetch the fields we need
+    "&f=geojson", # Request GeoJSON format (sf reads this easily)
+    "&outSR=4326" # Ensure WGS84 coordinates
   ))
 
-  # Download directly to the destination path
-  download.file(query_url, destfile = dst_mun, mode = "wb", quiet = TRUE)
+  # D. Read directly into sf, then write to Parquet
+  # st_read can read directly from a URL string
+  sf::st_read(query_url, quiet = TRUE) |>
+    sf::st_transform(4326) |> # Ensure CRS is correct
+    arrow::write_parquet(dst_mun) # Write to Parquet
+
+  message("City boundaries saved to: ", dst_mun)
 }
 
 # Deploy

@@ -15,36 +15,34 @@ library(utils)
 # ==============================================================================
 
 # 1. Define target paths
-data_path <- "data/h3_scored.parquet"
-cities_path <- "data/UtahMunicipalBoundaries_5481515892185534628.geojson"
+data_path <- "data/h3_scored"
+cities_path <- "data/UtahMunicipalBoundaries.parquet"
 
-# Load H3 Data
-message("Loading H3 data...")
-ds_h3 <- arrow::open_dataset(data_path) |>
-  sf::st_as_sf(crs = 4326)
-message("H3 Data loaded: ", nrow(ds_h3), " rows")
+# Load H3 Data (LAZY CONNECTION)
+message("Connecting to H3 dataset...")
+# Do NOT call st_as_sf() here. It triggers a full load.
+ds_h3 <- arrow::open_dataset(data_path)
+
+message("H3 Dataset connected.")
 
 # Store column names available in H3 for strict score validation in client-side expression
 available_h3_cols <- names(ds_h3)
 
-# Load City Boundaries
+# Load City Boundaries (Arrow -> sf pipeline)
 message("Loading City Boundaries...")
 if (file.exists(cities_path)) {
-  cities_sf <- sf::st_read(cities_path, quiet = TRUE) |>
-    sf::st_transform(4326)
+  # CORRECTED: Read with arrow, then convert to sf
+  cities_sf <- arrow::open_dataset(cities_path) |>
+    sf::st_as_sf(crs = 4326)
 
-  # GENERATE CITY LOOKUP DYNAMICALLY
+  # Prepare Lookup Map
   cities_sf <- cities_sf[order(cities_sf$NAME), ]
-  all_cities_map <- stats::setNames(cities_sf$UGRCODE, cities_sf$NAME)
+  city_choices <- stats::setNames(cities_sf$UGRCODE, cities_sf$NAME)
 } else {
   message("Warning: City boundaries file not found.")
   cities_sf <- NULL
-  all_cities_map <- character(0)
+  city_choices <- character(0)
 }
-
-# Filter choices to only those present in the H3 data
-present_codes <- unique(ds_h3$CommCode)
-city_choices <- all_cities_map[all_cities_map %in% present_codes]
 
 # Internal Mappings
 lu_mappings <- list(
@@ -631,12 +629,15 @@ server <- function(input, output, session) {
       )
     })
 
-    # WITH THIS:
-    # Use the debounced values so this only fires when you stop dragging
-    # w_vec <- debounced_sliders()
-    # weights <- stats::setNames(w_vec, substring(names(w_vec), 3))
-
     total_weight <- sum(weights)
+
+    # --------------------------------------------------------
+    # NEW: Lazy Filtering Pipeline
+    # --------------------------------------------------------
+    # 1. Start with the arrow dataset connection
+    # 2. Apply filters (Arrow pushes these down to the file system)
+    # 3. Collect() to load only result into R memory
+    # 4. Convert to sf (geoarrow handles the binary geometry column)
 
     df <- ds_h3 |>
       dplyr::filter(CommCode %in% !!input$comm_code) |>
@@ -645,15 +646,29 @@ server <- function(input, output, session) {
       df <- df |> dplyr::filter(OZ == 1)
     }
 
+    # Execute the query and load to memory
+    df <- df |>
+      # dplyr::collect() |>
+      sf::st_as_sf(crs = 4326)
+    # Note: Since geoarrow is loaded, st_as_sf usually detects
+    # the WKB geometry column automatically.
+
     if (nrow(df) > 0) {
       cols <- names(weights)
-      for (c in cols) {
-        if (!c %in% names(df)) {
-          df[[c]] <- 0
-        }
-        df[[c]][is.na(df[[c]])] <- 0
+
+      # Ensure columns exist (handling potential schema mismatches)
+      # In arrow, selecting non-existent columns usually errors,
+      # but if they exist in schema but are null, this handles it.
+      missing_cols <- setdiff(cols, names(df))
+      if (length(missing_cols) > 0) {
+        df[missing_cols] <- 0
       }
+
       df_calc <- sf::st_drop_geometry(df)
+
+      # Handle NAs which might come from parquet nulls
+      df_calc[cols][is.na(df_calc[cols])] <- 0
+
       weighted_sum <- rowSums(
         df_calc[, cols, drop = FALSE] *
           weights[col(df_calc[, cols, drop = FALSE])]
@@ -973,7 +988,7 @@ server <- function(input, output, session) {
       }
     }
 
-    if (!is.null(clicked_code) && clicked_code %in% all_cities_map) {
+    if (!is.null(clicked_code) && clicked_code %in% city_choices) {
       current_selection <- input$comm_code
       if (is.null(current_selection)) {
         current_selection <- character(0)
