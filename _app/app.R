@@ -620,7 +620,7 @@ server <- function(input, output, session) {
 
   # --- Data Processing with PERCENTAGE Tooltip ---
   filtered_data <- shiny::reactive({
-    shiny::req(input$comm_code, target_bc_codes())
+    shiny::req(input$comm_code)
 
     weights <- shiny::isolate({
       stats::setNames(
@@ -640,8 +640,8 @@ server <- function(input, output, session) {
     # 4. Convert to sf (geoarrow handles the binary geometry column)
 
     df <- ds_h3 |>
-      dplyr::filter(CommCode %in% !!input$comm_code) |>
-      dplyr::filter(BC %in% !!target_bc_codes())
+      dplyr::filter(CommCode %in% !!input$comm_code)
+
     if (input$oz_filter) {
       df <- df |> dplyr::filter(OZ == 1)
     }
@@ -800,6 +800,26 @@ server <- function(input, output, session) {
     return(df)
   })
 
+  # Add Client sided filter to filter land use
+  shiny::observeEvent(input$land_use_group, {
+    # Get the codes for the selected group (e.g., "Residential" -> c("SF", "MF"))
+    selected_codes <- unique(unlist(lu_mappings[input$land_use_group]))
+
+    # Create a MapLibre Filter Expression: ["in", "BC", "SF", "MF"]
+    # The "in" operator checks if the property "BC" matches any value in the list
+    filter_expr <- c(list("in", "BC"), as.list(selected_codes))
+
+    # If "All Land Uses" is selected (or nothing), clear the filter
+    if (input$land_use_group == "All Land Uses") {
+      filter_expr <- NULL
+    }
+
+    # Apply Instant Filter
+    mapgl::maplibre_proxy("map") |>
+      mapgl::set_filter("h3_layer_2d", filter_expr) |>
+      mapgl::set_filter("h3_layer_3d", filter_expr)
+  })
+
   # --- HELPER: CLIENT-SIDE EXPRESSION (For Instant Coloring) ---
   build_score_expr <- function(weights) {
     # Extract column names (e.g., "w_AC" -> "AC")
@@ -918,12 +938,67 @@ server <- function(input, output, session) {
     debounced_sliders(),
     {
       shiny::req(input$comm_code)
-      w <- debounced_sliders()
-      score_expr <- build_score_expr(w)
 
-      # While dragging, we use a fixed 0-1 scale for speed.
-      # The map might look slightly "dim" momentarily until you release.
-      stops_val <- seq(0, 1, length.out = 6)
+      # 1. Get current data and weights
+      dat <- shiny::isolate(filtered_data())
+      w <- debounced_sliders()
+
+      # 2. Re-calculate scores in R to find the new Min/Max
+      #    (This vector math is extremely fast, even for 20k+ rows)
+      if (nrow(dat) > 0) {
+        # Extract the relevant columns from the SF object
+        # Note: We use the Short Names (e.g. "AA") derived from slider ID ("w_AA")
+        cols <- substring(names(w), 3)
+
+        # Ensure we only use columns that actually exist in the data
+        # (Prevents crash if a column is missing)
+        valid_cols <- intersect(cols, names(dat))
+
+        if (length(valid_cols) > 0) {
+          # Drop geometry for speed
+          df_calc <- sf::st_drop_geometry(dat)[, valid_cols, drop = FALSE]
+
+          # Match weights to columns
+          current_weights <- w[paste0("w_", valid_cols)]
+
+          # Calculate Weighted Sum
+          # Handle NAs by treating them as 0
+          df_calc[is.na(df_calc)] <- 0
+
+          weighted_sum <- rowSums(
+            df_calc * current_weights[col(df_calc)]
+          )
+
+          total_weight <- sum(current_weights)
+
+          # Final Score Vector
+          new_scores <- if (total_weight == 0) {
+            0
+          } else {
+            weighted_sum / total_weight
+          }
+
+          # 3. Determine Dynamic Range (The "Intensity" Fix)
+          min_s <- min(new_scores, na.rm = TRUE)
+          max_s <- max(new_scores, na.rm = TRUE)
+
+          # Safety check to prevent div/0 in interpolation
+          if (max_s == min_s) {
+            max_s <- min_s + 0.0001
+          }
+
+          # Create stops based on ACTUAL data range (just like the initial load)
+          stops_val <- seq(min_s, max_s, length.out = 6)
+        } else {
+          # Fallback if no valid columns found
+          stops_val <- seq(0, 1, length.out = 6)
+        }
+      } else {
+        stops_val <- seq(0, 1, length.out = 6)
+      }
+
+      # 4. Build the MapLibre Expression
+      score_expr <- build_score_expr(w)
       pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
 
       color_expr <- list("interpolate", list("linear"), score_expr)
@@ -931,6 +1006,7 @@ server <- function(input, output, session) {
         color_expr <- append(color_expr, list(stops_val[i], pal_colors[i]))
       }
 
+      # 5. Apply Updates
       proxy <- mapgl::maplibre_proxy("map")
 
       if (isTRUE(input$map_3d)) {
@@ -941,7 +1017,7 @@ server <- function(input, output, session) {
             color_expr
           )
 
-        # Instant Height Update
+        # Update Height (Dynamic Scale)
         extrusion_val <- if (is.numeric(input$z_mult)) {
           input$z_mult * 1000
         } else {
@@ -951,9 +1027,9 @@ server <- function(input, output, session) {
           "interpolate",
           list("linear"),
           score_expr,
+          0, # Min Score -> Height 0
           0,
-          0,
-          1,
+          1, # Max Score (theoretical) -> Max Height
           extrusion_val
         )
         proxy |>
