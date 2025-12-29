@@ -15,36 +15,34 @@ library(utils)
 # ==============================================================================
 
 # 1. Define target paths
-data_path <- "data/h3_scored.parquet"
-cities_path <- "data/UtahMunicipalBoundaries_5481515892185534628.geojson"
+data_path <- "data/h3_scored"
+cities_path <- "data/UtahMunicipalBoundaries.parquet"
 
-# Load H3 Data
-message("Loading H3 data...")
-ds_h3 <- arrow::open_dataset(data_path) |>
-  sf::st_as_sf(crs = 4326)
-message("H3 Data loaded: ", nrow(ds_h3), " rows")
+# Load H3 Data (LAZY CONNECTION)
+message("Connecting to H3 dataset...")
+# Do NOT call st_as_sf() here. It triggers a full load.
+ds_h3 <- arrow::open_dataset(data_path)
+
+message("H3 Dataset connected.")
 
 # Store column names available in H3 for strict score validation in client-side expression
 available_h3_cols <- names(ds_h3)
 
-# Load City Boundaries
+# Load City Boundaries (Arrow -> sf pipeline)
 message("Loading City Boundaries...")
 if (file.exists(cities_path)) {
-  cities_sf <- sf::st_read(cities_path, quiet = TRUE) |>
-    sf::st_transform(4326)
+  # CORRECTED: Read with arrow, then convert to sf
+  cities_sf <- arrow::open_dataset(cities_path) |>
+    sf::st_as_sf(crs = 4326)
 
-  # GENERATE CITY LOOKUP DYNAMICALLY
+  # Prepare Lookup Map
   cities_sf <- cities_sf[order(cities_sf$NAME), ]
-  all_cities_map <- stats::setNames(cities_sf$UGRCODE, cities_sf$NAME)
+  city_choices <- stats::setNames(cities_sf$UGRCODE, cities_sf$NAME)
 } else {
   message("Warning: City boundaries file not found.")
   cities_sf <- NULL
-  all_cities_map <- character(0)
+  city_choices <- character(0)
 }
-
-# Filter choices to only those present in the H3 data
-present_codes <- unique(ds_h3$CommCode)
-city_choices <- all_cities_map[all_cities_map %in% present_codes]
 
 # Internal Mappings
 lu_mappings <- list(
@@ -622,7 +620,7 @@ server <- function(input, output, session) {
 
   # --- Data Processing with PERCENTAGE Tooltip ---
   filtered_data <- shiny::reactive({
-    shiny::req(input$comm_code, target_bc_codes())
+    shiny::req(input$comm_code)
 
     weights <- shiny::isolate({
       stats::setNames(
@@ -631,29 +629,46 @@ server <- function(input, output, session) {
       )
     })
 
-    # WITH THIS:
-    # Use the debounced values so this only fires when you stop dragging
-    # w_vec <- debounced_sliders()
-    # weights <- stats::setNames(w_vec, substring(names(w_vec), 3))
-
     total_weight <- sum(weights)
 
+    # --------------------------------------------------------
+    # NEW: Lazy Filtering Pipeline
+    # --------------------------------------------------------
+    # 1. Start with the arrow dataset connection
+    # 2. Apply filters (Arrow pushes these down to the file system)
+    # 3. Collect() to load only result into R memory
+    # 4. Convert to sf (geoarrow handles the binary geometry column)
+
     df <- ds_h3 |>
-      dplyr::filter(CommCode %in% !!input$comm_code) |>
-      dplyr::filter(BC %in% !!target_bc_codes())
+      dplyr::filter(CommCode %in% !!input$comm_code)
+
     if (input$oz_filter) {
       df <- df |> dplyr::filter(OZ == 1)
     }
 
+    # Execute the query and load to memory
+    df <- df |>
+      # dplyr::collect() |>
+      sf::st_as_sf(crs = 4326)
+    # Note: Since geoarrow is loaded, st_as_sf usually detects
+    # the WKB geometry column automatically.
+
     if (nrow(df) > 0) {
       cols <- names(weights)
-      for (c in cols) {
-        if (!c %in% names(df)) {
-          df[[c]] <- 0
-        }
-        df[[c]][is.na(df[[c]])] <- 0
+
+      # Ensure columns exist (handling potential schema mismatches)
+      # In arrow, selecting non-existent columns usually errors,
+      # but if they exist in schema but are null, this handles it.
+      missing_cols <- setdiff(cols, names(df))
+      if (length(missing_cols) > 0) {
+        df[missing_cols] <- 0
       }
+
       df_calc <- sf::st_drop_geometry(df)
+
+      # Handle NAs which might come from parquet nulls
+      df_calc[cols][is.na(df_calc[cols])] <- 0
+
       weighted_sum <- rowSums(
         df_calc[, cols, drop = FALSE] *
           weights[col(df_calc[, cols, drop = FALSE])]
@@ -785,6 +800,26 @@ server <- function(input, output, session) {
     return(df)
   })
 
+  # Add Client sided filter to filter land use
+  shiny::observeEvent(input$land_use_group, {
+    # Get the codes for the selected group (e.g., "Residential" -> c("SF", "MF"))
+    selected_codes <- unique(unlist(lu_mappings[input$land_use_group]))
+
+    # Create a MapLibre Filter Expression: ["in", "BC", "SF", "MF"]
+    # The "in" operator checks if the property "BC" matches any value in the list
+    filter_expr <- c(list("in", "BC"), as.list(selected_codes))
+
+    # If "All Land Uses" is selected (or nothing), clear the filter
+    if (input$land_use_group == "All Land Uses") {
+      filter_expr <- NULL
+    }
+
+    # Apply Instant Filter
+    mapgl::maplibre_proxy("map") |>
+      mapgl::set_filter("h3_layer_2d", filter_expr) |>
+      mapgl::set_filter("h3_layer_3d", filter_expr)
+  })
+
   # --- HELPER: CLIENT-SIDE EXPRESSION (For Instant Coloring) ---
   build_score_expr <- function(weights) {
     # Extract column names (e.g., "w_AC" -> "AC")
@@ -903,12 +938,67 @@ server <- function(input, output, session) {
     debounced_sliders(),
     {
       shiny::req(input$comm_code)
-      w <- debounced_sliders()
-      score_expr <- build_score_expr(w)
 
-      # While dragging, we use a fixed 0-1 scale for speed.
-      # The map might look slightly "dim" momentarily until you release.
-      stops_val <- seq(0, 1, length.out = 6)
+      # 1. Get current data and weights
+      dat <- shiny::isolate(filtered_data())
+      w <- debounced_sliders()
+
+      # 2. Re-calculate scores in R to find the new Min/Max
+      #    (This vector math is extremely fast, even for 20k+ rows)
+      if (nrow(dat) > 0) {
+        # Extract the relevant columns from the SF object
+        # Note: We use the Short Names (e.g. "AA") derived from slider ID ("w_AA")
+        cols <- substring(names(w), 3)
+
+        # Ensure we only use columns that actually exist in the data
+        # (Prevents crash if a column is missing)
+        valid_cols <- intersect(cols, names(dat))
+
+        if (length(valid_cols) > 0) {
+          # Drop geometry for speed
+          df_calc <- sf::st_drop_geometry(dat)[, valid_cols, drop = FALSE]
+
+          # Match weights to columns
+          current_weights <- w[paste0("w_", valid_cols)]
+
+          # Calculate Weighted Sum
+          # Handle NAs by treating them as 0
+          df_calc[is.na(df_calc)] <- 0
+
+          weighted_sum <- rowSums(
+            df_calc * current_weights[col(df_calc)]
+          )
+
+          total_weight <- sum(current_weights)
+
+          # Final Score Vector
+          new_scores <- if (total_weight == 0) {
+            0
+          } else {
+            weighted_sum / total_weight
+          }
+
+          # 3. Determine Dynamic Range (The "Intensity" Fix)
+          min_s <- min(new_scores, na.rm = TRUE)
+          max_s <- max(new_scores, na.rm = TRUE)
+
+          # Safety check to prevent div/0 in interpolation
+          if (max_s == min_s) {
+            max_s <- min_s + 0.0001
+          }
+
+          # Create stops based on ACTUAL data range (just like the initial load)
+          stops_val <- seq(min_s, max_s, length.out = 6)
+        } else {
+          # Fallback if no valid columns found
+          stops_val <- seq(0, 1, length.out = 6)
+        }
+      } else {
+        stops_val <- seq(0, 1, length.out = 6)
+      }
+
+      # 4. Build the MapLibre Expression
+      score_expr <- build_score_expr(w)
       pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
 
       color_expr <- list("interpolate", list("linear"), score_expr)
@@ -916,6 +1006,7 @@ server <- function(input, output, session) {
         color_expr <- append(color_expr, list(stops_val[i], pal_colors[i]))
       }
 
+      # 5. Apply Updates
       proxy <- mapgl::maplibre_proxy("map")
 
       if (isTRUE(input$map_3d)) {
@@ -926,7 +1017,7 @@ server <- function(input, output, session) {
             color_expr
           )
 
-        # Instant Height Update
+        # Update Height (Dynamic Scale)
         extrusion_val <- if (is.numeric(input$z_mult)) {
           input$z_mult * 1000
         } else {
@@ -936,9 +1027,9 @@ server <- function(input, output, session) {
           "interpolate",
           list("linear"),
           score_expr,
+          0, # Min Score -> Height 0
           0,
-          0,
-          1,
+          1, # Max Score (theoretical) -> Max Height
           extrusion_val
         )
         proxy |>
@@ -973,7 +1064,7 @@ server <- function(input, output, session) {
       }
     }
 
-    if (!is.null(clicked_code) && clicked_code %in% all_cities_map) {
+    if (!is.null(clicked_code) && clicked_code %in% city_choices) {
       current_selection <- input$comm_code
       if (is.null(current_selection)) {
         current_selection <- character(0)
