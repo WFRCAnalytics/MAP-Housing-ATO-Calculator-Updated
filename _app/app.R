@@ -187,7 +187,7 @@ layer_defs <- list(
     color = "#4DAF4A"
   ),
   "w_AG" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Residential_Accessibility_WFL1/FeatureServer/374",
+    url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0",
     query = "POINT_X >= 406532.6 AND POINT_X <= 449162.9 AND POINT_Y >= 4425359 AND POINT_Y <= 4597055",
     type = "point",
     color = "#984EA3"
