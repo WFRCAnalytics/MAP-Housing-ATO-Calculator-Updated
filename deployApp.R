@@ -3,12 +3,16 @@ library(rsconnect)
 library(arrow)
 library(geoarrow)
 library(sf)
+library(tools)
 
 src_h3 <- "_output/h3_scored.parquet"
 dst_h3 <- "_app/data/h3_scored"
 
 src_mun <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
 dst_mun <- "_app/data/UtahMunicipalBoundaries.parquet"
+
+src_bnd <- "_data/processed/base_layers/Analysis_Boundary_WFRC_MAG.parquet"
+dst_bnd <- "_app/data/Analysis_Boundary_WFRC_MAG.parquet"
 
 # If this is the first time deploying fromt the device, you have to run the following.
 # rsconnect::setAccountInfo(name="<ACCOUNT>", token="<TOKEN>", secret="<SECRET>")
@@ -64,6 +68,14 @@ if (!file.exists(dst_mun)) {
     arrow::write_parquet(dst_mun) # Write to Parquet
 
   message("City boundaries saved to: ", dst_mun)
+}
+
+# 3. Regional Boundary
+if (
+  !file.exists(dst_bnd) || (tools::md5sum(src_bnd) != tools::md5sum(dst_bnd))
+) {
+  message("Updating regional boundary file...")
+  file.copy(src_bnd, dst_bnd, overwrite = TRUE)
 }
 
 # Deploy

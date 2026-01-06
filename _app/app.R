@@ -17,6 +17,7 @@ library(utils)
 # 1. Define target paths
 data_path <- "data/h3_scored"
 cities_path <- "data/UtahMunicipalBoundaries.parquet"
+boundary_path <- "data/Analysis_Boundary_WFRC_MAG.parquet"
 
 # Load H3 Data (LAZY CONNECTION)
 message("Connecting to H3 dataset...")
@@ -42,6 +43,17 @@ if (file.exists(cities_path)) {
   message("Warning: City boundaries file not found.")
   cities_sf <- NULL
   city_choices <- character(0)
+}
+
+# Load Regional Boundary (Arrow -> sf pipeline)
+message("Loading Regional Boundary...")
+if (file.exists(boundary_path)) {
+  # CORRECTED: Read with arrow, then convert to sf
+  bound_sf <- arrow::open_dataset(boundary_path) |>
+    sf::st_as_sf(crs = 4326)
+} else {
+  message("Warning: Regional boundary file not found.")
+  bound_sf <- NULL
 }
 
 # Internal Mappings
@@ -137,20 +149,55 @@ layer_defs <- list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
     query = "1=1",
     type = "polygon",
-    color = "#e7298a"
+    # 5-Class Red-Purple Gradient (Auto Access)
+    # Breaks: 0, 163k, 258k, 371k, 509k
+    color = list(
+      "interpolate",
+      list("linear"),
+      list("get", "JOBAUTO_50"),
+      0,
+      "#feebe2", # 0 - 163k (Very Light)
+      163245,
+      "#fbb4b9", # 163k - 258k
+      258193,
+      "#f768a1", # 258k - 371k
+      371250,
+      "#c51b8a", # 371k - 509k
+      508914,
+      "#7a0177" # 509k+ (Deepest)
+    ),
+    limit = 3600 # Approx 3,546
   ),
   "w_AT" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
     query = "1=1",
     type = "polygon",
-    color = "#7570b3"
+    # 5-Class Purples Gradient (Transit Access)
+    # Breaks: 0, 11k, 33k, 63k, 113k
+    color = list(
+      "interpolate",
+      list("linear"),
+      list("get", "JOBTRANSIT_50"),
+      0,
+      "#f2f0f7", # 0 - 11k (Very Light)
+      11768,
+      "#cbc9e2", # 11k - 33k
+      33817,
+      "#9e9ac8", # 33k - 63k
+      63893,
+      "#756bb1", # 63k - 113k
+      113254,
+      "#54278f" # 113k+ (Deepest)
+    ),
+    limit = 3600 # Approx 3,546
   ),
   # Transportation
   "w_TT" = list(
     url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0",
     query = "1=1",
     type = "point",
-    color = "#666666"
+    color = "#666666",
+    limit = 6000 # Approx 5,568
   ),
   "w_TF" = list(
     url = "https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0",
@@ -160,20 +207,21 @@ layer_defs <- list(
   ),
   "w_TA" = list(
     url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
-    query = "(Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%(2C)%' or Facility1 like '%Trail%') AND COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'MORGAN', 'TOOELE', 'UTAH', 'SUMMIT', 'WASATCH')",
+    query = "(Facility1 like '%(1A)%' or Facility1 like '%(1B)%' or Facility1 like '%(2A)%' or Facility1 like '%(2B)%' or Facility1 like '%(2C)%' or Facility1 like '%Trail%') AND COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'UTAH')",
     type = "line",
-    color = "#2ca25f"
+    color = "#2ca25f",
+    limit = 8000 # Approx 8,000
   ),
   # Necessities
   "w_AC" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Child_Care_Centers/FeatureServer/0",
-    query = "COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'MORGAN', 'TOOELE', 'UTAH', 'SUMMIT', 'WASATCH')",
+    query = "COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'UTAH')",
     type = "point",
     color = "#E41A1C"
   ),
   "w_AH" = list(
     url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0",
-    query = "COUNTY IN ('Box Elder', 'Weber', 'Davis', 'Salt Lake', 'Morgan', 'Tooele', 'Utah', 'Summit', 'Wasatch')",
+    query = "COUNTY IN ('Box Elder', 'Weber', 'Davis', 'Salt Lake', 'Utah')",
     type = "point",
     color = "#377EB8"
   ),
@@ -188,13 +236,13 @@ layer_defs <- list(
   ),
   "w_AG" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0",
-    query = "POINT_X >= 406532.6 AND POINT_X <= 449162.9 AND POINT_Y >= 4425359 AND POINT_Y <= 4597055",
+    query = "POINT_X BETWEEN 406532.6 AND 449162.9 AND POINT_Y BETWEEN 4425359 AND 4597055",
     type = "point",
-    color = "#984EA3"
+    color = "#e7298a"
   ),
   "w_AM" = list(
     url = "https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Community_Centers/FeatureServer/0",
-    query = "County IN ('Box Elder', 'Weber', 'Davis', 'Salt Lake', 'Morgan', 'Tooele', 'Utah', 'Summit', 'Wasatch')",
+    query = "County IN ('Box Elder', 'Weber', 'Davis', 'Salt Lake', 'Utah')",
     type = "point",
     color = "#FF7F00"
   ),
@@ -677,17 +725,33 @@ server <- function(input, output, session) {
       df$bc_name <- bc_map[df$BC]
       df$bc_name[is.na(df$bc_name)] <- "Unknown"
 
-      c_ac <- layer_defs$w_AC$color
-      c_ah <- layer_defs$w_AH$color
-      c_ae <- layer_defs$w_AE$color
-      c_ag <- layer_defs$w_AG$color
-      c_am <- layer_defs$w_AM$color
-      c_ap <- layer_defs$w_AP$color
-      c_tt <- layer_defs$w_TT$color
-      c_tf <- layer_defs$w_TF$color
-      c_ta <- layer_defs$w_TA$color
-      c_aa <- layer_defs$w_AA$color
-      c_at <- layer_defs$w_AT$color
+      # --- DYNAMIC COLOR EXTRACTION ---
+      # Helper: If it's a list (gradient), grab the LAST element (Max Intensity).
+      # If it's a string (static), just use it.
+      get_high_color <- function(lid) {
+        col_def <- layer_defs[[lid]]$color
+        if (is.list(col_def)) {
+          # The last element of the MapLibre expression is the highest color
+          return(col_def[[length(col_def)]])
+        }
+        return(col_def)
+      }
+
+      # Dynamically fetch colors (Works for both Gradients and Static Hexes)
+      c_ac <- get_high_color("w_AC")
+      c_ah <- get_high_color("w_AH")
+      c_ae <- get_high_color("w_AE")
+      c_ag <- get_high_color("w_AG")
+      c_am <- get_high_color("w_AM")
+      c_ap <- get_high_color("w_AP")
+
+      c_tt <- get_high_color("w_TT")
+      c_tf <- get_high_color("w_TF")
+      c_ta <- get_high_color("w_TA")
+
+      c_aa <- get_high_color("w_AA") # Automatically grabs the dark red
+      c_at <- get_high_color("w_AT") # Automatically grabs the dark blue
+
       MAX_H <- 40
 
       df$tooltip_html <- paste0(
@@ -910,24 +974,66 @@ server <- function(input, output, session) {
         active_color = "#233A57"
       )
 
+    # 1. Prepare BBox Filter
+    bbox_query_str <- ""
+    if (!is.null(bound_sf)) {
+      bb <- sf::st_bbox(bound_sf)
+      # Format removes scientific notation
+      bbox_val <- paste(
+        format(as.numeric(bb[c(1, 2, 3, 4)]), scientific = FALSE, trim = TRUE),
+        collapse = ","
+      )
+      bbox_query_str <- paste0(
+        "&geometry=",
+        bbox_val,
+        "&geometryType=esriGeometryEnvelope",
+        "&spatialRel=esriSpatialRelIntersects",
+        "&inSR=4326"
+      )
+    }
+
     for (lid in names(layer_defs)) {
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
+
+      # Determine chunks. Server Max is usually 2000.
+      target_limit <- if (!is.null(def$limit)) def$limit else 2000
+      chunk_size <- 2000
+
       for (i in seq_along(urls)) {
-        q <- utils::URLencode(def$query)
-        full_url <- paste0(
-          urls[i],
-          "/query?where=",
-          q,
-          "&outFields=*&f=geojson"
-        )
-        suffix <- if (length(urls) > 1) paste0("_", i) else ""
-        m <- m |>
-          mapgl::add_source(
-            id = paste0("src_", lid, suffix),
-            type = "geojson",
-            data = full_url
+        # Calculate how many "pages" we need for this URL
+        # e.g., if Limit is 3600, offsets will be: 0, 2000
+        offsets <- seq(0, target_limit - 1, by = chunk_size)
+
+        for (j in seq_along(offsets)) {
+          offset_val <- offsets[j]
+
+          # Construct paginated URL
+          q <- utils::URLencode(def$query)
+          full_url <- paste0(
+            urls[i],
+            "/query?where=",
+            q,
+            "&outFields=*",
+            "&f=geojson",
+            "&outSR=4326",
+            "&resultOffset=",
+            offset_val,
+            "&resultRecordCount=",
+            chunk_size,
+            bbox_query_str
           )
+
+          # Create unique ID: e.g., src_w_AA_1_1, src_w_AA_1_2
+          suffix <- paste0("_", i, "_", j)
+
+          m <- m |>
+            mapgl::add_source(
+              id = paste0("src_", lid, suffix),
+              type = "geojson",
+              data = full_url
+            )
+        }
       }
     }
     m
@@ -1124,6 +1230,8 @@ server <- function(input, output, session) {
   lapply(names(layer_defs), function(lid) {
     shiny::observeEvent(input[[paste0("toggle_", lid)]], {
       layer_states[[lid]] <- !layer_states[[lid]]
+
+      # Toggle button styling
       if (layer_states[[lid]]) {
         shinyjs::addClass(id = paste0("btn_", lid), class = "active")
       } else {
@@ -1133,64 +1241,77 @@ server <- function(input, output, session) {
       proxy <- mapgl::maplibre_proxy("map")
       def <- layer_defs[[lid]]
       urls <- if (!is.null(def$urls)) def$urls else def$url
+
+      # Pagination Settings (Must match map logic)
+      target_limit <- if (!is.null(def$limit)) def$limit else 2000
+      chunk_size <- 2000
+
       current_ids <- character()
 
       for (i in seq_along(urls)) {
-        suffix <- if (length(urls) > 1) paste0("_", i) else ""
-        source_id <- paste0("src_", lid, suffix)
-        layer_id <- paste0("lay_", lid, suffix)
-        current_ids <- c(current_ids, layer_id)
-        if (def$type == "polygon") {
-          current_ids <- c(current_ids, paste0(layer_id, "_ol"))
-        }
+        offsets <- seq(0, target_limit - 1, by = chunk_size)
 
-        if (layer_states[[lid]]) {
+        for (j in seq_along(offsets)) {
+          suffix <- paste0("_", i, "_", j)
+          source_id <- paste0("src_", lid, suffix)
+          layer_id <- paste0("lay_", lid, suffix)
+          current_ids <- c(current_ids, layer_id)
+
           if (def$type == "polygon") {
-            proxy <- proxy |>
-              mapgl::add_fill_layer(
-                id = layer_id,
-                source = source_id,
-                fill_color = def$color,
-                fill_opacity = 0.7
-              ) |>
-              mapgl::move_layer(layer_id, "lay_cities_line") |>
-              mapgl::add_line_layer(
-                id = paste0(layer_id, "_ol"),
-                source = source_id,
-                line_color = def$color,
-                line_width = 1.5
-              ) |>
-              mapgl::move_layer(paste0(layer_id, "_ol"), "lay_cities_line")
-          } else if (def$type == "line") {
-            proxy <- proxy |>
-              mapgl::add_line_layer(
-                id = layer_id,
-                source = source_id,
-                line_color = def$color,
-                line_width = 2
-              ) |>
-              mapgl::move_layer(layer_id, "lay_cities_line")
-          } else if (def$type == "point") {
-            proxy <- proxy |>
-              mapgl::add_circle_layer(
-                id = layer_id,
-                source = source_id,
-                circle_color = def$color,
-                circle_radius = 5,
-                circle_stroke_width = 1,
-                circle_stroke_color = "#fff"
-              ) |>
-              mapgl::move_layer(layer_id, "lay_cities_line")
+            current_ids <- c(current_ids, paste0(layer_id, "_ol"))
           }
-        } else {
-          proxy <- proxy |> mapgl::clear_layer(layer_id)
-          if (def$type == "polygon") {
-            proxy <- proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
+
+          if (layer_states[[lid]]) {
+            if (def$type == "polygon") {
+              proxy <- proxy |>
+                mapgl::add_fill_layer(
+                  id = layer_id,
+                  source = source_id,
+                  fill_color = def$color,
+                  fill_opacity = 0.7
+                ) |>
+                mapgl::move_layer(layer_id, "lay_cities_line") |>
+                mapgl::add_line_layer(
+                  id = paste0(layer_id, "_ol"),
+                  source = source_id,
+                  line_color = def$color,
+                  line_width = 1.5
+                ) |>
+                mapgl::move_layer(paste0(layer_id, "_ol"), "lay_cities_line")
+            } else if (def$type == "line") {
+              proxy <- proxy |>
+                mapgl::add_line_layer(
+                  id = layer_id,
+                  source = source_id,
+                  line_color = def$color,
+                  line_width = 2
+                ) |>
+                mapgl::move_layer(layer_id, "lay_cities_line")
+            } else if (def$type == "point") {
+              proxy <- proxy |>
+                mapgl::add_circle_layer(
+                  id = layer_id,
+                  source = source_id,
+                  circle_color = def$color,
+                  circle_radius = 5,
+                  circle_stroke_width = 1,
+                  circle_stroke_color = "#fff"
+                ) |>
+                mapgl::move_layer(layer_id, "lay_cities_line")
+            }
+          } else {
+            proxy <- proxy |> mapgl::clear_layer(layer_id)
+            if (def$type == "polygon") {
+              proxy <- proxy |> mapgl::clear_layer(paste0(layer_id, "_ol"))
+            }
           }
         }
       }
+
+      # Update Layer Control
       current_list <- active_ref_layers()
       human_name <- if (lid %in% names(layer_names)) layer_names[[lid]] else lid
+
       if (layer_states[[lid]]) {
         current_list[[human_name]] <- current_ids
       } else {
