@@ -9,6 +9,7 @@ library(shinyWidgets)
 library(RColorBrewer)
 library(shinyjs)
 library(utils)
+library(waiter)
 
 # ==============================================================================
 # 1. GLOBAL SETUP & DATA LOADING
@@ -318,6 +319,7 @@ ui <- bslib::page_navbar(
   theme = bslib::bs_theme(preset = "flatly"),
   header = tags$head(
     useShinyjs(),
+    waiter::use_waiter(),
     tags$link(
       rel = "stylesheet",
       href = "https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;700&display=swap"
@@ -363,6 +365,44 @@ ui <- bslib::page_navbar(
       .splash-footer { background-color: #f1f1f1; padding: 15px 35px; font-size: 0.85rem; border-top: 1px solid #ddd; }
       .btn-get-started { background-color: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.1rem; padding: 10px 40px; border-radius: 30px; border: none; transition: all 0.3s; width: 100%; }
       .btn-get-started:hover { background-color: #e8572d; color: white; transform: scale(1.02); }
+
+      /* --- WAITER / LOADING PILL STYLING --- */
+
+      /* 1. The Container (The Pill) */
+      .waiter-overlay-content {
+        background: rgba(255, 255, 255, 0.85) !important; /* High opacity for legibility */
+        backdrop-filter: blur(12px);                      /* Frosted glass effect */
+        -webkit-backdrop-filter: blur(12px);              /* Safari support */
+        border: 1px solid rgba(255, 255, 255, 0.9);       /* Subtle border */
+        border-radius: 50px;                              /* Full pill shape */
+        padding: 12px 28px;                               /* Sizing */
+        box-shadow: 0 10px 30px rgba(0,0,0,0.15);         /* Soft, floating shadow */
+
+        /* Flexbox for perfect alignment */
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        gap: 15px;
+      }
+
+      /* 2. The Text */
+      .waiter-text {
+        color: #233A57;
+        font-family: 'Oswald', sans-serif;
+        font-size: 1rem;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        margin: 0;
+        white-space: nowrap;
+      }
+
+      /* 3. The Spinner Color Override */
+      .waiter-spinner {
+        color: #233A57 !important; /* Matches Brand Blue */
+        font-size: 20px !important;
+        display: flex;
+        align-items: center;
+      }
     "
     ))
   ),
@@ -505,6 +545,21 @@ ui <- bslib::page_navbar(
 # 3. SERVER LOGIC
 # ==============================================================================
 server <- function(input, output, session) {
+  # --- 1. DEFINE LOADING SCREEN (Floating Pill) ---
+  w <- waiter::Waiter$new(
+    id = "map",
+    html = shiny::tagList(
+      # The .waiter-overlay-content class defined in CSS automatically wraps this
+      shiny::div(
+        class = "waiter-spinner",
+        waiter::bs5_spinner(color = "primary")
+      ),
+      shiny::span(class = "waiter-text", "Updating Map...")
+    ),
+    # The overlay background: Nearly invisible, just enough to block interaction
+    color = "rgba(255, 255, 255, 0.2)"
+  )
+
   # --- SPLASH SCREEN ---
   shiny::showModal(shiny::modalDialog(
     title = NULL,
@@ -763,8 +818,8 @@ server <- function(input, output, session) {
       df$tooltip_html <- paste0(
         "<div style='font-family: sans-serif; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); min-width: 160px;'>",
         "<div style='margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:6px;'>",
-        "<div style='font-weight:bold; font-size:16px; color:#233A57;'>Score: ",
-        paste0(round(df$score * 100), "%"), # UPDATED: Show Percentage in Tooltip
+        "<div style='font-weight:bold; font-size:16px; color:#233A57;'>ATO Index: ",
+        round(df$score, 2),
         "</div>",
         "<div style='font-size:12px; color:#666; margin-top:2px;'>Land Use: ",
         df$bc_name,
@@ -919,7 +974,7 @@ server <- function(input, output, session) {
   # --- 3. MAP INITIALIZATION ---
   output$map <- mapgl::renderMaplibre({
     m <- mapgl::maplibre(
-      style = mapgl::openfreemap_style("liberty"),
+      style = mapgl::carto_style("voyager"),
       center = c(-111.8910, 40.7608),
       zoom = 8,
       pitch = 0
@@ -935,7 +990,7 @@ server <- function(input, output, session) {
       mapgl::add_raster_source(
         id = "src_roads_tile",
         tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
-        tileSize = 256
+        tileSize = 192
       )
 
     # 2. ADD CITY FILL (BOTTOM LAYER)
@@ -955,7 +1010,7 @@ server <- function(input, output, session) {
         id = "lay_roads_tile",
         source = "src_roads_tile",
         raster_opacity = 0.9,
-        visibility = "none"
+        visibility = "visible"
       )
 
     # 4. ADD CITY LINES (TOP LAYER - On top of roads)
@@ -1342,6 +1397,24 @@ server <- function(input, output, session) {
 
   # --- 6. HEATMAP RENDERER (SLOW UPDATE: LEGEND & BRIGHTNESS) ---
   shiny::observe({
+    # A. SHOW WAITER
+    w$show()
+
+    # 1. INITIALIZE DELAY VARIABLE
+    # Start with a safe default (1.0s) in case the data query fails
+    # or returns 0 rows.
+    delay_ms <- 1000
+
+    # B. ROBUST HIDING
+    # Note: on.exit evaluates 'delay_ms' at the moment of exit,
+    # so it will pick up the updated value calculated below.
+    on.exit({
+      shinyjs::delay(delay_ms, w$hide())
+    })
+
+    # C. UI RENDER PAUSE
+    Sys.sleep(0.1)
+
     dat <- filtered_data()
 
     # Note: We clear layers to force a clean redraw with the new relative scale
@@ -1350,6 +1423,17 @@ server <- function(input, output, session) {
       mapgl::clear_layer("h3_layer_2d")
 
     if (nrow(dat) > 0) {
+      # [Logic Block: Calculate Scale & Colors] ---------------------------
+
+      # --- DYNAMIC DELAY CALCULATION ---
+      # Base: 1000ms (minimum wait for UI smoothness)
+      # Dynamic: +0.15ms per hexagon row
+      # Example: 2,000 rows  -> 1000 + 300  = 1.3 seconds
+      # Example: 15,000 rows -> 1000 + 2250 = 3.25 seconds (SLC Size)
+      delay_ms <- 1000 + (nrow(dat) * 0.15)
+
+      # ----------------------------------------------------
+
       # 1. CALCULATE RELATIVE SCALE (BRIGHTNESS)
       # Find the actual min/max scores in the current view
       min_s <- min(dat$score, na.rm = TRUE)
@@ -1363,19 +1447,20 @@ server <- function(input, output, session) {
       # Create stops based on ACTUAL data range (e.g., 0 to 0.77)
       stops_val <- seq(min_s, max_s, length.out = 6)
 
-      # 2. GENERATE LEGEND LABELS (PERCENTAGE)
-      legend_labels <- paste0(round(stops_val * 100), "%")
+      # 2. GENERATE LEGEND LABELS
+      legend_labels <- round(stops_val, 2)
       pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
 
       # 3. CONSTRUCT COLOR EXPRESSION
       # We need to rebuild the expression to use our new dynamic stops
-      w <- shiny::isolate(debounced_sliders()) # Use current slider values
-      score_expr <- build_score_expr(w)
+      current_weights <- shiny::isolate(debounced_sliders()) # Use current slider values
+      score_expr <- build_score_expr(current_weights)
 
       color_expr <- list("interpolate", list("linear"), score_expr)
       for (i in seq_along(stops_val)) {
         color_expr <- append(color_expr, list(stops_val[i], pal_colors[i]))
       }
+      # -------------------------------------------------------------------
 
       # 4. RENDER LAYER
       target_layer <- if (input$map_3d) "h3_layer_3d" else "h3_layer_2d"
@@ -1428,7 +1513,7 @@ server <- function(input, output, session) {
       proxy |>
         mapgl::move_layer("lay_cities_line") |>
         mapgl::add_legend(
-          legend_title = "ATO Score",
+          legend_title = "ATO Index",
           type = "categorical",
           values = legend_labels,
           colors = pal_colors,
