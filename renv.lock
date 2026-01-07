@@ -4476,6 +4476,36 @@
       "Author": "Simon Garnier [aut, cre], Noam Ross [ctb, cph], Bob Rudis [ctb, cph], Marco Sciaini [ctb, cph], Antônio Pedro Camargo [ctb, cph], Cédric Scherer [ctb, cph]",
       "Repository": "CRAN"
     },
+    "waiter": {
+      "Package": "waiter",
+      "Version": "0.2.5.1",
+      "Source": "Repository",
+      "Title": "Loading Screen for 'Shiny'",
+      "Date": "2022-01-02",
+      "Authors@R": "c( person(given = \"John\", family = \"Coene\", role = c(\"aut\", \"cre\"), email = \"jcoenep@gmail.com\"), person(given = \"Jinhwan\", family = \"Kim\", role = \"ctb\", email = 'hwanistic@gmail.com'), person(given = \"Victor\", family = \"Granda\", role = c(\"ctb\"), email = \"victorgrandagarcia@gmail.com\", comment = c(ORCID = \"0000-0002-0469-1991\")))",
+      "Description": "Full screen and partial loading screens for 'Shiny' with spinners, progress bars, and notifications.",
+      "License": "MIT + file LICENSE",
+      "URL": "https://waiter.john-coene.com/, https://github.com/JohnCoene/waiter",
+      "BugReports": "https://github.com/JohnCoene/waiter/issues",
+      "Encoding": "UTF-8",
+      "Imports": [
+        "R6",
+        "shiny",
+        "htmltools"
+      ],
+      "RoxygenNote": "7.3.3",
+      "Suggests": [
+        "httr",
+        "knitr",
+        "packer",
+        "rmarkdown"
+      ],
+      "VignetteBuilder": "knitr",
+      "NeedsCompilation": "no",
+      "Author": "John Coene [aut, cre], Jinhwan Kim [ctb], Victor Granda [ctb] (ORCID: <https://orcid.org/0000-0002-0469-1991>)",
+      "Maintainer": "John Coene <jcoenep@gmail.com>",
+      "Repository": "CRAN"
+    },
     "withr": {
       "Package": "withr",
       "Version": "3.0.2",

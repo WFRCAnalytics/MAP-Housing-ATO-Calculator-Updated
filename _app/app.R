@@ -10,6 +10,7 @@ library(RColorBrewer)
 library(shinyjs)
 library(utils)
 library(waiter)
+library(capture)
 
 # ==============================================================================
 # 1. GLOBAL SETUP & DATA LOADING
@@ -369,6 +370,31 @@ ui <- bslib::page_navbar(
       rel = "stylesheet",
       href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
     ),
+    # --- ADD THIS SCRIPT ---
+    tags$script(
+      src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+    ),
+    tags$script(HTML(
+      "
+      function downloadMap() {
+        // 1. Target the element (we use the map ID)
+        var element = document.querySelector('#map');
+
+        // 2. Use html2canvas with CORS enabled
+        html2canvas(element, {
+          useCORS: true,        // FORCE Cross-Origin images to load
+          allowTaint: true,     // Allow 'tainted' canvas reading
+          backgroundColor: null // Transparent background
+        }).then(canvas => {
+          // 3. Create a fake link to trigger download
+          var link = document.createElement('a');
+          link.download = 'ATO_Housing_Map.png';
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        });
+      }
+    "
+    )),
     shinyWidgets::chooseSliderSkin("Flat", color = "#2c3e50"),
     tags$style(shiny::HTML(
       "
@@ -444,6 +470,13 @@ ui <- bslib::page_navbar(
         display: flex;
         align-items: center;
       }
+
+      /* Force 'disabled' links to strictly ignore mouse clicks */
+      .btn.disabled {
+        pointer-events: none !important;
+        cursor: not-allowed !important;
+        opacity: 0.65 !important;
+      }
     "
     ))
   ),
@@ -454,7 +487,7 @@ ui <- bslib::page_navbar(
       "comm_code",
       "Step 1: Select Cities",
       choices = city_choices,
-      selected = character(0),
+      selected = NULL,
       options = list(`actions-box` = TRUE, `live-search` = TRUE),
       multiple = TRUE
     ),
@@ -592,11 +625,26 @@ ui <- bslib::page_navbar(
       full_screen = TRUE,
       bslib::card_header(
         class = "d-flex align-items-center w-100",
-        shiny::span(
-          "Housing Accessibility Map",
-          class = "me-auto",
-          style = "font-family: 'Oswald'; font-size: 1.5rem; color: #233A57;"
+        # shiny::span(
+        #   "Housing Accessibility Map",
+        #   class = "me-auto",
+        #   style = "font-family: 'Oswald'; font-size: 1.5rem; color: #233A57;"
+        # ),
+
+        # --- Data Download Button ---
+        shiny::uiOutput("ui_btn_dl_data"),
+
+        # --- Map Download Button ---
+        tags$button(
+          id = "btn_dl_map",
+          # CHANGE: Added 'disabled' to class list
+          class = "btn btn-outline-primary btn-sm me-auto disabled",
+          style = "font-family: 'Oswald', sans-serif; font-weight: 500; cursor: pointer;",
+          onclick = "downloadMap()",
+          shiny::icon("camera"),
+          " Download Map"
         ),
+
         shiny::div(
           class = "d-flex align-items-center",
           style = "gap: 20px;",
@@ -777,11 +825,64 @@ server <- function(input, output, session) {
   active_ref_layers <- shiny::reactiveVal(list())
   all_sliders <- names(layer_defs)
 
+  # --- ENABLE/DISABLE DOWNLOAD BUTTONS ---
+  # --- 1. RENDER DATA BUTTON CONDITIONALLY ---
+  output$ui_btn_dl_data <- shiny::renderUI({
+    # Check condition
+    has_city <- !is.null(input$comm_code) && length(input$comm_code) > 0
+
+    if (has_city) {
+      # CASE A: Active Download Button (When city is selected)
+      shiny::downloadButton(
+        outputId = "btn_dl_data",
+        label = " Download Data",
+        icon = shiny::icon("table"),
+        class = "btn btn-outline-primary btn-sm me-2",
+        style = "font-family: 'Oswald', sans-serif; font-weight: 500;"
+      )
+    } else {
+      # CASE B: Disabled Placeholder (When no city selected)
+      # We use a standard button styled to look exactly like the disabled download button
+      tags$button(
+        shiny::icon("table"),
+        " Download Data",
+        class = "btn btn-outline-primary btn-sm me-2 disabled",
+        style = "font-family: 'Oswald', sans-serif; font-weight: 500;",
+        disabled = "disabled"
+      )
+    }
+  })
+
+  # --- 2. HANDLE MAP BUTTON (Keep this in your existing observer) ---
+  # The Map button is standard HTML, so shinyjs works perfectly on it without hacks.
+  shiny::observeEvent(
+    input$comm_code,
+    {
+      has_city <- !is.null(input$comm_code) && length(input$comm_code) > 0
+      shinyjs::toggleState("btn_dl_map", condition = has_city)
+    },
+    ignoreNULL = FALSE
+  )
+
   # Debounce sliders for map coloring (FAST)
   debounced_sliders <- shiny::reactive({
     sapply(all_sliders, function(x) input[[x]])
   }) |>
     shiny::debounce(10)
+
+  # --- CLEANUP: Force Clear H3 layers when selection is empty ---
+  shiny::observeEvent(
+    input$comm_code,
+    {
+      # Check if selection is empty
+      if (is.null(input$comm_code) || length(input$comm_code) == 0) {
+        mapgl::maplibre_proxy("map") |>
+          mapgl::clear_layer("h3_layer_3d") |>
+          mapgl::clear_layer("h3_layer_2d")
+      }
+    },
+    ignoreNULL = FALSE
+  ) # <--- Important: Run even when input is NULL
 
   shiny::observeEvent(input$reset_all, {
     for (id in all_sliders) {
@@ -1089,7 +1190,8 @@ server <- function(input, output, session) {
       style = mapgl::carto_style("voyager"),
       center = c(-111.8910, 40.7608),
       zoom = 8,
-      pitch = 0
+      pitch = 0,
+      preserveDrawingBuffer = TRUE
     ) |>
       mapgl::add_navigation_control(position = "top-left") |>
       mapgl::add_scale_control(position = "bottom-left", unit = "imperial") |>
@@ -1112,7 +1214,16 @@ server <- function(input, output, session) {
           id = "lay_cities_fill",
           source = cities_sf,
           fill_color = "#CCCCCC",
-          fill_opacity = 0.5
+          # --- CHANGED: Fade fill from 0.5 to 0.0 between Zoom 12 and 15 ---
+          fill_opacity = list(
+            "interpolate",
+            list("linear"),
+            list("zoom"),
+            12,
+            0.5,
+            15,
+            0.0
+          )
         )
     }
 
@@ -1121,7 +1232,16 @@ server <- function(input, output, session) {
       mapgl::add_raster_layer(
         id = "lay_roads_tile",
         source = "src_roads_tile",
-        raster_opacity = 0.9,
+        # --- CHANGED: Fade out roads between zoom 12 and 16 ---
+        raster_opacity = list(
+          "interpolate",
+          list("linear"),
+          list("zoom"),
+          13,
+          0.9, # Full opacity (0.9) up to zoom 12
+          14,
+          0.0 # Completely invisible (0.0) by zoom 16
+        ),
         visibility = "visible"
       )
 
@@ -1600,7 +1720,15 @@ server <- function(input, output, session) {
             dat,
             fill_extrusion_color = color_expr,
             fill_extrusion_height = height_expr,
-            fill_extrusion_opacity = 0.9,
+            fill_extrusion_opacity = list(
+              "interpolate",
+              list("linear"),
+              list("zoom"),
+              14,
+              0.9,
+              18,
+              0.1
+            ),
             tooltip = "tooltip_html" # REMOVE: from here
           ) |>
           # ADD THIS: Sets the tooltip column for hover
@@ -1613,7 +1741,16 @@ server <- function(input, output, session) {
             "h3_layer_2d",
             dat,
             fill_color = color_expr,
-            fill_opacity = 0.8,
+            # --- CHANGED: Fade 2D fill from 0.8 to 0.2 between zoom 15 and 18 ---
+            fill_opacity = list(
+              "interpolate",
+              list("linear"),
+              list("zoom"),
+              14,
+              0.9,
+              18,
+              0.1
+            ),
             tooltip = "tooltip_html" # REMOVE from here
           ) |>
           # ADD THIS: Sets the tooltip column for hover
@@ -1639,6 +1776,25 @@ server <- function(input, output, session) {
       refresh_layer_control(proxy, input$map_3d, current_refs)
     }
   })
+
+  # --- 7. DATA DOWNLOAD HANDLER ---
+  output$btn_dl_data <- shiny::downloadHandler(
+    filename = function() {
+      "ATO_Filtered_Data.csv"
+    },
+    content = function(file) {
+      shiny::req(input$comm_code)
+      shiny::req(length(input$comm_code) > 0)
+      shiny::req(filtered_data())
+
+      # Clean data: Get reactive data -> Drop Geometry -> Write CSV
+      out_df <- filtered_data() |>
+        sf::st_drop_geometry() |>
+        dplyr::select(-any_of("tooltip_html")) # specific cleanup if column exists
+
+      utils::write.csv(out_df, file, row.names = FALSE)
+    }
+  )
 }
 
 shiny::shinyApp(ui, server)
