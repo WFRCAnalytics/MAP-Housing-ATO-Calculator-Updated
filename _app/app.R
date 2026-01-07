@@ -349,6 +349,45 @@ sliderWithLayer <- function(inputId, label) {
   )
 }
 
+# TODO: --- REVERTIBLE CHANGE: Helper function for Toggle-Only Layers ---
+toggleOnlyLayer <- function(inputId, label) {
+  help_msg <- layer_help_text[[inputId]]
+  if (is.null(help_msg)) {
+    help_msg <- "Toggle this reference layer."
+  }
+
+  shiny::div(
+    class = "d-flex justify-content-between align-items-center mb-2", # mb-2 for spacing
+    shiny::div(
+      class = "d-flex align-items-center",
+      tags$label(
+        label,
+        class = "control-label",
+        style = "margin-bottom: 0; margin-right: 8px;"
+      ),
+      bslib::tooltip(
+        trigger = shiny::tags$i(
+          class = "fa-regular fa-circle-question",
+          style = "color: #9aa5b1; cursor: help; font-size: 0.85rem;"
+        ),
+        help_msg,
+        placement = "top"
+      )
+    ),
+    tags$a(
+      id = paste0("btn_", inputId),
+      class = "layer-toggle-btn",
+      onclick = sprintf(
+        "Shiny.setInputValue('%s', Math.random());",
+        paste0("toggle_", inputId)
+      ),
+      title = "Toggle Reference Layer",
+      tags$i(class = "fa-solid fa-eye-slash")
+    )
+  )
+}
+# -----------------------------------------------------------------
+
 # ==============================================================================
 # 2. UI
 # ==============================================================================
@@ -515,10 +554,20 @@ ui <- bslib::page_navbar(
       open = FALSE,
       bslib::accordion_panel(
         "Places (Centers)",
-        sliderWithLayer("w_CM", "Metropolitan Centers"),
-        sliderWithLayer("w_CU", "Urban Centers"),
-        sliderWithLayer("w_CC", "City Centers"),
-        sliderWithLayer("w_CN", "Neighborhood Centers")
+
+        # TODO: --- REVERTIBLE CHANGE: Remove Sliders, Keep Toggles ---
+        # ORIGINAL CODE:
+        # sliderWithLayer("w_CM", "Metropolitan Centers"),
+        # sliderWithLayer("w_CU", "Urban Centers"),
+        # sliderWithLayer("w_CC", "City Centers"),
+        # sliderWithLayer("w_CN", "Neighborhood Centers")
+
+        # NEW CODE:
+        toggleOnlyLayer("w_CM", "Metropolitan Centers"),
+        toggleOnlyLayer("w_CU", "Urban Centers"),
+        toggleOnlyLayer("w_CC", "City Centers"),
+        toggleOnlyLayer("w_CN", "Neighborhood Centers")
+        # -------------------------------------------------------
       ),
       bslib::accordion_panel(
         "Employment",
@@ -823,7 +872,15 @@ server <- function(input, output, session) {
   })
 
   active_ref_layers <- shiny::reactiveVal(list())
-  all_sliders <- names(layer_defs)
+
+  # TODO: --- REVERTIBLE CHANGE: Exclude Centers from Scoring Logic ---
+  # ORIGINAL CODE:
+  # all_sliders <- names(layer_defs)
+
+  # NEW CODE: Explicitly exclude centers so they don't affect the math
+  center_layers <- c("w_CM", "w_CU", "w_CC", "w_CN")
+  all_sliders <- setdiff(names(layer_defs), center_layers)
+  # -------------------------------------------------------------
 
   # --- ENABLE/DISABLE DOWNLOAD BUTTONS ---
   # --- 1. RENDER DATA BUTTON CONDITIONALLY ---
@@ -1567,20 +1624,35 @@ server <- function(input, output, session) {
           }
 
           if (layer_states[[lid]]) {
+            # TODO: --- REVERTIBLE CHANGE: Custom Styling for Centers ---
+            # ORIGINAL CODE (Implicit):
+            # fill_op <- 0.7
+            # line_wd <- 1.5
+
+            # NEW CODE: Check if layer is a Center, apply custom styles
+            is_center <- lid %in% c("w_CM", "w_CU", "w_CC", "w_CN")
+
+            # If center: 0.1 opacity (almost transparent), otherwise 0.7
+            fill_op <- if (is_center) 0.1 else 0.7
+
+            # If center: 4.0 width (double), otherwise 1.5
+            line_wd <- if (is_center) 4.0 else 1.5
+            # -----------------------------------------------------
+
             if (def$type == "polygon") {
               proxy <- proxy |>
                 mapgl::add_fill_layer(
                   id = layer_id,
                   source = source_id,
                   fill_color = def$color,
-                  fill_opacity = 0.7
+                  fill_opacity = fill_op # CHANGED: Uses variable
                 ) |>
                 mapgl::move_layer(layer_id, "lay_cities_line") |>
                 mapgl::add_line_layer(
                   id = paste0(layer_id, "_ol"),
                   source = source_id,
                   line_color = def$color,
-                  line_width = 1.5
+                  line_width = line_wd # CHANGED: Uses variable
                 ) |>
                 mapgl::move_layer(paste0(layer_id, "_ol"), "lay_cities_line")
             } else if (def$type == "line") {
