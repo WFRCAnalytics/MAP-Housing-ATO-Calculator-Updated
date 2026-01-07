@@ -786,6 +786,21 @@ server <- function(input, output, session) {
       df$bc_name <- bc_map[df$BC]
       df$bc_name[is.na(df$bc_name)] <- "Unknown"
 
+      # --- START CHANGE: Normalization Logic ---
+      # Calculate Min/Max for the current filtered dataset
+      min_s <- min(df$score, na.rm = TRUE)
+      max_s <- max(df$score, na.rm = TRUE)
+      rng <- max_s - min_s
+
+      # Handle case where all scores are identical to prevent division by zero
+      if (rng == 0) {
+        rng <- 1
+      }
+
+      # Create Normalized Score (0 to 1)
+      df$norm_score <- (df$score - min_s) / rng
+      # --- END CHANGE ---
+
       # --- DYNAMIC COLOR EXTRACTION ---
       # Helper: If it's a list (gradient), grab the LAST element (Max Intensity).
       # If it's a string (static), just use it.
@@ -819,7 +834,8 @@ server <- function(input, output, session) {
         "<div style='font-family: sans-serif; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); min-width: 160px;'>",
         "<div style='margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:6px;'>",
         "<div style='font-weight:bold; font-size:16px; color:#233A57;'>ATO Index: ",
-        round(df$score, 2),
+        # CHANGED: Use norm_score and force 2 decimals (0.00 - 1.00)
+        sprintf("%.2f", df$norm_score),
         "</div>",
         "<div style='font-size:12px; color:#666; margin-top:2px;'>Land Use: ",
         df$bc_name,
@@ -1448,7 +1464,8 @@ server <- function(input, output, session) {
       stops_val <- seq(min_s, max_s, length.out = 6)
 
       # 2. GENERATE LEGEND LABELS
-      legend_labels <- round(stops_val, 2)
+      # CHANGED: Force labels to be 0.00 to 1.00, formatted to 2 decimals
+      legend_labels <- sprintf("%.2f", seq(0, 1, length.out = 6))
       pal_colors <- RColorBrewer::brewer.pal(6, "YlGnBu")
 
       # 3. CONSTRUCT COLOR EXPRESSION
