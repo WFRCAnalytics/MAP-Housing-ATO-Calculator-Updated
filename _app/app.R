@@ -290,7 +290,8 @@ sliderWithLayer <- function(inputId, label) {
           paste0("toggle_", inputId)
         ),
         title = "Toggle Reference Layer",
-        shiny::icon("layer-group")
+        # --- CHANGED: Explicitly use fa-solid and fa-eye-slash ---
+        tags$i(class = "fa-solid fa-eye-slash")
       )
     ),
     shiny::sliderInput(
@@ -342,6 +343,11 @@ ui <- bslib::page_navbar(
       .layer-toggle-btn:hover { color: #5a87c6; }
       .layer-toggle-btn.active { color: #2c3e50; }
       .maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }
+      .mapboxgl-legend {
+        background-color: rgba(255, 255, 255, 0.8) !important; /* 1.0 = 100% Opaque */
+        border: 1px solid #ccc; /* Optional: Adds a clean border */
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2); /* Optional: Shadow for depth */
+      }
       .shiny-input-container { width: 100% !important; margin-bottom: 0px !important; }
       .form-group { margin-bottom: 5px !important; }
       .modal-content { border: none; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); overflow: hidden; }
@@ -760,7 +766,7 @@ server <- function(input, output, session) {
         "<div style='font-weight:bold; font-size:16px; color:#233A57;'>Score: ",
         paste0(round(df$score * 100), "%"), # UPDATED: Show Percentage in Tooltip
         "</div>",
-        "<div style='font-size:12px; color:#666; margin-top:2px;'>Type: ",
+        "<div style='font-size:12px; color:#666; margin-top:2px;'>Land Use: ",
         df$bc_name,
         "</div></div>",
 
@@ -923,6 +929,8 @@ server <- function(input, output, session) {
       mapgl::add_geolocate_control(position = "top-left") |>
       mapgl::add_geocoder_control(position = "top-left") |>
       mapgl::add_reset_control(position = "top-left") |>
+      # mapgl::add_draw_control(position = "top-left") |>
+      # mapgl::add_features_to_draw(position = "top-left") |>
       # 1. ADD SOURCE FOR ROADS
       mapgl::add_raster_source(
         id = "src_roads_tile",
@@ -1231,11 +1239,21 @@ server <- function(input, output, session) {
     shiny::observeEvent(input[[paste0("toggle_", lid)]], {
       layer_states[[lid]] <- !layer_states[[lid]]
 
-      # Toggle button styling
+      # Toggle button styling & Icon Switching
       if (layer_states[[lid]]) {
         shinyjs::addClass(id = paste0("btn_", lid), class = "active")
+        # --- CHANGED: Remove 'slash', add 'eye' (fa-solid stays) ---
+        shinyjs::runjs(sprintf(
+          "$('#btn_%s i').removeClass('fa-eye-slash').addClass('fa-eye');",
+          lid
+        ))
       } else {
         shinyjs::removeClass(id = paste0("btn_", lid), class = "active")
+        # --- CHANGED: Remove 'eye', add 'slash' (fa-solid stays) ---
+        shinyjs::runjs(sprintf(
+          "$('#btn_%s i').removeClass('fa-eye').addClass('fa-eye-slash');",
+          lid
+        ))
       }
 
       proxy <- mapgl::maplibre_proxy("map")
