@@ -273,16 +273,58 @@ layer_names <- c(
   "w_AP" = "10-min Walk to Parks"
 )
 
+# --- NEW: Tooltip Descriptions ---
+layer_help_text <- list(
+  "w_CM" = "Regional centers designated for highest density growth and activity.",
+  "w_CU" = "Centers serving sub-regional areas with high density commercial and housing.",
+  "w_CC" = "Centers serving specific cities with moderate density and mixed use.",
+  "w_CN" = "Local centers serving immediate neighborhoods.",
+  "w_AA" = "Number of jobs accessible by car within a 30-minute drive.",
+  "w_AT" = "Number of jobs accessible by public transit within a 30-minute ride.",
+  "w_TT" = "Proximity to UTA bus stops, TRAX stations, and FrontRunner stations.",
+  "w_TF" = "Proximity to freeway entrance and exit ramps.",
+  "w_TA" = "Proximity to bike lanes, multi-use trails, and active transportation paths.",
+  "w_AC" = "Proximity to licensed childcare facilities.",
+  "w_AH" = "Proximity to hospitals, clinics, and medical facilities.",
+  "w_AE" = "Proximity to K-12 schools and higher education institutions.",
+  "w_AG" = "Proximity to supermarkets and grocery stores.",
+  "w_AM" = "Proximity to community centers, libraries, and recreation halls.",
+  "w_AP" = "Areas located within a 10-minute walk of a public park."
+)
+
 sliderWithLayer <- function(inputId, label) {
+  # Lookup help text; default to empty if missing
+  help_msg <- layer_help_text[[inputId]]
+  if (is.null(help_msg)) {
+    help_msg <- "Adjust the importance of this factor."
+  }
+
   shiny::tagList(
     shiny::div(
       class = "d-flex justify-content-between align-items-center mb-1",
-      tags$label(
-        label,
-        class = "control-label",
-        `for` = inputId,
-        style = "margin-bottom: 0;"
+
+      # --- LEFT SIDE: Label + Tooltip Grouped ---
+      shiny::div(
+        class = "d-flex align-items-center",
+        tags$label(
+          label,
+          class = "control-label",
+          `for` = inputId,
+          # Add right margin to separate text from the question mark
+          style = "margin-bottom: 0; margin-right: 8px;"
+        ),
+        bslib::tooltip(
+          trigger = shiny::tags$i(
+            class = "fa-regular fa-circle-question",
+            # Subtler styling for the help icon
+            style = "color: #9aa5b1; cursor: help; font-size: 0.85rem;"
+          ),
+          help_msg,
+          placement = "top"
+        )
       ),
+
+      # --- RIGHT SIDE: Visibility Toggle ---
       tags$a(
         id = paste0("btn_", inputId),
         class = "layer-toggle-btn",
@@ -291,7 +333,6 @@ sliderWithLayer <- function(inputId, label) {
           paste0("toggle_", inputId)
         ),
         title = "Toggle Reference Layer",
-        # --- CHANGED: Explicitly use fa-solid and fa-eye-slash ---
         tags$i(class = "fa-solid fa-eye-slash")
       )
     ),
