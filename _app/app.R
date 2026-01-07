@@ -448,23 +448,78 @@ ui <- bslib::page_navbar(
       ),
       bslib::accordion_panel(
         "Employment",
-        sliderWithLayer("w_AA", "Auto Access to Jobs"),
-        sliderWithLayer("w_AT", "Transit Access to Jobs")
+        sliderWithLayer(
+          "w_AA",
+          shiny::HTML(
+            "<i class='fa-solid fa-car' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Auto Access to Jobs"
+          )
+        ),
+        sliderWithLayer(
+          "w_AT",
+          shiny::HTML(
+            "<i class='fa-solid fa-train' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Transit Access to Jobs"
+          )
+        )
       ),
       bslib::accordion_panel(
         "Transportation",
-        sliderWithLayer("w_TT", "Transit Stops"),
-        sliderWithLayer("w_TF", "Freeway Exits"),
-        sliderWithLayer("w_TA", "Active Transportation")
+        sliderWithLayer(
+          "w_TT",
+          shiny::HTML(
+            "<i class='fa-solid fa-bus' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Transit Stops"
+          )
+        ),
+        sliderWithLayer(
+          "w_TF",
+          shiny::HTML(
+            "<i class='fa-solid fa-road' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Freeway Exits"
+          )
+        ),
+        sliderWithLayer(
+          "w_TA",
+          shiny::HTML(
+            "<i class='fa-solid fa-bicycle' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Active Transportation"
+          )
+        )
       ),
       bslib::accordion_panel(
         "Necessities",
-        sliderWithLayer("w_AC", "Childcare Centers"),
-        sliderWithLayer("w_AH", "Healthcare Facilities"),
-        sliderWithLayer("w_AE", "Education Institutions"),
-        sliderWithLayer("w_AG", "Grocery Stores"),
-        sliderWithLayer("w_AM", "Community Centers"),
-        sliderWithLayer("w_AP", "10-min Walk to Parks")
+        sliderWithLayer(
+          "w_AC",
+          shiny::HTML(
+            "<i class='fa-solid fa-baby' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Childcare Centers"
+          )
+        ),
+        sliderWithLayer(
+          "w_AH",
+          shiny::HTML(
+            "<i class='fa-solid fa-heart-pulse' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Healthcare Facilities"
+          )
+        ),
+        sliderWithLayer(
+          "w_AE",
+          shiny::HTML(
+            "<i class='fa-solid fa-graduation-cap' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Education Institutions"
+          )
+        ),
+        sliderWithLayer(
+          "w_AG",
+          shiny::HTML(
+            "<i class='fa-solid fa-cart-shopping' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Grocery Stores"
+          )
+        ),
+        sliderWithLayer(
+          "w_AM",
+          shiny::HTML(
+            "<i class='fa-solid fa-building' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Community Centers"
+          )
+        ),
+        sliderWithLayer(
+          "w_AP",
+          shiny::HTML(
+            "<i class='fa-solid fa-tree' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> 10-min Walk to Parks"
+          )
+        )
       )
     ),
     shiny::div(
