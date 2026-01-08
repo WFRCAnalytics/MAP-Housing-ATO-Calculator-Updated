@@ -1620,7 +1620,7 @@ gdf.plot()
       mapgl::add_screenshot_control(
         position = "top-left",
         hide_controls = TRUE,
-        filename = "ATO-Map-Screenshot"
+        filename = "ATO_Housing_Map"
       ) |>
       # mapgl::add_draw_control(position = "top-left") |>
       # mapgl::add_features_to_draw(position = "top-left") |>
