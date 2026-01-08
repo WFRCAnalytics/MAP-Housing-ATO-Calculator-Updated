@@ -442,7 +442,7 @@ ui <- bslib::page_navbar(
           useCORS: true,        // FORCE Cross-Origin images to load
           allowTaint: true,     // Allow 'tainted' canvas reading
           backgroundColor: null, // Transparent background
-          scale: 3,  // Increase resolution
+          scale: 2,  // Increase resolution
         }).then(canvas => {
           // 3. Create a fake link to trigger download
           var link = document.createElement('a');
@@ -1619,8 +1619,9 @@ gdf.plot()
       mapgl::add_reset_control(position = "top-left") |>
       mapgl::add_screenshot_control(
         position = "top-left",
-        hide_controls = TRUE,
-        filename = "ATO_Housing_Map"
+        hide_controls = FALSE,
+        filename = "ATO_Housing_Map",
+        image_scale = 2
       ) |>
       # mapgl::add_draw_control(position = "top-left") |>
       # mapgl::add_features_to_draw(position = "top-left") |>
