@@ -1617,6 +1617,10 @@ gdf.plot()
       mapgl::add_geolocate_control(position = "top-left") |>
       mapgl::add_geocoder_control(position = "top-left") |>
       mapgl::add_reset_control(position = "top-left") |>
+      mapgl::add_screenshot_control(
+        position = "top-left",
+        filename = "ATO-Map-Screenshot"
+      ) |>
       # mapgl::add_draw_control(position = "top-left") |>
       # mapgl::add_features_to_draw(position = "top-left") |>
       # 1. ADD SOURCE FOR ROADS
