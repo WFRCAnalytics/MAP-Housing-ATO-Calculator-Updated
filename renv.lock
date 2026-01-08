@@ -754,6 +754,43 @@
       "Maintainer": "Winston Chang <winston@posit.co>",
       "Repository": "CRAN"
     },
+    "capture": {
+      "Package": "capture",
+      "Version": "0.1.5",
+      "Source": "GitHub",
+      "Title": "Capture Screenshot in Web Page",
+      "Authors@R": "c(person(given = \"Victor\", family = \"Perrier\", role = c(\"aut\", \"cre\", \"cph\"), email = \"victor.perrier@dreamrs.fr\"), person(given = \"Fanny\", family = \"Meyer\", role = \"aut\"))",
+      "Description": "Add a button in web page ('Shiny' or 'RMarkdown') to take a screenshot of a specified element.",
+      "License": "GPL-3",
+      "Encoding": "UTF-8",
+      "Roxygen": "list(markdown = TRUE)",
+      "RoxygenNote": "7.3.2",
+      "Imports": [
+        "htmltools",
+        "jsonlite",
+        "shiny",
+        "tools"
+      ],
+      "Suggests": [
+        "knitr",
+        "rmarkdown",
+        "leaflet",
+        "dygraphs"
+      ],
+      "VignetteBuilder": "knitr",
+      "URL": "https://dreamrs.github.io/capture, https://github.com/dreamRs/capture",
+      "BugReports": "https://github.com/dreamRs/capture/issues",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteRepo": "capture",
+      "RemoteUsername": "dreamRs",
+      "RemotePkgRef": "dreamRs/capture",
+      "RemoteRef": "HEAD",
+      "RemoteSha": "802a55d283aefbea9b3afd563e66fe953b2cc12a",
+      "NeedsCompilation": "no",
+      "Author": "Victor Perrier [aut, cre, cph], Fanny Meyer [aut]",
+      "Maintainer": "Victor Perrier <victor.perrier@dreamrs.fr>"
+    },
     "class": {
       "Package": "class",
       "Version": "7.3-23",
@@ -2613,17 +2650,18 @@
     },
     "mapgl": {
       "Package": "mapgl",
-      "Version": "0.4.3",
-      "Source": "Repository",
+      "Version": "0.4.3.9000",
+      "Source": "GitHub",
       "Title": "Interactive Maps with 'Mapbox GL JS' and 'MapLibre GL JS'",
-      "Date": "2025-11-20",
+      "Date": "2026-01-08",
       "Authors@R": "person(given = \"Kyle\", family = \"Walker\", email = \"kyle@walker-data.com\", role = c(\"aut\", \"cre\"))",
       "Description": "Provides an interface to the 'Mapbox GL JS' (<https://docs.mapbox.com/mapbox-gl-js/guides>) and the 'MapLibre GL JS' (<https://maplibre.org/maplibre-gl-js/docs/>) interactive mapping libraries to help users create custom interactive maps in R.  Users can create interactive globe visualizations; layer 'sf' objects to create filled maps, circle maps, 'heatmaps', and three-dimensional graphics; and customize map styles and views.  The package also includes utilities to use 'Mapbox' and 'MapLibre' maps in 'Shiny' web applications.",
       "URL": "https://walker-data.com/mapgl/",
       "BugReports": "https://github.com/walkerke/mapgl/issues",
       "License": "MIT + file LICENSE",
       "Encoding": "UTF-8",
-      "RoxygenNote": "7.3.2",
+      "Roxygen": "list(markdown = TRUE)",
+      "RoxygenNote": "7.3.3",
       "Depends": [
         "R (>= 4.1.0)"
       ],
@@ -2647,10 +2685,16 @@
         "usethis",
         "leaflet"
       ],
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteRepo": "mapgl",
+      "RemoteUsername": "walkerke",
+      "RemotePkgRef": "walkerke/mapgl",
+      "RemoteRef": "HEAD",
+      "RemoteSha": "6d657cf8ed43a014b85d56f118959e8f88e929cb",
       "NeedsCompilation": "no",
       "Author": "Kyle Walker [aut, cre]",
-      "Maintainer": "Kyle Walker <kyle@walker-data.com>",
-      "Repository": "CRAN"
+      "Maintainer": "Kyle Walker <kyle@walker-data.com>"
     },
     "memoise": {
       "Package": "memoise",

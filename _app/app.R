@@ -1619,6 +1619,7 @@ gdf.plot()
       mapgl::add_reset_control(position = "top-left") |>
       mapgl::add_screenshot_control(
         position = "top-left",
+        hide_controls = TRUE,
         filename = "ATO-Map-Screenshot"
       ) |>
       # mapgl::add_draw_control(position = "top-left") |>
