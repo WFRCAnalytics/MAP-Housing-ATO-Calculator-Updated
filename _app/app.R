@@ -409,7 +409,25 @@ ui <- bslib::page_navbar(
       rel = "stylesheet",
       href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css"
     ),
-    # --- ADD THIS SCRIPT ---
+
+    # --- Syntax Highlighting Libraries ---
+    # CHANGED: Switched to 'atom-one-dark' for better contrast and color
+    tags$link(
+      rel = "stylesheet",
+      href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+    ),
+    tags$script(
+      src = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+    ),
+    tags$script(
+      src = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/r.min.js"
+    ),
+    tags$script(
+      src = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"
+    ),
+    # --------------------------------------------------------
+
+    # --- DOWNLOAD SCREENSHOT ---
     tags$script(
       src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
     ),
@@ -872,6 +890,340 @@ server <- function(input, output, session) {
     shiny::removeModal()
   })
 
+  # --- 7. DATA DOWNLOAD MODAL (PROFESSIONAL STYLE) ---
+  shiny::observeEvent(input$trigger_dl_modal, {
+    # 1. SHOW THE MODAL
+    shiny::showModal(
+      shiny::modalDialog(
+        title = NULL, # We create a custom header
+        footer = NULL, # We create a custom footer
+        size = "l",
+        easyClose = TRUE,
+        fade = TRUE,
+
+        # --- CUSTOM CSS FOR THIS MODAL ---
+        shiny::HTML(
+          '
+          <style>
+            /* 1. Modal Reset: Remove default padding so our header touches edges */
+            .modal-body { padding: 0 !important; border-radius: 12px; overflow: hidden; }
+            .modal-content { border: none; box-shadow: 0 15px 50px rgba(0,0,0,0.3); border-radius: 12px; }
+
+            /* 2. Header: Matching the Splash Screen Brand Look */
+            .dl-header {
+              background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%);
+              color: white;
+              padding: 25px 30px;
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              border-bottom: 4px solid #377EB8; /* Accent border */
+            }
+            .dl-title-group h2 {
+              font-family: "Oswald", sans-serif;
+              font-size: 1.6rem;
+              margin: 0;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: white;
+            }
+            .dl-title-group p {
+              font-family: "Open Sans", sans-serif;
+              font-size: 0.9rem;
+              margin: 5px 0 0 0;
+              opacity: 0.9;
+              font-weight: 300;
+            }
+            .dl-icon {
+              font-size: 2.5rem;
+              color: #aaddff;
+              opacity: 0.8;
+            }
+
+            /* 3. Body: Clean Layout */
+            .dl-body {
+              padding: 25px 30px;
+              background-color: #fcfcfc;
+              font-family: "Open Sans", sans-serif;
+            }
+            .dl-intro-box {
+              background-color: #eef6fc;
+              border-left: 4px solid #377EB8;
+              padding: 12px 18px;
+              margin-bottom: 20px;
+              color: #444;
+              font-size: 0.95rem;
+            }
+
+            /* 4. Code Blocks: Dark Theme Overrides */
+            pre { margin-bottom: 0; border: none; padding: 0; }
+            code.hljs {
+              border-radius: 6px;
+              font-family: "Fira Code", "Consolas", monospace;
+              font-size: 0.9em;
+              padding: 15px !important;
+              background-color: #282c34; /* Atom One Dark BG */
+              box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+            }
+
+            /* 5. Footer: Action Bar */
+            .dl-footer {
+              background-color: #f1f1f1;
+              padding: 15px 30px;
+              border-top: 1px solid #ddd;
+              text-align: right;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .btn-brand-close {
+              background-color: #233A57;
+              border: none;
+              color: white;
+              padding: 8px 25px;
+              font-family: "Oswald", sans-serif;
+              text-transform: uppercase;
+              border-radius: 4px;
+              transition: all 0.2s ease;
+            }
+            .btn-brand-close:hover {
+              background-color: #e8572d; /* Brand Orange on Hover */
+              color: white;
+              transform: translateY(-1px);
+              box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            }
+            .dl-footer-note {
+              font-size: 0.85rem;
+              color: #888;
+              font-style: italic;
+            }
+          </style>
+        '
+        ),
+
+        # --- A. HEADER ---
+        shiny::div(
+          class = "dl-header",
+          shiny::div(
+            class = "dl-title-group",
+            shiny::tags$h2("Download Started"),
+            shiny::tags$p(
+              "Your data is being prepared and will download shortly."
+            )
+          ),
+          shiny::div(
+            class = "dl-icon",
+            shiny::icon("file-csv")
+          )
+        ),
+
+        # --- B. BODY ---
+        shiny::div(
+          class = "dl-body",
+
+          # Instruction Box
+          shiny::div(
+            class = "dl-intro-box",
+            shiny::icon("circle-info"),
+            " This file contains ",
+            shiny::tags$strong("H3 Hexagon Indices"),
+            " rather than standard coordinates. Select your preferred tool below to visualize this data."
+          ),
+
+          # Tabs
+          bslib::navset_card_tab(
+            id = "modal_tabs",
+
+            # --- TAB 1: R (h3o) ---
+            bslib::nav_panel(
+              title = shiny::HTML(
+                '<span style="color: #233A57; font-weight:600;"><i class="fa-brands fa-r-project"></i> R Script</span>'
+              ),
+              shiny::div(
+                # shiny::p(
+                #   "Use the `h3o` package to parse strings into H3 objects, then convert them to standard simple feature (sf) polygons.",
+                #   style = "font-size:0.9rem; color:#555;"
+                # ),
+                shiny::HTML(
+                  '
+<pre><code class="language-r"># Install packages if missing
+# install.packages(c("sf", "h3o", "readr", "dplyr"))
+
+library(sf)
+library(h3o)
+library(readr)
+library(dplyr)
+
+# 1. Read the CSV
+df <- read_csv("ATO_Filtered_Data.csv")
+
+# 2. Convert Strings to H3 Objects, then to Polygons
+sf_data <- df |>
+  mutate(
+    h3_obj = h3_from_strings(h3_index), # Parses the ID string into an H3 object
+    geometry = cell_to_polygon(h3_obj) # Generates the sf geometry
+  ) |>
+  st_as_sf()
+
+# 3. Plot to verify
+plot(sf_data$geometry, main = "ATO Export Map")
+</code></pre>'
+                )
+              )
+            ),
+
+            # --- TAB 2: Python (h3-py) ---
+            bslib::nav_panel(
+              title = shiny::HTML(
+                '<span style="color: #233A57; font-weight:600;"><i class="fa-brands fa-python"></i> Python Script</span>'
+              ),
+              shiny::div(
+                # shiny::p(
+                #   "We use `h3.cells_to_geo()` to generate a GeoJSON-compliant dictionary (automatically flipping coordinates to lng/lat), which `shapely` converts to a Polygon.",
+                #   style = "font-size:0.9rem; color:#555;"
+                # ),
+                shiny::HTML(
+                  '
+<pre><code class="language-python"># Install h3 and dependencies
+# pip install h3 pandas geopandas shapely
+
+import h3
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import shape
+
+# 1. Read Data
+df = pd.read_csv("ATO_Filtered_Data.csv")
+
+# 2. Create Geometry
+# cells_to_geo([x]) creates a GeoJSON dict for the cell
+# shape() converts that dict into a shapely Polygon
+df["geometry"] = df["h3_index"].apply(lambda x: shape(h3.cells_to_geo([x])))
+
+# 3. Convert to GeoDataFrame
+gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+
+# 4. Plot
+gdf.plot()
+</code></pre>'
+                )
+              )
+            ),
+
+            # --- TAB 3: QGIS / ArcGIS ---
+            bslib::nav_panel(
+              title = shiny::HTML(
+                '<span style="color: #233A57; font-weight:600;"><i class="fa-solid fa-map"></i> QGIS / ArcGIS</span>'
+              ),
+              shiny::div(
+                style = "padding: 10px 5px;",
+                shiny::p(
+                  shiny::tags$i(
+                    class = "fa-solid fa-triangle-exclamation",
+                    style = "color:#f39c12;"
+                  ),
+                  " Note: Neither tool supports generating polygons directly from a CSV index. You must generate a blank grid first, then join your data.",
+                  style = "font-size: 0.9rem;"
+                ),
+
+                shiny::hr(),
+
+                shiny::h5(
+                  "Option A: QGIS",
+                  style = "font-family:'Oswald'; color:#233A57;"
+                ),
+                shiny::tags$ul(
+                  style = "font-size: 0.9rem; color:#444; line-height: 1.6;",
+                  shiny::tags$li(
+                    "Install the ",
+                    shiny::a(
+                      "H3 Toolkit Plugin",
+                      href = "https://plugins.qgis.org/plugins/h3_toolkit/",
+                      target = "_blank",
+                      style = "font-weight:bold; text-decoration:underline; color:#377EB8;"
+                    ),
+                    " via the QGIS Plugin Manager."
+                  ),
+                  shiny::tags$li(
+                    "Use the plugin to generate a grid covering your area of interest at ",
+                    shiny::tags$strong("Resolution 10"),
+                    "."
+                  ),
+                  shiny::tags$li("Import your CSV as a delimited text layer."),
+                  shiny::tags$li(
+                    "Perform a Table Join between the Grid (Target) and CSV (Join) using the H3 Index column."
+                  )
+                ),
+
+                shiny::br(),
+
+                shiny::h5(
+                  "Option B: ArcGIS Pro",
+                  style = "font-family:'Oswald'; color:#233A57;"
+                ),
+                shiny::tags$ul(
+                  style = "font-size: 0.9rem; color:#444; line-height: 1.6;",
+                  shiny::tags$li(
+                    "Use the ",
+                    shiny::a(
+                      "Generate Grids and Hexagons",
+                      href = "https://pro.arcgis.com/en/pro-app/latest/help/analysis/business-analyst/generate-grids-and-hexagons.htm",
+                      target = "_blank",
+                      style = "font-weight:bold; text-decoration:underline; color:#377EB8;"
+                    ),
+                    " tool (Business Analyst/Intelligence toolbox)."
+                  ),
+                  shiny::tags$li(
+                    "Generate a new hexagon layer for your area at ",
+                    shiny::tags$strong("Resolution 10"),
+                    "."
+                  ),
+                  shiny::tags$li(
+                    "Import the CSV and use the 'Add Join' tool to append your data to the hexagon layer using the H3 Index."
+                  )
+                )
+              )
+            )
+          )
+        ),
+
+        # --- C. FOOTER ---
+        shiny::div(
+          class = "dl-footer",
+          shiny::div(
+            class = "dl-footer-note",
+            "Need help? Contact ",
+            shiny::a(
+              href = "mailto:analytics@wfrc.utah.gov",
+              "analytics@wfrc.utah.gov",
+              style = "color: inherit; text-decoration: underline;"
+            )
+          ),
+          shiny::actionButton(
+            inputId = "close_modal_dl",
+            label = "Done",
+            class = "btn-brand-close",
+            icon = shiny::icon("check")
+          )
+        )
+      )
+    )
+
+    # 2. TRIGGER SYNTAX HIGHLIGHTING
+    # Ensure this runs after the animation completes
+    shinyjs::runjs(
+      "
+      setTimeout(function() {
+        if (typeof hljs !== 'undefined') {
+          document.querySelectorAll('pre code').forEach((el) => {
+             hljs.highlightElement(el);
+          });
+        }
+      }, 500);
+    "
+    )
+  })
+
   active_ref_layers <- shiny::reactiveVal(list())
 
   # TODO: --- REVERTIBLE CHANGE: Exclude Centers from Scoring Logic ---
@@ -891,16 +1243,17 @@ server <- function(input, output, session) {
 
     if (has_city) {
       # CASE A: Active Download Button (When city is selected)
+      # CHANGE: Added onclick to trigger the modal
       shiny::downloadButton(
         outputId = "btn_dl_data",
         label = " Download Data",
         icon = shiny::icon("table"),
         class = "btn btn-outline-primary btn-sm me-2",
-        style = "font-family: 'Oswald', sans-serif; font-weight: 500;"
+        style = "font-family: 'Oswald', sans-serif; font-weight: 500;",
+        onclick = "Shiny.setInputValue('trigger_dl_modal', Math.random());"
       )
     } else {
       # CASE B: Disabled Placeholder (When no city selected)
-      # We use a standard button styled to look exactly like the disabled download button
       tags$button(
         shiny::icon("table"),
         " Download Data",
@@ -941,6 +1294,11 @@ server <- function(input, output, session) {
     },
     ignoreNULL = FALSE
   ) # <--- Important: Run even when input is NULL
+
+  # --- CLOSE MODAL HANDLER ---
+  shiny::observeEvent(input$close_modal_dl, {
+    shiny::removeModal()
+  })
 
   shiny::observeEvent(input$reset_all, {
     for (id in all_sliders) {
@@ -1853,7 +2211,7 @@ server <- function(input, output, session) {
     }
   })
 
-  # --- 7. DATA DOWNLOAD HANDLER ---
+  # --- 8. DATA DOWNLOAD HANDLER ---
   output$btn_dl_data <- shiny::downloadHandler(
     filename = function() {
       "ATO_Filtered_Data.csv"
@@ -1863,10 +2221,12 @@ server <- function(input, output, session) {
       shiny::req(length(input$comm_code) > 0)
       shiny::req(filtered_data())
 
-      # Clean data: Get reactive data -> Drop Geometry -> Write CSV
       out_df <- filtered_data() |>
         sf::st_drop_geometry() |>
-        dplyr::select(-any_of("tooltip_html")) # specific cleanup if column exists
+        dplyr::select(-any_of("tooltip_html")) |>
+        # OPTIONAL: Rename your internal H3 column to standard 'h3_index' if it isn't already
+        # dplyr::rename(h3_index = H3) |>
+        dplyr::as_tibble() # Ensure clean write
 
       utils::write.csv(out_df, file, row.names = FALSE)
     }
