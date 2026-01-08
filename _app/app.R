@@ -423,7 +423,8 @@ ui <- bslib::page_navbar(
         html2canvas(element, {
           useCORS: true,        // FORCE Cross-Origin images to load
           allowTaint: true,     // Allow 'tainted' canvas reading
-          backgroundColor: null // Transparent background
+          backgroundColor: null, // Transparent background
+          scale: 3,  // Increase resolution
         }).then(canvas => {
           // 3. Create a fake link to trigger download
           var link = document.createElement('a');
@@ -1248,7 +1249,10 @@ server <- function(input, output, session) {
       center = c(-111.8910, 40.7608),
       zoom = 8,
       pitch = 0,
-      preserveDrawingBuffer = TRUE
+      # preserveDrawingBuffer = TRUE
+      canvasContextAttributes = list(
+        preserveDrawingBuffer = TRUE
+      )
     ) |>
       mapgl::add_navigation_control(position = "top-left") |>
       mapgl::add_scale_control(position = "bottom-left", unit = "imperial") |>
