@@ -24,6 +24,7 @@ dst_bnd <- "_app/data/Analysis_Boundary_WFRC_MAG.parquet"
 if (!dir.exists(dst_h3)) {
   message("Updating data file...")
   arrow::open_dataset(src_h3) |>
+    dplyr::filter(!is.na(CommCode)) |>
     sf::st_as_sf(crs = 4326) |>
     arrow::write_dataset(
       path = dst_h3,

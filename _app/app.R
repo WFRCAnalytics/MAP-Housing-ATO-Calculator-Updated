@@ -1060,8 +1060,8 @@ df <- read_csv("ATO_Filtered_Data.csv")
 # 2. Convert Strings to H3 Objects, then to Polygons
 sf_data <- df |>
   mutate(
-    h3_obj = h3_from_strings(h3_index), # Parses the ID string into an H3 object
-    geometry = cell_to_polygon(h3_obj) # Generates the sf geometry
+    h3_obj = h3_from_strings(tolower(h3_index)), # Parses the ID string into an H3 object
+    geometry = h3_to_vertexes(h3_obj) |> st_cast("POLYGON") # Generates the sf geometry
   ) |>
   st_as_sf()
 

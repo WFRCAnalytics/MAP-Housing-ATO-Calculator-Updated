@@ -75,11 +75,11 @@ dirs <- list(
 
 # Input Paths (From Step 3)
 fp_parcels_enriched <- here::here(dirs$results, "parcels_enriched.parquet")
-fp_h3_enriched      <- here::here(dirs$results, "h3_enriched.parquet")
+fp_h3_enriched <- here::here(dirs$results, "h3_enriched.parquet")
 
 # Output Paths
-fp_parcels_scored   <- here::here(dirs$results, "parcels_scored.parquet")
-fp_h3_scored        <- here::here(dirs$results, "h3_scored.parquet")
+fp_parcels_scored <- here::here(dirs$results, "parcels_scored.parquet")
+fp_h3_scored <- here::here(dirs$results, "h3_scored.parquet")
 ```
 
 ### Projection Constants
@@ -88,9 +88,9 @@ fp_h3_scored        <- here::here(dirs$results, "h3_scored.parquet")
 #| label: setup-crs
 
 # Projection Constants
-CRS_STP <- "EPSG:3566"  # NAD83 / Utah Central (Projected - ftUS)
+CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
-CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
+CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```
 
 ## Initialize Database
@@ -100,6 +100,7 @@ CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
 conn <- DBI::dbConnect(duckdb::duckdb())
 
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
 DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 ```
 
@@ -121,23 +122,36 @@ This function encapsulates the entire scoring workflow so it can be applied iden
 #| label: func-scoring
 
 score_and_export <- function(conn, input_path, output_path, table_name) {
-
   message(glue::glue("📊 Scoring {table_name}..."))
 
   # 1. Load Data into View (Zero Copy)
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     CREATE OR REPLACE VIEW raw_{table_name} AS SELECT * FROM read_parquet('{input_path}')
-  "))
+  "
+    )
+  )
 
   # 2. Identify Columns
   static_cols <- c(
-    "rowid", "geometry", "geom", "parcel_id", "h3_index", "CommCode", "COUNTYNBR", "BC"
+    "rowid",
+    "geometry",
+    "geom",
+    "parcel_id",
+    "h3_index",
+    "CommCode",
+    "COUNTYNBR",
+    "BC"
   )
 
-  all_cols   <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
+  all_cols <- DBI::dbListFields(conn, glue::glue("raw_{table_name}"))
   score_cols <- setdiff(all_cols, static_cols)
 
-  if(length(score_cols) == 0) stop("❌ Error: No scorable columns found!")
+  if (length(score_cols) == 0) {
+    stop("❌ Error: No scorable columns found!")
+  }
 
   # 3. Pass 1: Gather Normalization Stats
   #    We build the SQL to normalize individual columns (0 to 1)
@@ -152,28 +166,43 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
 
     if (is_cost) {
       # COST: Inverse Normalization
-      val <- DBI::dbGetQuery(conn, glue::glue('SELECT MIN("{col}") as m FROM raw_{table_name} WHERE "{col}" > 0'))$m
-      if (is.na(val) || val == 0) val <- 1.0 # Safety
+      val <- DBI::dbGetQuery(
+        conn,
+        glue::glue(
+          'SELECT MIN("{col}") as m FROM raw_{table_name} WHERE "{col}" > 0'
+        )
+      )$m
+      if (is.na(val) || val == 0) {
+        val <- 1.0
+      } # Safety
 
-      sql_parts[[col]] <- glue::glue('
+      sql_parts[[col]] <- glue::glue(
+        '
         CASE
           WHEN "{col}" IS NULL THEN 0.0
           WHEN "{col}" <= {val} THEN 1.0
           ELSE {val} / "{col}"
         END AS "{col}"
-      ')
-
+      '
+      )
     } else {
       # BENEFIT: Linear Normalization
-      val <- DBI::dbGetQuery(conn, glue::glue('SELECT MAX("{col}") as m FROM raw_{table_name}'))$m
-      if (is.na(val) || val == 0) val <- 1.0
+      val <- DBI::dbGetQuery(
+        conn,
+        glue::glue('SELECT MAX("{col}") as m FROM raw_{table_name}')
+      )$m
+      if (is.na(val) || val == 0) {
+        val <- 1.0
+      }
 
-      sql_parts[[col]] <- glue::glue('
+      sql_parts[[col]] <- glue::glue(
+        '
         CASE
           WHEN "{col}" IS NULL THEN 0.0
           ELSE "{col}" / {val}
         END AS "{col}"
-      ')
+      '
+      )
     }
   }
 
@@ -185,29 +214,51 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
 
   # A. Transit: Weighted Max of normalized Local, Rapid, and CRT
   if (all(c("TT_Local", "TT_Rapid", "TT_CRT") %in% score_cols)) {
-    composites[["TT"]] <- "GREATEST(COALESCE(TT_Local,0)*0.5, COALESCE(TT_Rapid,0)*0.8, COALESCE(TT_CRT,0)*1.0) AS TT"
+    composites[[
+      "TT"
+    ]] <- "GREATEST(COALESCE(TT_Local,0)*0.5, COALESCE(TT_Rapid,0)*0.8, COALESCE(TT_CRT,0)*1.0) AS TT"
   }
 
   # B. Education: Weighted Max of K12 and HigherEd
   if (all(c("AE_K12", "AE_High") %in% score_cols)) {
-    composites[["AE"]] <- "GREATEST(COALESCE(AE_K12,0)*0.8, COALESCE(AE_High,0)*1.0) AS AE"
+    composites[[
+      "AE"
+    ]] <- "GREATEST(COALESCE(AE_K12,0)*0.8, COALESCE(AE_High,0)*1.0) AS AE"
   }
 
   # C. Active Transport (Bikeways): Weighted Max of normalized buffer scores
   if (all(c("TA_class1", "TA_class2", "TA_trails") %in% score_cols)) {
-     composites[["TA"]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*1.0, COALESCE(TA_trails,0)*1.0) AS TA"
+    composites[[
+      "TA"
+    ]] <- "GREATEST(COALESCE(TA_class2,0)*0.5, COALESCE(TA_class1,0)*1.0, COALESCE(TA_trails,0)*1.0) AS TA"
   }
 
   # 5. Pass 2: Execute Pipeline
   message(glue::glue("💾 Projecting & Saving to {output_path}..."))
 
-  select_static <- paste(intersect(all_cols, static_cols), collapse = ", ")
+  target_static_cols <- intersect(all_cols, static_cols)
+
+  select_static_list <- lapply(target_static_cols, function(col) {
+    if (col == "h3_index") {
+      # Convert UBIGINT to Hex String
+      return("h3_h3_to_string(h3_index) AS h3_index")
+    } else {
+      return(col)
+    }
+  })
+
+  select_static <- paste(unlist(select_static_list), collapse = ", ")
   select_scores <- paste(unlist(sql_parts), collapse = ", \n      ")
-  select_comps  <- if(length(composites) > 0) paste(",", paste(unlist(composites), collapse = ", \n      ")) else ""
+  select_comps <- if (length(composites) > 0) {
+    paste(",", paste(unlist(composites), collapse = ", \n      "))
+  } else {
+    ""
+  }
 
   # The CTE 'scored_base' normalizes the data.
   # The outer SELECT calculates composites on those normalized values.
-  query <- glue::glue("
+  query <- glue::glue(
+    "
     COPY (
       WITH scored_base AS (
         SELECT
@@ -220,7 +271,8 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
         {select_comps}
       FROM scored_base
     ) TO '{output_path}' (FORMAT PARQUET)
-  ")
+  "
+  )
 
   DBI::dbExecute(conn, query)
   DBI::dbExecute(conn, glue::glue("DROP VIEW raw_{table_name}"))
@@ -233,7 +285,12 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
 
 ```{r}
 #| label: run-parcels
-score_and_export(conn, fp_parcels_enriched, fp_parcels_scored, "targets_parcels")
+score_and_export(
+  conn,
+  fp_parcels_enriched,
+  fp_parcels_scored,
+  "targets_parcels"
+)
 ```
 
 ## H3 Grid
@@ -256,15 +313,16 @@ gdb_path <- here::here(dirs$results, "HousingSuitability_Centers202512.gdb")
 # Define inputs: Layer Name -> File Path
 to_export <- list(
   "Parcels_Enriched" = fp_parcels_enriched,
-  "H3_Enriched"      = fp_h3_enriched,
-  "Parcels_Scored"   = fp_parcels_scored,
-  "H3_Scored"        = fp_h3_scored
+  "H3_Enriched" = fp_h3_enriched,
+  "Parcels_Scored" = fp_parcels_scored,
+  "H3_Scored" = fp_h3_scored
 )
 
 # 2. Execution
 purrr::iwalk(to_export, function(path, layer_name) {
-
-  if (!fs::file_exists(path)) return(message(glue::glue("⚠️ Skipping {layer_name} (Not found)")))
+  if (!fs::file_exists(path)) {
+    return(message(glue::glue("⚠️ Skipping {layer_name} (Not found)")))
+  }
 
   message(glue::glue("  ↳ Processing {layer_name}..."))
 
@@ -274,8 +332,13 @@ purrr::iwalk(to_export, function(path, layer_name) {
     sf::st_cast("MULTIPOLYGON") |>
     # Optional: Uncomment next line if you need the GDB in UTM
     # sf::st_transform(CRS_UTM) |>
-    sf::st_write(dsn = gdb_path, layer = layer_name, driver = "OpenFileGDB",
-                 append = FALSE, quiet = TRUE)
+    sf::st_write(
+      dsn = gdb_path,
+      layer = layer_name,
+      driver = "OpenFileGDB",
+      append = FALSE,
+      quiet = TRUE
+    )
 })
 
 message("✅ GDB Export Complete!")
@@ -291,10 +354,10 @@ zip_path <- paste0(gdb_path, ".zip")
 
 # 3. Create Zip
 zip::zip(
-  zipfile = zip_path,      # Where to save the result (Absolute path works best)
-  files   = fs::path_file(gdb_path), # What to grab (Relative to 'root')
-  root    = fs::path_dir(gdb_path),      # The virtual working directory for this operation
-  mode    = "mirror"       # "mirror" is best for exact copies
+  zipfile = zip_path, # Where to save the result (Absolute path works best)
+  files = fs::path_file(gdb_path), # What to grab (Relative to 'root')
+  root = fs::path_dir(gdb_path), # The virtual working directory for this operation
+  mode = "mirror" # "mirror" is best for exact copies
 )
 
 message(glue::glue("✅ Compressed successfully: {zip_path}"))
