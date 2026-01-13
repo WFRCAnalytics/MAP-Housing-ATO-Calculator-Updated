@@ -1054,19 +1054,22 @@ library(h3o)
 library(readr)
 library(dplyr)
 
-# 1. Read the CSV
-df <- read_csv("ATO_Filtered_Data.csv")
+# 0. Define your folder path
+folder_path &lt;- "path/to/folder"
 
-# 2. Convert Strings to H3 Objects, then to Polygons
-sf_data <- df |>
+# 1. Read the CSV
+df &lt;- read_csv(file.path(folder_path, "ATO_Filtered_Data.csv"))
+
+# 2. Convert Strings to H3 Polygons
+sf_data &lt;- df |&gt;
   mutate(
-    h3_obj = h3_from_strings(tolower(h3_index)), # Parses the ID string into an H3 object
-    geometry = h3_to_vertexes(h3_obj) |> st_cast("POLYGON") # Generates the sf geometry
-  ) |>
+    h3_obj = h3_from_strings(tolower(h3_index)),
+    geometry = h3_to_vertexes(h3_obj) |&gt; st_cast("POLYGON")
+  ) |&gt;
   st_as_sf()
 
-# 3. Plot to verify
-plot(sf_data$geometry, main = "ATO Export Map")
+# 3. Save as GeoJSON
+write_sf(sf_data, file.path(folder_path, "ATO_Filtered_Data.geojson"))
 </code></pre>'
                 )
               )
@@ -1091,20 +1094,22 @@ import h3
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import shape
+import os
+
+# 0. Define your folder path
+folder_path = "path/to/folder"
 
 # 1. Read Data
-df = pd.read_csv("ATO_Filtered_Data.csv")
+df = pd.read_csv(os.path.join(folder_path, "ATO_Filtered_Data.csv"))
 
 # 2. Create Geometry
-# cells_to_geo([x]) creates a GeoJSON dict for the cell
-# shape() converts that dict into a shapely Polygon
 df["geometry"] = df["h3_index"].apply(lambda x: shape(h3.cells_to_geo([x])))
 
 # 3. Convert to GeoDataFrame
 gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
 
-# 4. Plot
-gdf.plot()
+# 4. Save as GeoJSON
+gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJSON")
 </code></pre>'
                 )
               )
