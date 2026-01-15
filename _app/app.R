@@ -271,7 +271,7 @@ layer_names <- c(
   "w_AE" = "Education Institutions",
   "w_AG" = "Grocery Stores",
   "w_AM" = "Community Centers",
-  "w_AP" = "10-min Walk to Parks"
+  "w_AP" = "Public Parks"
 )
 
 # --- NEW: Tooltip Descriptions ---
@@ -659,7 +659,7 @@ ui <- bslib::page_navbar(
         sliderWithLayer(
           "w_AP",
           shiny::HTML(
-            "<i class='fa-solid fa-tree' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Walk Access to Parks"
+            "<i class='fa-solid fa-tree' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Public Parks"
           )
         )
       )
