@@ -470,11 +470,6 @@ ui <- bslib::page_navbar(
       .layer-toggle-btn:hover { color: #5a87c6; }
       .layer-toggle-btn.active { color: #2c3e50; }
       .maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }
-      .mapboxgl-legend {
-        background-color: rgba(255, 255, 255, 0.8) !important; /* 1.0 = 100% Opaque */
-        border: 1px solid #ccc; /* Optional: Adds a clean border */
-        box-shadow: 0 2px 10px rgba(0,0,0,0.2); /* Optional: Shadow for depth */
-      }
       .shiny-input-container { width: 100% !important; margin-bottom: 0px !important; }
       .form-group { margin-bottom: 5px !important; }
       .modal-content { border: none; border-radius: 12px; box-shadow: 0 15px 35px rgba(0,0,0,0.25); overflow: hidden; }
@@ -2204,6 +2199,19 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
           mapgl::fit_bounds(dat, animate = TRUE, pitch = 0)
       }
 
+      # 1. Define the Style Object (Matches your previous CSS)
+      custom_legend_style <- mapgl::legend_style(
+        background_color = "white",
+        background_opacity = 0.8, # Previously rgba(..., 0.8)
+        border_color = "#cccccc", # Previously border: 1px solid #ccc
+        border_width = 1,
+        shadow = TRUE,
+        shadow_color = "rgba(0,0,0,0.2)", # Previously box-shadow color
+        shadow_size = 10, # previously 10px blur
+        title_font_family = "Oswald", # Matches your app header font
+        font_family = "Open Sans" # Matches your app body font
+      )
+
       # 5. ADD DYNAMIC LEGEND
       proxy |>
         mapgl::move_layer("lay_cities_line") |>
@@ -2214,7 +2222,8 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
           colors = pal_colors,
           position = "bottom-right",
           layer_id = target_layer,
-          add = FALSE
+          add = FALSE,
+          style = custom_legend_style
         )
 
       current_refs <- shiny::isolate(active_ref_layers())
