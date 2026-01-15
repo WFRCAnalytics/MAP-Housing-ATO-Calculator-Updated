@@ -78,15 +78,15 @@ library(here)
 
 # Setup Paths & Params
 dirs <- list(
-  source     = here::here("_src"), # Source custom functions
-  raw        = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
-  processed  = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
-  buffered   = here::here("_data/buffered"), # Intermediate Output: Buffered layers
+  source = here::here("_src"), # Source custom functions
+  raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
+  buffered = here::here("_data/buffered"), # Intermediate Output: Buffered layers
   isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
-  results    = here::here("_output") # Final Output: Analysis Results
+  results = here::here("_output") # Final Output: Analysis Results
 )
 
-purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -94,15 +94,15 @@ purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
 
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
-  base      = here::here(dirs$processed, "base_layers"),
-  parcels   = here::here(dirs$processed, "parcels_taz"),
-  landuse   = here::here(dirs$processed, "landuse_zones"),
+  base = here::here(dirs$processed, "base_layers"),
+  parcels = here::here(dirs$processed, "parcels_taz"),
+  landuse = here::here(dirs$processed, "landuse_zones"),
   transport = here::here(dirs$processed, "transportation"),
-  access    = here::here(dirs$processed, "access"),
+  access = here::here(dirs$processed, "access"),
   amenities = here::here(dirs$processed, "amenities")
 )
 
-purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -110,12 +110,12 @@ purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
 
 # Define Sub-directories for Isochrones
 iso_dirs <- list(
-  walking   = here::here(dirs$isochrones, "foot-walking"),
-  biking    = here::here(dirs$isochrones, "cycling-regular"),
-  driving   = here::here(dirs$isochrones, "driving-car")
+  walking = here::here(dirs$isochrones, "foot-walking"),
+  biking = here::here(dirs$isochrones, "cycling-regular"),
+  driving = here::here(dirs$isochrones, "driving-car")
 )
 
-purrr::walk(iso_dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(iso_dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ### Projection Constants
@@ -124,9 +124,9 @@ purrr::walk(iso_dirs, ~fs::dir_create(., recurse = TRUE))
 #| label: setup-crs
 
 # Projection Constants
-CRS_STP <- "EPSG:3566"  # NAD83 / Utah Central (Projected - ftUS)
+CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
-CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
+CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```
 
 ## Helper Functions
@@ -170,22 +170,33 @@ fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
 
 # 1. Load Polygons (UTM)
 #    Note: H3 WKB is usually WGS84, so we must transform to UTM.
-DBI::dbExecute(conn, glue::glue("
+DBI::dbExecute(
+  conn,
+  glue::glue(
+    "
   CREATE OR REPLACE TABLE targets_h3 AS
   SELECT
     CAST(h3_index AS UBIGINT) as h3_index, -- Strict type safety
     ST_Transform(ST_GeomFromWKB(geometry), '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
   FROM read_parquet('{fp_h3_grid}')
-"))
-DBI::dbExecute(conn, "CREATE INDEX idx_h3_geom ON targets_h3 USING RTREE (geom)")
+"
+  )
+)
+DBI::dbExecute(
+  conn,
+  "CREATE INDEX idx_h3_geom ON targets_h3 USING RTREE (geom)"
+)
 
 # 2. OPTIMIZATION: Create & Index Points
 message("📍 Pre-calculating H3 Points (PointOnSurface)...")
-DBI::dbExecute(conn, "
+DBI::dbExecute(
+  conn,
+  "
   CREATE OR REPLACE TABLE points_h3 AS
   SELECT rowid, h3_index, ST_Centroid(geom) as geom
   FROM targets_h3
-")
+"
+)
 DBI::dbExecute(conn, "CREATE INDEX idx_h3_utm ON points_h3 USING RTREE (geom)")
 DBI::dbExecute(conn, "CREATE INDEX idx_h3_id ON points_h3 (h3_index)")
 
@@ -197,7 +208,10 @@ message("✅ H3 Grid loaded & indexed")
 # 2. GET RESOLUTION
 # -----------------------------------------------------------------------------
 # We need this 'res' variable for the next steps
-res <- DBI::dbGetQuery(conn, "SELECT h3_get_resolution(h3_index) as res FROM targets_h3 LIMIT 1")$res
+res <- DBI::dbGetQuery(
+  conn,
+  "SELECT h3_get_resolution(h3_index) as res FROM targets_h3 LIMIT 1"
+)$res
 message(glue::glue("ℹ️ Detected Grid Resolution: {res}"))
 ```
 
@@ -209,7 +223,10 @@ message(glue::glue("ℹ️ Detected Grid Resolution: {res}"))
 fp_remm_parcels <- here::here(sub_dirs$parcels, "REMM_BY_parcels.parquet")
 
 # 1. Load Polygons (UTM)
-DBI::dbExecute(conn, glue::glue("
+DBI::dbExecute(
+  conn,
+  glue::glue(
+    "
   CREATE OR REPLACE TABLE targets_parcels AS
   SELECT
     parcel_id,
@@ -225,17 +242,25 @@ DBI::dbExecute(conn, glue::glue("
     ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom
   FROM read_parquet('{fp_remm_parcels}')
   WHERE ST_IsValid(geometry)
-"))
+"
+  )
+)
 
 # 2. OPTIMIZATION: Create & Index Points (Point-On-Surface)
 #    ST_PointOnSurface guarantees the point is INSIDE the polygon (unlike Centroid).
 #    This handles U-shaped parcels correctly.
-DBI::dbExecute(conn, "
+DBI::dbExecute(
+  conn,
+  "
   CREATE OR REPLACE TABLE points_parcels AS
   SELECT rowid, h3_index, ST_PointOnSurface(geom) as geom
   FROM targets_parcels
-")
-DBI::dbExecute(conn, "CREATE INDEX idx_pp_utm ON points_parcels USING RTREE (geom)")
+"
+)
+DBI::dbExecute(
+  conn,
+  "CREATE INDEX idx_pp_utm ON points_parcels USING RTREE (geom)"
+)
 DBI::dbExecute(conn, "CREATE INDEX idx_pp_h3 ON points_parcels (h3_index)")
 
 message("✅ Parcels loaded & indexed")
@@ -251,36 +276,57 @@ A helper function to join City/County codes to any target table (Parcel or H3).
 #| label: func-admin-join
 
 attach_admin_data <- function(conn, target_table, point_table) {
-
   message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
-  fp_municipal_bound <- here::here(sub_dirs$base, "UtahMunicipalBoundaries.parquet")
-  fp_county_bound    <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
+  fp_municipal_bound <- here::here(
+    sub_dirs$base,
+    "UtahMunicipalBoundaries.parquet"
+  )
+  fp_county_bound <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
 
   # 1. Load Admin Layers (Fixed Geometry)
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     CREATE OR REPLACE TEMP TABLE layer_muni AS
     SELECT
       ugrcode as CommCode,
       ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
     FROM read_parquet('{fp_municipal_bound}')
-  "))
+  "
+    )
+  )
 
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     CREATE OR REPLACE TEMP TABLE layer_county AS
     SELECT
       countynbr as COUNTYNBR,
       ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
     FROM read_parquet('{fp_county_bound}')
-  "))
+  "
+    )
+  )
 
   # 2. Add Columns
   for (col in c("CommCode", "COUNTYNBR")) {
-    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS {col}"))
-    DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN {col} VARCHAR"))
+    DBI::dbExecute(
+      conn,
+      glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS {col}")
+    )
+    DBI::dbExecute(
+      conn,
+      glue::glue("ALTER TABLE {target_table} ADD COLUMN {col} VARCHAR")
+    )
   }
 
   # 3. Update City (Spatial Join on Point Table -> Update Target by RowID)
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     UPDATE {target_table}
     SET CommCode = match.CommCode
     FROM (
@@ -289,10 +335,15 @@ attach_admin_data <- function(conn, target_table, point_table) {
         WHERE ST_Intersects(pt.geom, m.geom)
     ) match
     WHERE {target_table}.rowid = match.rowid
-  "))
+  "
+    )
+  )
 
   # 4. Update County (Spatial Join on Point Table -> Update Target by RowID)
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     UPDATE {target_table}
     SET COUNTYNBR = match.COUNTYNBR
     FROM (
@@ -301,7 +352,9 @@ attach_admin_data <- function(conn, target_table, point_table) {
         WHERE ST_Intersects(pt.geom, c.geom)
     ) match
     WHERE {target_table}.rowid = match.rowid
-  "))
+  "
+    )
+  )
 
   DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
 }
@@ -331,7 +384,10 @@ fp_remm_buildings <- here::here(sub_dirs$parcels, "REMM_BY_buildings.parquet")
 
 # Create Temp Table with BOTH UTM Geom and H3 Index
 # Load -> Centroid -> Transform (UTM) -> Index
-DBI::dbExecute(conn, glue::glue("
+DBI::dbExecute(
+  conn,
+  glue::glue(
+    "
   CREATE OR REPLACE TEMP TABLE points_buildings AS
   SELECT
     parcel_id,
@@ -350,34 +406,39 @@ DBI::dbExecute(conn, glue::glue("
 
   FROM read_parquet('{fp_remm_buildings}')
   WHERE ST_IsValid(geometry)
-"))
+"
+  )
+)
 
 # Index both columns for speed
-DBI::dbExecute(conn, "CREATE INDEX idx_b_utm ON points_buildings USING RTREE (geom)")
+DBI::dbExecute(
+  conn,
+  "CREATE INDEX idx_b_utm ON points_buildings USING RTREE (geom)"
+)
 DBI::dbExecute(conn, "CREATE INDEX idx_b_h3 ON points_buildings (h3_index)")
 
 # Create Mapping Table (Full Name -> Abbreviation)
 bc_mapping <- tibble::tribble(
-  ~full_name,                  ~abbr,
-  "Agriculture",              "AG",
-  "Church",                   "CH",
-  "Commons",                  "OS",
-  "Educational",              "ED",
-  "Empty - Buildable",        "EM",
-  "Empty Buildable",          "EM",
-  "Governmental",             "GO",
-  "Group Quarters",           "GQ",
-  "Healthcare",               "HE",
-  "Industrial",               "IN",
-  "Mixed Use",                "MU",
-  "Multi Family Res",         "MF",
-  "No Build",                 "NB",
-  "Office",                   "OF",
-  "Open Space Non-Buildable", "OS",
-  "Other",                    "OT",
-  "Retail",                   "RE",
-  "Single Family Res",        "SF",
-  "Utilities",                "UT"
+  ~full_name                 , ~abbr ,
+  "Agriculture"              , "AG"  ,
+  "Church"                   , "CH"  ,
+  "Commons"                  , "OS"  ,
+  "Educational"              , "ED"  ,
+  "Empty - Buildable"        , "EM"  ,
+  "Empty Buildable"          , "EM"  ,
+  "Governmental"             , "GO"  ,
+  "Group Quarters"           , "GQ"  ,
+  "Healthcare"               , "HE"  ,
+  "Industrial"               , "IN"  ,
+  "Mixed Use"                , "MU"  ,
+  "Multi Family Res"         , "MF"  ,
+  "No Build"                 , "NB"  ,
+  "Office"                   , "OF"  ,
+  "Open Space Non-Buildable" , "OS"  ,
+  "Other"                    , "OT"  ,
+  "Retail"                   , "RE"  ,
+  "Single Family Res"        , "SF"  ,
+  "Utilities"                , "UT"
   # Note: NA values are handled in the join below
 )
 DBI::dbWriteTable(conn, "bc_map", bc_mapping, overwrite = TRUE)
@@ -390,7 +451,9 @@ message("🏗️ Attaching Building Codes to Parcels (Attribute Match)...")
 # Join Abbreviation to Parcels
 # Note: QUALIFY ROW_NUMBER() handles cases where a parcel has multiple buildings
 # Note: We prioritize the LARGEST building on the parcel using building_sqft
-DBI::dbExecute(conn, "
+DBI::dbExecute(
+  conn,
+  "
   ALTER TABLE targets_parcels ADD COLUMN BC VARCHAR;
 
   UPDATE targets_parcels
@@ -409,7 +472,8 @@ DBI::dbExecute(conn, "
     ) = 1
   ) mapped
   WHERE targets_parcels.parcel_id = mapped.parcel_id
-")
+"
+)
 
 # -----------------------------------------------------------------------------
 # 3. H3: Hybrid Approach
@@ -419,7 +483,10 @@ DBI::dbExecute(conn, "
 message("🏗️ Aggregating Building Codes to H3 (Index Match)...")
 
 # --- Pass A: Aggregation via Index Match (Existing Logic) ---
-DBI::dbExecute(conn, glue::glue("
+DBI::dbExecute(
+  conn,
+  glue::glue(
+    "
   ALTER TABLE targets_h3 ADD COLUMN IF NOT EXISTS BC VARCHAR;
 
   UPDATE targets_h3
@@ -433,7 +500,9 @@ DBI::dbExecute(conn, glue::glue("
     GROUP BY b.h3_index
   ) agg
   WHERE targets_h3.h3_index = agg.h3_index
-"))
+"
+  )
+)
 
 # --- Pass B: Spatial Backfill (Gap Filling) ---
 # Check: If BC is still NULL, sample the Parcel Polygon at the H3 Center.
@@ -442,10 +511,15 @@ DBI::dbExecute(conn, glue::glue("
 message("  ↳ Filling gaps using Parcel Polygons...")
 
 # 1. Ensure Polygon Index Exists (Critical for spatial join speed)
-DBI::dbExecute(conn, "CREATE INDEX IF NOT EXISTS idx_tp_geom ON targets_parcels USING RTREE (geom)")
+DBI::dbExecute(
+  conn,
+  "CREATE INDEX IF NOT EXISTS idx_tp_geom ON targets_parcels USING RTREE (geom)"
+)
 
 # 2. Update NULLs only
-DBI::dbExecute(conn, "
+DBI::dbExecute(
+  conn,
+  "
   UPDATE targets_h3
   SET BC = matched.BC
   FROM (
@@ -459,7 +533,8 @@ DBI::dbExecute(conn, "
   ) matched
   WHERE targets_h3.h3_index = matched.h3_index
     AND targets_h3.BC IS NULL -- Only touch rows that failed Pass A
-")
+"
+)
 
 # --- Pass C: Spatial Voting (KNN Mode) ---
 # Logic: If a cell is empty, look at its 6 immediate neighbors.
@@ -467,7 +542,9 @@ DBI::dbExecute(conn, "
 # If 3 or fewer neighbors have data, we assume this is a coastline/edge -> LEAVE IT.
 message("  ↳ Pass C: Filling holes using Grid Adjacency (Threshold >= 4)...")
 
-DBI::dbExecute(conn, "
+DBI::dbExecute(
+  conn,
+  "
   UPDATE targets_h3
   SET BC = fill.mode_bc
   FROM (
@@ -491,7 +568,8 @@ DBI::dbExecute(conn, "
     HAVING COUNT(*) >= 4
   ) fill
   WHERE targets_h3.h3_index = fill.h3_index
-")
+"
+)
 
 # --- Pass D: Final Cleanup (Catch-All) ---
 # Logic: If it is STILL null after Pass C, it means it is either:
@@ -500,11 +578,14 @@ DBI::dbExecute(conn, "
 # We force these to 'OT' (Other).
 message("  ↳ Pass D: Setting remaining NULLs to 'OT'...")
 
-DBI::dbExecute(conn, "
+DBI::dbExecute(
+  conn,
+  "
   UPDATE targets_h3
   SET BC = 'OT'
   WHERE BC IS NULL
-")
+"
+)
 
 # Cleanup
 DBI::dbExecute(conn, "DROP TABLE points_buildings; DROP TABLE bc_map;")
@@ -515,24 +596,30 @@ DBI::dbExecute(conn, "DROP TABLE points_buildings; DROP TABLE bc_map;")
 #| eval: false
 
 # Check H3 for missing BC values
-DBI::dbGetQuery(conn, "
+DBI::dbGetQuery(
+  conn,
+  "
   SELECT
     COUNT(*) as total,
     COUNT(BC) as filled,
     COUNT(*) - COUNT(BC) as missing,
     ROUND(100.0 * (COUNT(*) - COUNT(BC)) / COUNT(*), 2) as missing_pct
   FROM targets_h3
-")
+"
+)
 
 # Check Parcels (for comparison)
-parcel_stats <- DBI::dbGetQuery(conn, "
+parcel_stats <- DBI::dbGetQuery(
+  conn,
+  "
   SELECT
     COUNT(*) as total,
     COUNT(BC) as filled,
     COUNT(*) - COUNT(BC) as missing,
     ROUND(100.0 * (COUNT(*) - COUNT(BC)) / COUNT(*), 2) as missing_pct
   FROM targets_parcels
-")
+"
+)
 ```
 
 ## Attach Job Access (AA, AT)
@@ -542,14 +629,20 @@ We attach the raw job access numbers from the TAZ layer. The normalization (divi
 ```{r}
 #| label: func-job-join
 
-fp_taz_access <- here::here(dirs$processed, "access", "TAZ_AccessToOpportunities_OY2023.parquet")
+fp_taz_access <- here::here(
+  dirs$processed,
+  "access",
+  "TAZ_AccessToOpportunities_OY2023.parquet"
+)
 
 attach_job_access <- function(conn, target_table, point_table) {
-
   message(glue::glue("💼 Attaching Job Access to {target_table}..."))
 
   # 1. Load TAZ & SAFE Transform
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     CREATE OR REPLACE TEMP TABLE taz_access AS
     SELECT
       ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom,
@@ -557,19 +650,39 @@ attach_job_access <- function(conn, target_table, point_table) {
       job_by_tran
     FROM read_parquet('{fp_taz_access}')
     WHERE ST_IsValid(geometry)
-  "))
-  DBI::dbExecute(conn, "CREATE INDEX idx_taz_geom ON taz_access USING RTREE (geom)")
+  "
+    )
+  )
+  DBI::dbExecute(
+    conn,
+    "CREATE INDEX idx_taz_geom ON taz_access USING RTREE (geom)"
+  )
 
   # 2. RESET COLUMNS (Drop if exists)
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AA\""))
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AT\""))
+  DBI::dbExecute(
+    conn,
+    glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AA\"")
+  )
+  DBI::dbExecute(
+    conn,
+    glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AT\"")
+  )
 
   # 3. Add Columns
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AA\" DOUBLE"))
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AT\" DOUBLE"))
+  DBI::dbExecute(
+    conn,
+    glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AA\" DOUBLE")
+  )
+  DBI::dbExecute(
+    conn,
+    glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AT\" DOUBLE")
+  )
 
   # 4. Spatial Join
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     UPDATE {target_table}
     SET \"AA\" = match.job_by_auto, \"AT\" = match.job_by_tran
     FROM (
@@ -578,7 +691,9 @@ attach_job_access <- function(conn, target_table, point_table) {
       WHERE ST_Intersects(tp.geom, t.geom)
     ) match
     WHERE {target_table}.rowid = match.rowid;
-  "))
+  "
+    )
+  )
 
   DBI::dbExecute(conn, "DROP TABLE taz_access;")
 }
@@ -602,48 +717,48 @@ We define all external layers here. This structure handles Binary (In/Out), Isoc
 #| label: config-amenities
 
 # Helpers
-iso_walk  <- function(f) here::here(dirs$isochrones, "foot-walking", f)
-iso_bike  <- function(f) here::here(dirs$isochrones, "cycling-regular", f)
+iso_walk <- function(f) here::here(dirs$isochrones, "foot-walking", f)
+iso_bike <- function(f) here::here(dirs$isochrones, "cycling-regular", f)
 iso_drive <- function(f) here::here(dirs$isochrones, "driving-car", f)
-land_use  <- function(f) here::here(sub_dirs$landuse, f)
-trans     <- function(f) here::here(sub_dirs$transport, f)
-amen      <- function(f) here::here(sub_dirs$amenities, f)
+land_use <- function(f) here::here(sub_dirs$landuse, f)
+trans <- function(f) here::here(sub_dirs$transport, f)
+amen <- function(f) here::here(sub_dirs$amenities, f)
 
 amenity_config <- tibble::tribble(
-  ~col_name, ~type,       ~path,                                    ~filter_sql,               ~value_col, ~buffer_opts,
+  ~col_name                                                                     , ~type                        , ~path                                                  , ~filter_sql                           , ~value_col , ~buffer_opts ,
 
   # --- BINARY ---
-  "OZ",      "binary",    land_use("Utah_Qualified_Opportunity_Zones.parquet"), "1=1",              NA,         NA,
-  "AP",      "binary",    amen("WalkAccesstoParks_10Min.parquet"),              "1=1",              NA,         NA,
-  "CM",      "binary",    land_use("WCV_Centers_and_Regional_Land_Uses.parquet"), "center_type = 'Metropolitan Center'", NA, NA,
-  "CU",      "binary",    land_use("WCV_Centers_and_Regional_Land_Uses.parquet"), "center_type = 'Urban Center'",        NA, NA,
-  "CC",      "binary",    land_use("WCV_Centers_and_Regional_Land_Uses.parquet"), "center_type = 'City Center'",         NA, NA,
-  "CN",      "binary",    land_use("WCV_Centers_and_Regional_Land_Uses.parquet"), "center_type = 'Neighborhood Center'", NA, NA,
+  "OZ"                                                                          , "binary"                     , land_use("Utah_Qualified_Opportunity_Zones.parquet")   , "1=1"                                 , NA         , NA           ,
+  "CM"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'Metropolitan Center'" , NA         , NA           ,
+  "CU"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'Urban Center'"        , NA         , NA           ,
+  "CC"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'City Center'"         , NA         , NA           ,
+  "CN"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'Neighborhood Center'" , NA         , NA           ,
 
   # --- ISOCHRONES ---
-  "TT_Local", "isochrone", iso_walk("Transit_Local.parquet"),       "1=1", "value", NA,
-  "TT_Rapid", "isochrone", iso_walk("Transit_Rapid.parquet"),       "1=1", "value", NA,
-  "TT_CRT",   "isochrone", iso_bike("Transit_CRT.parquet"),         "1=1", "value", NA,
-  "TF",      "isochrone", iso_drive("Freeways.parquet"),            "1=1", "value", NA,
-  "AC",      "isochrone", iso_walk("ChildCare.parquet"),            "1=1", "value", NA,
-  "AH",      "isochrone", iso_drive("Healthcare.parquet"),          "1=1", "value", NA,
-  "AG",      "isochrone", iso_walk("Grocery.parquet"),              "1=1", "value", NA,
-  "AM",      "isochrone", iso_walk("Community_Centers.parquet"),    "1=1", "value", NA,
-  "AE_K12",  "isochrone", iso_walk("Schools_PreK12.parquet"),       "1=1", "value", NA,
-  "AE_High", "isochrone", iso_bike("Schools_HigherEd.parquet"),     "1=1", "value", NA,
+  "TT_Local"                                                                    , "isochrone"                  , iso_walk("Transit_Local.parquet")                      , "1=1"                                 , "value"    , NA           ,
+  "TT_Rapid"                                                                    , "isochrone"                  , iso_walk("Transit_Rapid.parquet")                      , "1=1"                                 , "value"    , NA           ,
+  "TT_CRT"                                                                      , "isochrone"                  , iso_bike("Transit_CRT.parquet")                        , "1=1"                                 , "value"    , NA           ,
+  "TF"                                                                          , "isochrone"                  , iso_drive("Freeways.parquet")                          , "1=1"                                 , "value"    , NA           ,
+  "AC"                                                                          , "isochrone"                  , iso_walk("ChildCare.parquet")                          , "1=1"                                 , "value"    , NA           ,
+  "AH"                                                                          , "isochrone"                  , iso_drive("Healthcare.parquet")                        , "1=1"                                 , "value"    , NA           ,
+  "AG"                                                                          , "isochrone"                  , iso_walk("Grocery.parquet")                            , "1=1"                                 , "value"    , NA           ,
+  "AM"                                                                          , "isochrone"                  , iso_walk("Community_Centers.parquet")                  , "1=1"                                 , "value"    , NA           ,
+  "AE_K12"                                                                      , "isochrone"                  , iso_walk("Schools_PreK12.parquet")                     , "1=1"                                 , "value"    , NA           ,
+  "AE_High"                                                                     , "isochrone"                  , iso_bike("Schools_HigherEd.parquet")                   , "1=1"                                 , "value"    , NA           ,
+  "AP"                                                                          , "isochrone"                  , amen("ParkAccess_Graded.parquet")                      , "1=1"                                 , "value"    , NA           ,
 
   # --- BUFFER ---
-  "TA_class1", "buffer", trans("Bikeways.parquet"),
-  "facility1 LIKE '%(1A)%' OR facility1 LIKE '%(1B)%'",
-  NA, c(0.25, 0.5, 0.75, 1.5, 3.0),
+  "TA_class1"                                                                   , "buffer"                     , trans("Bikeways.parquet")                              ,
+  "facility1 LIKE '%(1A)%' OR facility1 LIKE '%(1B)%'"                          ,
+  NA                                                                            , c(0.25, 0.5, 0.75, 1.5, 3.0) ,
 
-  "TA_class2", "buffer", trans("Bikeways.parquet"),
-  "facility1 LIKE '%(2A)%' OR facility1 LIKE '%(2B)%' OR facility1 LIKE '%2C%'",
-  NA, c(0.25, 0.5, 0.75, 1.5, 3.0),
+  "TA_class2"                                                                   , "buffer"                     , trans("Bikeways.parquet")                              ,
+  "facility1 LIKE '%(2A)%' OR facility1 LIKE '%(2B)%' OR facility1 LIKE '%2C%'" ,
+  NA                                                                            , c(0.25, 0.5, 0.75, 1.5, 3.0) ,
 
-  "TA_trails", "buffer", trans("Bikeways.parquet"),
-  "facility1 LIKE '%Trail%'",
-  NA, c(0.25, 0.5, 0.75, 1.5, 3.0)
+  "TA_trails"                                                                   , "buffer"                     , trans("Bikeways.parquet")                              ,
+  "facility1 LIKE '%Trail%'"                                                    ,
+  NA                                                                            , c(0.25, 0.5, 0.75, 1.5, 3.0)
 )
 ```
 
@@ -656,8 +771,7 @@ This function handles the transform, union-by-value optimization, and spatial jo
 ```{r}
 #| label: func-spatial-engine
 process_layers <- function(conn, point_table, config) {
-
-  col  <- config$col_name
+  col <- config$col_name
   path <- config$path
   type <- config$type
   sql_filter <- config$filter_sql
@@ -675,7 +789,10 @@ process_layers <- function(conn, point_table, config) {
 
   # A. Load Raw Data (UTM + Clean)
   #    We create the index here, which is CRITICAL for ST_DWithin to be fast.
-  DBI::dbExecute(conn, glue::glue("
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
     CREATE OR REPLACE TEMP TABLE raw_layer AS
     SELECT
       ST_Simplify(
@@ -688,48 +805,76 @@ process_layers <- function(conn, point_table, config) {
     FROM read_parquet('{path}')
     WHERE {sql_filter}
       AND ST_IsValid(geometry)
-  "))
-  DBI::dbExecute(conn, "CREATE INDEX idx_raw_layer ON raw_layer USING RTREE (geom)")
+  "
+    )
+  )
+  DBI::dbExecute(
+    conn,
+    "CREATE INDEX idx_raw_layer ON raw_layer USING RTREE (geom)"
+  )
 
   # B. Reset Column (Clean Slate)
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {point_table} DROP COLUMN IF EXISTS {col}"))
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {point_table} ADD COLUMN {col} DOUBLE DEFAULT NULL"))
+  DBI::dbExecute(
+    conn,
+    glue::glue("ALTER TABLE {point_table} DROP COLUMN IF EXISTS {col}")
+  )
+  DBI::dbExecute(
+    conn,
+    glue::glue("ALTER TABLE {point_table} ADD COLUMN {col} DOUBLE DEFAULT NULL")
+  )
 
   # C. Execute Spatial Logic
   if (type == "binary") {
     # BINARY: Simple Intersection (Uses Index)
-    DBI::dbExecute(conn, glue::glue("
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "
       UPDATE {point_table}
       SET {col} = 1
       FROM raw_layer r
       WHERE ST_Intersects({point_table}.geom, r.geom)
-    "))
-    DBI::dbExecute(conn, glue::glue("UPDATE {point_table} SET {col} = 0 WHERE {col} IS NULL"))
-
+    "
+      )
+    )
+    DBI::dbExecute(
+      conn,
+      glue::glue("UPDATE {point_table} SET {col} = 0 WHERE {col} IS NULL")
+    )
   } else if (type == "isochrone") {
     # ISOCHRONE: Union & Iterate (Optimized)
 
-    DBI::dbExecute(conn, "
+    DBI::dbExecute(
+      conn,
+      "
       CREATE OR REPLACE TEMP TABLE grouped_iso AS
       SELECT val, ST_MakeValid(ST_Union_Agg(geom)) as geom
       FROM raw_layer
       GROUP BY val
-    ")
+    "
+    )
 
-    vals <- DBI::dbGetQuery(conn, "SELECT DISTINCT val FROM grouped_iso ORDER BY val ASC")$val
+    vals <- DBI::dbGetQuery(
+      conn,
+      "SELECT DISTINCT val FROM grouped_iso ORDER BY val ASC"
+    )$val
 
     for (v in vals) {
-      DBI::dbExecute(conn, glue::glue("
+      DBI::dbExecute(
+        conn,
+        glue::glue(
+          "
         UPDATE {point_table}
         SET {col} = {v}
         FROM grouped_iso g
         WHERE {point_table}.{col} IS NULL
           AND g.val = {v}
           AND ST_Intersects({point_table}.geom, g.geom)
-      "))
+      "
+        )
+      )
     }
     DBI::dbExecute(conn, "DROP TABLE grouped_iso")
-
   } else if (type == "buffer") {
     # BUFFER: The Ultra-Fast Method (ST_DWithin)
     # Sorted Distance Loop (Fastest for Nearest Bin)
@@ -738,12 +883,17 @@ process_layers <- function(conn, point_table, config) {
     for (miles in dists) {
       meters <- miles * 1609.34
 
-      message(glue::glue("   Checking buffer: {miles} miles ({round(meters)}m)"))
+      message(glue::glue(
+        "   Checking buffer: {miles} miles ({round(meters)}m)"
+      ))
 
       # ST_DWithin uses the RTREE index on raw_layer.
       # The 'WHERE {col} IS NULL' ensures we don't re-calculate points
       # that already matched a closer distance.
-      DBI::dbExecute(conn, glue::glue("
+      DBI::dbExecute(
+        conn,
+        glue::glue(
+          "
         UPDATE {point_table}
         SET {col} = {miles}
         WHERE {col} IS NULL
@@ -751,7 +901,9 @@ process_layers <- function(conn, point_table, config) {
              SELECT 1 FROM raw_layer r
              WHERE ST_DWithin({point_table}.geom, r.geom, {meters})
           )
-      "))
+      "
+        )
+      )
     }
   }
 
@@ -781,7 +933,9 @@ amenity_config |>
 t_total_end <- Sys.time()
 total_duration <- round(difftime(t_total_end, t_total_start, units = "mins"), 2)
 
-message(glue::glue("✅ Points enriched successfully. Total Time: {total_duration} mins."))
+message(glue::glue(
+  "✅ Points enriched successfully. Total Time: {total_duration} mins."
+))
 ```
 
 ```{r}
@@ -790,7 +944,6 @@ message(glue::glue("✅ Points enriched successfully. Total Time: {total_duratio
 message("📦 Transferring attributes from Points to Polygons...")
 
 transfer_columns <- function(conn, target_poly, source_point, config) {
-
   config |>
     purrr::pwalk(function(...) {
       row <- list(...)
@@ -799,16 +952,27 @@ transfer_columns <- function(conn, target_poly, source_point, config) {
       message(glue::glue("  ↳ Transferring {col}..."))
 
       # 1. RESET COLUMN on Target (Drop if exists)
-      DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly} DROP COLUMN IF EXISTS {col}"))
-      DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly} ADD COLUMN {col} DOUBLE"))
+      DBI::dbExecute(
+        conn,
+        glue::glue("ALTER TABLE {target_poly} DROP COLUMN IF EXISTS {col}")
+      )
+      DBI::dbExecute(
+        conn,
+        glue::glue("ALTER TABLE {target_poly} ADD COLUMN {col} DOUBLE")
+      )
 
       # 2. Update Target from Source using RowID
-      DBI::dbExecute(conn, glue::glue("
+      DBI::dbExecute(
+        conn,
+        glue::glue(
+          "
         UPDATE {target_poly}
         SET {col} = source.{col}
         FROM {source_point} source
         WHERE {target_poly}.rowid = source.rowid
-      "))
+      "
+        )
+      )
     })
 }
 
@@ -830,23 +994,33 @@ We export the "Wide" tables (ID + all amenity times). We exclude the geometry to
 fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
 
 # Transform geom from UTM to WGS84 before export
-DBI::dbExecute(conn, glue::glue("
+DBI::dbExecute(
+  conn,
+  glue::glue(
+    "
   COPY (
     SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
     FROM targets_parcels
   ) TO '{fp_out_parcels}' (FORMAT PARQUET)
-"))
+"
+  )
+)
 
 # 2. H3
 fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
 
 # Transform geom from UTM to WGS84 before export
-DBI::dbExecute(conn, glue::glue("
+DBI::dbExecute(
+  conn,
+  glue::glue(
+    "
   COPY (
     SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
     FROM targets_h3
   ) TO '{fp_out_h3}' (FORMAT PARQUET)
-"))
+"
+  )
+)
 
 message("🚀 Processing Complete!")
 ```

@@ -93,7 +93,6 @@ if (USE_LOCAL_ORS) {
   suppressMessages(ors_api_key("local-instance"))
 
   message("✅ Using Local ORS instance at: ", local_url)
-
 } else {
   # 2. Remote Setup
   # Important: Clear the URL option so it defaults back to "api.openrouteservice.org"
@@ -137,15 +136,15 @@ options(
 
 # Setup Paths & Params
 dirs <- list(
-  source     = here::here("_src"), # Source custom functions
-  raw        = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
-  processed  = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
-  buffered   = here::here("_data/buffered"), # Intermediate Output: Buffered layers
+  source = here::here("_src"), # Source custom functions
+  raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
+  buffered = here::here("_data/buffered"), # Intermediate Output: Buffered layers
   isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
-  results    = here::here("_output") # Final Output: Analysis Results
+  results = here::here("_output") # Final Output: Analysis Results
 )
 
-purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -153,15 +152,15 @@ purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
 
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
-  base      = here::here(dirs$processed, "base_layers"),
-  parcels   = here::here(dirs$processed, "parcels_taz"),
-  landuse   = here::here(dirs$processed, "landuse_zones"),
+  base = here::here(dirs$processed, "base_layers"),
+  parcels = here::here(dirs$processed, "parcels_taz"),
+  landuse = here::here(dirs$processed, "landuse_zones"),
   transport = here::here(dirs$processed, "transportation"),
-  access    = here::here(dirs$processed, "access"),
+  access = here::here(dirs$processed, "access"),
   amenities = here::here(dirs$processed, "amenities")
 )
 
-purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -169,12 +168,12 @@ purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
 
 # Define Sub-directories for Isochrones
 iso_dirs <- list(
-  walking   = here::here(dirs$isochrones, "foot-walking"),
-  biking    = here::here(dirs$isochrones, "cycling-regular"),
-  driving   = here::here(dirs$isochrones, "driving-car")
+  walking = here::here(dirs$isochrones, "foot-walking"),
+  biking = here::here(dirs$isochrones, "cycling-regular"),
+  driving = here::here(dirs$isochrones, "driving-car")
 )
 
-purrr::walk(iso_dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(iso_dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ### Projection Constants
@@ -183,9 +182,9 @@ purrr::walk(iso_dirs, ~fs::dir_create(., recurse = TRUE))
 #| label: setup-crs
 
 # Projection Constants
-CRS_STP <- "EPSG:3566"  # NAD83 / Utah Central (Projected - ftUS)
+CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
-CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
+CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```
 
 ## Helper Functions
@@ -272,8 +271,14 @@ if (file.exists(fp_boundary_wftdm)) {
 #| label: prep-boundary
 
 # Define inputs/outputs
-fp_regional_bound <- here::here(sub_dirs$base, "RegionalBoundaryComponents.parquet")
-fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
+fp_regional_bound <- here::here(
+  sub_dirs$base,
+  "RegionalBoundaryComponents.parquet"
+)
+fp_boundary_wftdm <- here::here(
+  sub_dirs$base,
+  "Analysis_Boundary_WFRC_MAG.parquet"
+)
 
 # Define the CRS of your INPUT file 'RegionalBoundaryComponents.parquet'
 # Common Utah CRSs: "EPSG:26912" (UTM 12N) or "EPSG:3566" (Utah Central State Plane)
@@ -295,7 +300,8 @@ if (file.exists(fp_boundary_wftdm)) {
   DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 
   # Process using DuckDB SQL
-  query_prep <- glue::glue("
+  query_prep <- glue::glue(
+    "
     COPY (
       WITH raw_union AS (
         -- 1. Initial Dissolve
@@ -331,7 +337,8 @@ if (file.exists(fp_boundary_wftdm)) {
       FROM final_union
 
     ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
-  ")
+  "
+  )
 
   # Assuming 'conn' is your active DuckDB connection
   DBI::dbExecute(conn, query_prep)
@@ -411,18 +418,20 @@ if (file.exists(fp_h3_grid)) {
 #| label: gen-h3-grid
 
 # 1. Define Inputs/Outputs
-fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
-fp_h3_grid        <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-H3_RES            <- 10 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
+fp_boundary_wftdm <- here::here(
+  sub_dirs$base,
+  "Analysis_Boundary_WFRC_MAG.parquet"
+)
+fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
+H3_RES <- 10 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
 
 # The input boundary should now be EPSG:4326 from the previous step.
 # We define it explicitly here for the 3-argument ST_Transform.
-BOUNDARY_CRS      <- CRS_WGS
+BOUNDARY_CRS <- CRS_WGS
 
 if (file.exists(fp_h3_grid)) {
   message("✅ H3 Grid already exists: ", fp_h3_grid)
 } else {
-
   conn <- DBI::dbConnect(duckdb::duckdb())
   on.exit(DBI::dbDisconnect(conn, shutdown = TRUE))
 
@@ -431,7 +440,8 @@ if (file.exists(fp_h3_grid)) {
   DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 
   # Fix: Removed curly braces from comments to prevent glue parsing errors
-  query_h3 <- glue::glue("
+  query_h3 <- glue::glue(
+    "
     COPY (
       WITH boundary_parts AS (
         -- 1. Read Boundary & FORCE Transform to 4326
@@ -461,14 +471,18 @@ if (file.exists(fp_h3_grid)) {
       FROM h3_indices
 
     ) TO '{fp_h3_grid}' (FORMAT PARQUET)
-  ")
+  "
+  )
 
-  tryCatch({
-    DBI::dbExecute(conn, query_h3)
-    message("✅ H3 Grid saved to: ", fp_h3_grid)
-  }, error = function(e) {
-    stop("❌ H3 Generation Failed: ", e$message)
-  })
+  tryCatch(
+    {
+      DBI::dbExecute(conn, query_h3)
+      message("✅ H3 Grid saved to: ", fp_h3_grid)
+    },
+    error = function(e) {
+      stop("❌ H3 Generation Failed: ", e$message)
+    }
+  )
 }
 ```
 
@@ -490,23 +504,23 @@ arrow::read_parquet(fp_h3_grid) |>
 # - filter: SQL filtering logic (default "1=1")
 # - paths: List of file paths (if >1, they are unioned)
 layer_config <- tibble::tribble(
-  ~name,               ~filter,                                          ~path,
+  ~name               , ~filter                                       , ~path                                                                         ,
 
   # --- TRANSIT (Split by Mode) ---
-  "Transit_Local",     "Mode IN ('Bus', 'Flex Bus', 'Microtransit')",    here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
-  "Transit_Rapid",     "Mode IN ('BRT', 'TRAX', 'BRT, Bus')",           here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
-  "Transit_CRT",       "Mode = 'FrontRunner'",                           here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet"),
+  "Transit_Local"     , "Mode IN ('Bus', 'Flex Bus', 'Microtransit')" , here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet") ,
+  "Transit_Rapid"     , "Mode IN ('BRT', 'TRAX', 'BRT, Bus')"         , here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet") ,
+  "Transit_CRT"       , "Mode = 'FrontRunner'"                        , here::here(sub_dirs$transport, "UTA_Stops_and_Most_Recent_Ridership.parquet") ,
 
   # --- INFRASTRUCTURE ---
-  "Freeways",          "1=1",                                            here::here(sub_dirs$transport, "Freeway_Exit_Locations.parquet"),
+  "Freeways"          , "1=1"                                         , here::here(sub_dirs$transport, "Freeway_Exit_Locations.parquet")              ,
 
   # --- AMENITIES ---
-  "ChildCare",         "1=1",                                            here::here(sub_dirs$amenities, "ChildCareFacilities.parquet"),
-  "Healthcare",        "1=1",                                            here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet"),
-  "Schools_PreK12",    "1=1",                                            here::here(sub_dirs$amenities, "Schools_PreKto12.parquet"),
-  "Schools_HigherEd",  "1=1",                                            here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet"),
-  "Grocery",           "1=1",                                            here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet"),
-  "Community_Centers", "1=1",                                            here::here(sub_dirs$amenities, "Community_Centers.parquet")
+  "ChildCare"         , "1=1"                                         , here::here(sub_dirs$amenities, "ChildCareFacilities.parquet")                 ,
+  "Healthcare"        , "1=1"                                         , here::here(sub_dirs$amenities, "LicensedHealthCareFacilities.parquet")        ,
+  "Schools_PreK12"    , "1=1"                                         , here::here(sub_dirs$amenities, "Schools_PreKto12.parquet")                    ,
+  "Schools_HigherEd"  , "1=1"                                         , here::here(sub_dirs$amenities, "Schools_HigherEducation.parquet")             ,
+  "Grocery"           , "1=1"                                         , here::here(sub_dirs$amenities, "UtahGroceryAndFoodStores_DAF.parquet")        ,
+  "Community_Centers" , "1=1"                                         , here::here(sub_dirs$amenities, "Community_Centers.parquet")
 )
 ```
 
@@ -519,19 +533,17 @@ layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
   purrr::pwalk(function(name, filter, path) {
-
     # Direct execution (No union logic needed)
     process_isochrones(
-      path          = path,
-      name          = name,
-      profile       = "foot-walking",
-      range         = c(300, 600, 900, 1800, 3599),
-      input_filter  = filter,
+      path = path,
+      name = name,
+      profile = "foot-walking",
+      range = c(300, 600, 900, 1800, 3599),
+      input_filter = filter,
       boundary_path = fp_boundary_wftdm,
-      save_dir      = iso_dirs$walking,
-      dry_run       = TRUE # Set to FALSE to generate files
+      save_dir = iso_dirs$walking,
+      dry_run = TRUE # Set to FALSE to generate files
     )
-
   })
 ```
 
@@ -544,16 +556,15 @@ layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
   purrr::pwalk(function(name, filter, path) {
-
     process_isochrones(
-      path          = path,
-      name          = name,
-      profile       = "cycling-regular",
-      range         = c(300, 600, 900, 1800, 3599),
-      input_filter  = filter,
+      path = path,
+      name = name,
+      profile = "cycling-regular",
+      range = c(300, 600, 900, 1800, 3599),
+      input_filter = filter,
       boundary_path = fp_boundary_wftdm,
-      save_dir      = iso_dirs$biking,
-      dry_run       = TRUE # Set to FALSE to generate files
+      save_dir = iso_dirs$biking,
+      dry_run = TRUE # Set to FALSE to generate files
     )
   })
 ```
@@ -567,18 +578,76 @@ layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
   purrr::pwalk(function(name, filter, path) {
-
     process_isochrones(
-      path          = path,
-      name          = name,
-      profile       = "driving-car",
-      range         = c(300, 600, 900, 1800, 3599),
-      input_filter  = filter,
+      path = path,
+      name = name,
+      profile = "driving-car",
+      range = c(300, 600, 900, 1800, 3599),
+      input_filter = filter,
       boundary_path = fp_boundary_wftdm,
-      save_dir      = iso_dirs$driving,
-      dry_run       = TRUE # Set to FALSE to generate files
+      save_dir = iso_dirs$driving,
+      dry_run = TRUE # Set to FALSE to generate files
     )
   })
+```
+
+## Graded Park Access Buffers
+
+```{r}
+#| label: process-parks-graded
+
+# 1. Define Inputs/Outputs
+#    Input comes from the 'amenities' folder populated in Step 1
+fp_park_in <- here::here(sub_dirs$amenities, "WalkAccesstoParks_10Min.parquet")
+fp_parks_graded <- here::here(sub_dirs$amenities, "ParkAccess_Graded.parquet")
+DIST_METERS <- 402.34 # 0.25 miles
+
+# 2. Conditional Processing
+if (file.exists(fp_parks_graded)) {
+  message("✅ Graded Park Access already exists: ", fp_parks_graded)
+} else {
+  # Initialize DB
+  conn <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(conn, shutdown = TRUE))
+  DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+
+  # SQL Logic:
+  # 1. Transform to UTM (EPSG:26912) for accurate buffering
+  # 2. Generate 3 Tiers with specific 'seconds-like' scores:
+  #    - Inner (-0.25 mi): 300 (Best)
+  #    - Original: 600
+  #    - Outer (+0.25 mi): 900 (Worst)
+  # 3. Transform back to WGS84 for storage
+  query <- glue::glue(
+    "
+    COPY (
+      WITH raw_utm AS (
+        SELECT
+          ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+        FROM read_parquet('{fp_park_in}')
+      ),
+      tiers AS (
+        -- Tier 1: Inner (-0.25 mi) -> Value 300 (Best/Closest)
+        SELECT 300 as value, ST_Buffer(geom, -{DIST_METERS}) as geom FROM raw_utm
+        UNION ALL
+        -- Tier 2: Original Boundary -> Value 600
+        SELECT 600 as value, geom FROM raw_utm
+        UNION ALL
+        -- Tier 3: Outer (+0.25 mi) -> Value 900 (Worst/Furthest)
+        SELECT 900 as value, ST_Buffer(geom, {DIST_METERS}) as geom FROM raw_utm
+      )
+      SELECT
+        value,
+        ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) as geometry
+      FROM tiers
+      WHERE NOT ST_IsEmpty(geom)
+    ) TO '{fp_parks_graded}' (FORMAT PARQUET)
+  "
+  )
+
+  DBI::dbExecute(conn, query)
+  message("✅ Saved Graded Park Access to: ", fp_parks_graded)
+}
 ```
 
 ## Verify Results
@@ -596,19 +665,28 @@ fs::dir_tree(dirs$isochrones)
 #| eval: false
 
 # 2. Visual Check: Compare Walking vs Biking vs Driving
-preview_layer(here::here(iso_dirs$walking, "Schools_HigherEd.parquet"), column = "value")
+preview_layer(
+  here::here(iso_dirs$walking, "Schools_HigherEd.parquet"),
+  column = "value"
+)
 ```
 
 ```{r}
 #| eval: false
 
 # Biking - Should be larger
-preview_layer(here::here(iso_dirs$biking, "Schools_HigherEd.parquet"), column = "value")
+preview_layer(
+  here::here(iso_dirs$biking, "Schools_HigherEd.parquet"),
+  column = "value"
+)
 ```
 
 ```{r}
 #| eval: false
 
 # Driving Should be much larger
-preview_layer(here::here(iso_dirs$driving, "Schools_HigherEd.parquet"), column = "value")
+preview_layer(
+  here::here(iso_dirs$driving, "Schools_HigherEd.parquet"),
+  column = "value"
+)
 ```

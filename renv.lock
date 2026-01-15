@@ -219,11 +219,11 @@
     },
     "RcppSimdJson": {
       "Package": "RcppSimdJson",
-      "Version": "0.1.14",
+      "Version": "0.1.15",
       "Source": "Repository",
       "Type": "Package",
       "Title": "'Rcpp' Bindings for the 'simdjson' Header-Only Library for 'JSON' Parsing",
-      "Date": "2025-09-13",
+      "Date": "2026-01-14",
       "Authors@R": "c(person(\"Dirk\", \"Eddelbuettel\", role = c(\"aut\", \"cre\"), email = \"edd@debian.org\", comment = c(ORCID = \"0000-0001-6419-907X\")), person(\"Brendan\", \"Knapp\", role = \"aut\", comment = c(ORCID = \"0000-0003-3284-4972\")), person(\"Daniel\", \"Lemire\", role = \"aut\", comment = c(ORCID = \"0000-0003-3306-6922\")))",
       "Description": "The 'JSON' format is ubiquitous for data interchange, and the 'simdjson' library written by Daniel Lemire (and many contributors) provides a high-performance parser for these files which by relying on parallel 'SIMD' instruction manages to parse these files as faster than disk speed. See the <doi:10.48550/arXiv.1902.08318> paper for more details about 'simdjson'.  This package parses 'JSON' from string, file, or remote URLs under a variety of settings.",
       "License": "GPL (>= 2)",
@@ -238,7 +238,6 @@
         "bit64",
         "tinytest"
       ],
-      "SystemRequirements": "A C++17 compiler is required",
       "URL": "https://github.com/eddelbuettel/rcppsimdjson/",
       "BugReports": "https://github.com/eddelbuettel/rcppsimdjson/issues",
       "RoxygenNote": "7.1.1",
@@ -3879,7 +3878,7 @@
     },
     "shinyjs": {
       "Package": "shinyjs",
-      "Version": "2.1.0",
+      "Version": "2.1.1",
       "Source": "Repository",
       "Title": "Easily Improve the User Experience of Your Shiny Apps in Seconds",
       "Authors@R": "person(\"Dean\", \"Attali\",  email = \"daattali@gmail.com\", role = c(\"aut\", \"cre\"), comment= c(ORCID=\"0000-0002-5645-3493\"))",
@@ -3904,10 +3903,10 @@
       ],
       "License": "MIT + file LICENSE",
       "VignetteBuilder": "knitr",
-      "RoxygenNote": "7.1.1",
+      "RoxygenNote": "7.3.3",
       "Encoding": "UTF-8",
       "NeedsCompilation": "no",
-      "Author": "Dean Attali [aut, cre] (<https://orcid.org/0000-0002-5645-3493>)",
+      "Author": "Dean Attali [aut, cre] (ORCID: <https://orcid.org/0000-0002-5645-3493>)",
       "Maintainer": "Dean Attali <daattali@gmail.com>",
       "Repository": "CRAN"
     },
@@ -3948,7 +3947,7 @@
     },
     "snowflakeauth": {
       "Package": "snowflakeauth",
-      "Version": "0.2.0",
+      "Version": "0.2.1",
       "Source": "Repository",
       "Title": "Authentication Helpers for 'Snowflake'",
       "Authors@R": "c( person(\"Aaron\", \"Jacobs\", , \"aaron.jacobs@posit.co\", role = c(\"aut\")), person(\"E. David\", \"Aja\", , \"david@posit.co\", role = c(\"aut\", \"cre\")), person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")) )",
@@ -3965,6 +3964,7 @@
         "openssl"
       ],
       "Suggests": [
+        "httpuv",
         "testthat (>= 3.0.0)",
         "withr"
       ],

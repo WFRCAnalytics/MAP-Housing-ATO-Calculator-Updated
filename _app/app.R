@@ -249,8 +249,8 @@ layer_defs <- list(
     color = "#FF7F00"
   ),
   "w_AP" = list(
-    url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/ParkEdits/FeatureServer/0",
-    query = "1=1",
+    url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahParksLocal/FeatureServer/0",
+    query = "COUNTY IN ('BOX ELDER', 'WEBER', 'DAVIS', 'SALT LAKE', 'UTAH')",
     type = "polygon",
     color = "#A65628"
   )
@@ -290,7 +290,7 @@ layer_help_text <- list(
   "w_AE" = "Proximity to K-12 schools and higher education institutions.",
   "w_AG" = "Proximity to supermarkets and grocery stores.",
   "w_AM" = "Proximity to community centers, libraries, and recreation halls.",
-  "w_AP" = "Areas located within a 10-minute walk of a public park."
+  "w_AP" = "Proximity to local and public parks."
 )
 
 sliderWithLayer <- function(inputId, label) {
@@ -659,7 +659,7 @@ ui <- bslib::page_navbar(
         sliderWithLayer(
           "w_AP",
           shiny::HTML(
-            "<i class='fa-solid fa-tree' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> 10-min Walk to Parks"
+            "<i class='fa-solid fa-tree' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Walk Access to Parks"
           )
         )
       )

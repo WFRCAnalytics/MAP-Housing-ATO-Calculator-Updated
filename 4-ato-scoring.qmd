@@ -162,7 +162,7 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
   for (col in score_cols) {
     # Detect Type: Cost (Min/Val) vs Benefit (Val/Max)
     # Added 'TA_' explicitly to cost metrics based on your buffer config
-    is_cost <- grepl("^(TT_|AC|AH|AG|AM|AE_|TA_|TF)", col)
+    is_cost <- grepl("^(TT_|AC|AH|AG|AM|AE_|TA_|TF|AP)", col)
 
     if (is_cost) {
       # COST: Inverse Normalization
