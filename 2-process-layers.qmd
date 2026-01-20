@@ -597,12 +597,31 @@ layer_config |>
 #| label: process-parks-graded
 
 # 1. Define Inputs/Outputs
-#    Input comes from the 'amenities' folder populated in Step 1
-fp_park_in <- here::here(sub_dirs$amenities, "WalkAccesstoParks_10Min.parquet")
+fp_park_5_in <- here::here(sub_dirs$amenities, "Parks_5min_ServiceArea.parquet")
+fp_park_10_in <- here::here(
+  sub_dirs$amenities,
+  "Parks_10min_ServiceArea.parquet"
+)
 fp_parks_graded <- here::here(sub_dirs$amenities, "ParkAccess_Graded.parquet")
-DIST_METERS <- 402.34 # 0.25 miles
 
-# 2. Conditional Processing
+# 2. Define Buffer Parameters
+#    Base Speed: 3 MPH (~0.25 miles per 5 mins).
+#    If you strictly meant 0.25 MPH, change this value to 0.25.
+SPEED_MPH <- 3.0
+MPH_TO_MPS <- 0.44704 # Conversion factor: Miles/Hr to Meters/Sec
+
+# Calculate distances in meters based on time delta from the 10-min (600s) layer
+# Distance = (Target_Time - Base_Time) * Speed
+calc_buffer <- function(target_seconds) {
+  seconds_delta <- target_seconds - 600
+  return(seconds_delta * SPEED_MPH * MPH_TO_MPS)
+}
+
+dist_900 <- calc_buffer(900) # ~ 15 min total
+dist_1800 <- calc_buffer(1800) # ~ 30 min total
+dist_3600 <- calc_buffer(3599) # ~ 60 min total
+
+# 3. Conditional Processing
 if (file.exists(fp_parks_graded)) {
   message("✅ Graded Park Access already exists: ", fp_parks_graded)
 } else {
@@ -612,35 +631,63 @@ if (file.exists(fp_parks_graded)) {
   DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
 
   # SQL Logic:
-  # 1. Transform to UTM (EPSG:26912) for accurate buffering
-  # 2. Generate 3 Tiers with specific 'seconds-like' scores:
-  #    - Inner (-0.25 mi): 300 (Best)
-  #    - Original: 600
-  #    - Outer (+0.25 mi): 900 (Worst)
-  # 3. Transform back to WGS84 for storage
+  # 1. Read 5min (Val 300) and 10min (Val 600)
+  # 2. Buffer 10min to create 900, 1800, 3599 tiers
+  # 3. Union and Save
   query <- glue::glue(
     "
     COPY (
-      WITH raw_utm AS (
-        SELECT
-          ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
-        FROM read_parquet('{fp_park_in}')
+      WITH
+      -- 1. Load 5-Min Layer (Inner Core)
+      layer_5min AS (
+        SELECT 300 as value,
+               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+        FROM read_parquet('{fp_park_5_in}')
       ),
+
+      -- 2. Load 10-Min Layer (Base for Buffering)
+      layer_10min AS (
+        SELECT 600 as value,
+               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+        FROM read_parquet('{fp_park_10_in}')
+      ),
+
+      -- 3. Generate All Tiers
       tiers AS (
-        -- Tier 1: Inner (-0.25 mi) -> Value 300 (Best/Closest)
-        SELECT 300 as value, ST_Buffer(geom, -{DIST_METERS}) as geom FROM raw_utm
+        -- Tier: 0-5 min (Provided)
+        SELECT value, geom FROM layer_5min
+
         UNION ALL
-        -- Tier 2: Original Boundary -> Value 600
-        SELECT 600 as value, geom FROM raw_utm
+
+        -- Tier: 5-10 min (Provided)
+        SELECT value, geom FROM layer_10min
+
         UNION ALL
-        -- Tier 3: Outer (+0.25 mi) -> Value 900 (Worst/Furthest)
-        SELECT 900 as value, ST_Buffer(geom, {DIST_METERS}) as geom FROM raw_utm
+
+        -- Tier: 15 min (900s) -> Buffer 10min by ~0.25 miles
+        SELECT 900 as value, ST_Buffer(geom, {dist_900}) as geom
+        FROM layer_10min
+
+        UNION ALL
+
+        -- Tier: 30 min (1800s) -> Buffer 10min by ~1.0 miles
+        SELECT 1800 as value, ST_Buffer(geom, {dist_1800}) as geom
+        FROM layer_10min
+
+        UNION ALL
+
+        -- Tier: 60 min (3599s) -> Buffer 10min by ~2.5 miles
+        SELECT 3599 as value, ST_Buffer(geom, {dist_3600}) as geom
+        FROM layer_10min
       )
+
+      -- 4. Final Transform back to WGS84
       SELECT
         value,
         ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) as geometry
       FROM tiers
       WHERE NOT ST_IsEmpty(geom)
+
     ) TO '{fp_parks_graded}' (FORMAT PARQUET)
   "
   )

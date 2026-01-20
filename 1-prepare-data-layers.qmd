@@ -81,15 +81,15 @@ arrow::install_arrow()
 
 # Setup Paths & Params
 dirs <- list(
-  source     = here::here("_src"), # Source custom functions
-  raw        = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
-  processed  = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
-  buffered   = here::here("_data/buffered"), # Intermediate Output: Buffered layers
+  source = here::here("_src"), # Source custom functions
+  raw = here::here("_data/raw"), # Input: Shapefiles, GDBs, CSVs
+  processed = here::here("_data/processed"), # Intermediate Output: Standardized Parquets
+  buffered = here::here("_data/buffered"), # Intermediate Output: Buffered layers
   isochrones = here::here("_data/isochrones"), # Intermediate Output: ORS Isochrones
-  results    = here::here("_output") # Final Output: Analysis Results
+  results = here::here("_output") # Final Output: Analysis Results
 )
 
-purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ```{r}
@@ -97,15 +97,15 @@ purrr::walk(dirs, ~fs::dir_create(., recurse = TRUE))
 
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
-  base      = here::here(dirs$processed, "base_layers"),
-  parcels   = here::here(dirs$processed, "parcels_taz"),
-  landuse   = here::here(dirs$processed, "landuse_zones"),
+  base = here::here(dirs$processed, "base_layers"),
+  parcels = here::here(dirs$processed, "parcels_taz"),
+  landuse = here::here(dirs$processed, "landuse_zones"),
   transport = here::here(dirs$processed, "transportation"),
-  access    = here::here(dirs$processed, "access"),
+  access = here::here(dirs$processed, "access"),
   amenities = here::here(dirs$processed, "amenities")
 )
 
-purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
+purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
 ### Projection Constants
@@ -114,9 +114,9 @@ purrr::walk(sub_dirs, ~fs::dir_create(., recurse = TRUE))
 #| label: setup-crs
 
 # Projection Constants
-CRS_STP <- "EPSG:3566"  # NAD83 / Utah Central (Projected - ftUS)
+CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
-CRS_WGS <- "EPSG:4326"  # WGS84 (Geographic - Lat/Lon)
+CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```
 
 
@@ -209,7 +209,7 @@ fp_remm_parcels <- process_local_layer(
   save_dir = sub_dirs$parcels,
   # partitioning = "co_name",
   compression = "zstd",
-  crs  = CRS_WGS
+  crs = CRS_WGS
 )
 ```
 
@@ -232,7 +232,7 @@ fp_remm_buildings <- process_local_layer(
   save_dir = sub_dirs$parcels,
   # partitioning = "building_type",
   compression = "zstd",
-  crs  = CRS_WGS
+  crs = CRS_WGS
 )
 ```
 
@@ -252,7 +252,7 @@ fp_wf_taz <- process_local_layer(
   path = "WFv920_TAZ.zip",
   name = "WFv920_TAZ",
   save_dir = sub_dirs$parcels,
-  crs  = CRS_WGS
+  crs = CRS_WGS
 )
 ```
 
@@ -272,7 +272,7 @@ fp_ustm_taz <- process_local_layer(
   path = "Statewide_TAZ.zip",
   name = "Statewide_TAZ",
   save_dir = sub_dirs$parcels,
-  crs  = CRS_WGS
+  crs = CRS_WGS
 )
 ```
 
@@ -436,25 +436,27 @@ fp_taz_ato <- download_feature_layer(
 # ATO Source: "\\ModelAce\ModelAce-E\1 - TDM\1 - Official Release (full run)\v9x\v9.2\v9.2.0\Scenarios\OY_2023\5_AssignHwy\4_Summaries\WFv920_OY_2023_Access_to_Opportunity.csv"
 
 # 1. Define Paths
-fp_taz_ato <- here::here(sub_dirs$access, "TAZ_AccessToOpportunities_OY2023.parquet")
+fp_taz_ato <- here::here(
+  sub_dirs$access,
+  "TAZ_AccessToOpportunities_OY2023.parquet"
+)
 fp_ato_csv <- here::here(dirs$raw, "WFv920_OY_2023_Access_to_Opportunity.csv")
 
 # 2. Conditional Processing
 if (file.exists(fp_taz_ato)) {
   message("✅ TAZ ATO layer already exists: ", fp_taz_ato)
 } else {
-
   # Single Pipeline: Read TAZ -> Clean -> Join(Read CSV -> Clean) -> Save
-  arrow::read_parquet(fp_wf_taz) |>           # Read LHS (Geometry) to memory
-    sf::st_as_sf(crs = CRS_WGS) |>           # Convert to SF (EPSG:4326)
-    janitor::clean_names() |>                 # Clean LHS names
+  arrow::read_parquet(fp_wf_taz) |> # Read LHS (Geometry) to memory
+    sf::st_as_sf(crs = CRS_WGS) |> # Convert to SF (EPSG:4326)
+    janitor::clean_names() |> # Clean LHS names
     dplyr::left_join(
       # Nested Pipeline: Read RHS (Attributes) -> Clean Names
       arrow::read_csv_arrow(fp_ato_csv) |>
         janitor::clean_names(),
       by = "co_tazid"
     ) |>
-    as_geoparquet_table() |>                  # Convert back to Arrow with Metadata
+    as_geoparquet_table() |> # Convert back to Arrow with Metadata
     arrow::write_parquet(fp_taz_ato)
 
   message("✅ Joined and saved to: ", fp_taz_ato)
@@ -603,9 +605,19 @@ preview_layer(fp_community_center)
 
 ```{r}
 #| label: park-access
-fp_park_access <- download_feature_layer(
-  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/ParkEdits/FeatureServer/0",
-  name = "WalkAccesstoParks_10Min",
+
+# Download 5-Minute Service Area (300 seconds)
+fp_park_5min <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/0",
+  name = "Parks_5min_ServiceArea",
+  save_dir = sub_dirs$amenities,
+  crs = CRS_WGS
+)
+
+# Download 10-Minute Service Area (600 seconds)
+fp_park_10min <- download_feature_layer(
+  url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/1",
+  name = "Parks_10min_ServiceArea",
   save_dir = sub_dirs$amenities,
   crs = CRS_WGS
 )
