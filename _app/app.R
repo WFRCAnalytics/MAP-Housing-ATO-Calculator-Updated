@@ -551,38 +551,48 @@ ui <- bslib::page_navbar(
       selected = "All Land Uses",
       multiple = FALSE
     ),
+    bslib::accordion(
+      open = FALSE, # Keep collapsed to save space by default
+      bslib::accordion_panel(
+        "Wasatch Choice Centers (Overlay)",
+        toggleOnlyLayer("w_CM", "Metropolitan Centers"),
+        toggleOnlyLayer("w_CU", "Urban Centers"),
+        toggleOnlyLayer("w_CC", "City Centers"),
+        toggleOnlyLayer("w_CN", "Neighborhood Centers")
+      )
+    ),
     tags$div(
       class = "mb-2",
       tags$div(
-        "Step 3: Customize Accessibility Factors & Priorities",
+        "Step 3: Customize Accessibility Priorities",
         class = "step-header"
       ),
       tags$p(
         HTML(
-          "Please indicate your priority level for each of the following measures of accessibility.<br>Toggle layers using the icon on the right."
+          "Indicate priority level for each factor.<br>Toggle layers using the icon on the right."
         ),
         style = "font-size: 0.9em; color: #6c757d; margin-top: 5px;"
       )
     ),
     bslib::accordion(
       open = FALSE,
-      bslib::accordion_panel(
-        "Places (Centers)",
+      # bslib::accordion_panel(
+      #   "Places (Centers)",
 
-        # TODO: --- REVERTIBLE CHANGE: Remove Sliders, Keep Toggles ---
-        # ORIGINAL CODE:
-        # sliderWithLayer("w_CM", "Metropolitan Centers"),
-        # sliderWithLayer("w_CU", "Urban Centers"),
-        # sliderWithLayer("w_CC", "City Centers"),
-        # sliderWithLayer("w_CN", "Neighborhood Centers")
+      #   # TODO: --- REVERTIBLE CHANGE: Remove Sliders, Keep Toggles ---
+      #   # ORIGINAL CODE:
+      #   # sliderWithLayer("w_CM", "Metropolitan Centers"),
+      #   # sliderWithLayer("w_CU", "Urban Centers"),
+      #   # sliderWithLayer("w_CC", "City Centers"),
+      #   # sliderWithLayer("w_CN", "Neighborhood Centers")
 
-        # NEW CODE:
-        toggleOnlyLayer("w_CM", "Metropolitan Centers"),
-        toggleOnlyLayer("w_CU", "Urban Centers"),
-        toggleOnlyLayer("w_CC", "City Centers"),
-        toggleOnlyLayer("w_CN", "Neighborhood Centers")
-        # -------------------------------------------------------
-      ),
+      #   # NEW CODE:
+      #   toggleOnlyLayer("w_CM", "Metropolitan Centers"),
+      #   toggleOnlyLayer("w_CU", "Urban Centers"),
+      #   toggleOnlyLayer("w_CC", "City Centers"),
+      #   toggleOnlyLayer("w_CN", "Neighborhood Centers")
+      #   # -------------------------------------------------------
+      # ),
       bslib::accordion_panel(
         "Employment",
         sliderWithLayer(
@@ -1110,7 +1120,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
               )
             ),
 
-            # --- TAB 3: QGIS / ArcGIS ---
+            # --- TAB 3: QGIS / ArcGIS (UPDATED) ---
             bslib::nav_panel(
               title = shiny::HTML(
                 '<span style="color: #233A57; font-weight:600;"><i class="fa-solid fa-map"></i> QGIS / ArcGIS</span>'
@@ -1122,8 +1132,14 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
                     class = "fa-solid fa-triangle-exclamation",
                     style = "color:#f39c12;"
                   ),
-                  " Note: Neither tool supports generating polygons directly from a CSV index. You must generate a blank grid first, then join your data.",
+                  " To visualize this data, load the reference geometry service below, then join your downloaded CSV.",
                   style = "font-size: 0.9rem;"
+                ),
+
+                # The URL
+                shiny::div(
+                  style = "background: #e9ecef; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; word-break: break-all; margin-bottom: 15px; color: #333;",
+                  "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/HousingSuitability_Centers202512_gdb/FeatureServer/2"
                 ),
 
                 shiny::hr(),
@@ -1135,23 +1151,20 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
                 shiny::tags$ul(
                   style = "font-size: 0.9rem; color:#444; line-height: 1.6;",
                   shiny::tags$li(
-                    "Install the ",
-                    shiny::a(
-                      "H3 Toolkit Plugin",
-                      href = "https://plugins.qgis.org/plugins/h3_toolkit/",
-                      target = "_blank",
-                      style = "font-weight:bold; text-decoration:underline; color:#377EB8;"
-                    ),
-                    " via the QGIS Plugin Manager."
+                    "Go to ",
+                    shiny::tags$strong("Layer"),
+                    " > ",
+                    shiny::tags$strong("Add Layer"),
+                    " > ",
+                    shiny::tags$strong("Add ArcGIS REST Service Layer...")
                   ),
                   shiny::tags$li(
-                    "Use the plugin to generate a grid covering your area of interest at ",
-                    shiny::tags$strong("Resolution 10"),
-                    "."
+                    "Click 'New', paste the URL above, and click 'Connect' to add the layer."
                   ),
-                  shiny::tags$li("Import your CSV as a delimited text layer."),
                   shiny::tags$li(
-                    "Perform a Table Join between the Grid (Target) and CSV (Join) using the H3 Index column."
+                    "Import your downloaded CSV and perform a ",
+                    shiny::tags$strong("Table Join"),
+                    " using the H3 Index column."
                   )
                 ),
 
@@ -1164,22 +1177,20 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
                 shiny::tags$ul(
                   style = "font-size: 0.9rem; color:#444; line-height: 1.6;",
                   shiny::tags$li(
-                    "Use the ",
-                    shiny::a(
-                      "Generate Grids and Hexagons",
-                      href = "https://pro.arcgis.com/en/pro-app/latest/help/analysis/business-analyst/generate-grids-and-hexagons.htm",
-                      target = "_blank",
-                      style = "font-weight:bold; text-decoration:underline; color:#377EB8;"
-                    ),
-                    " tool (Business Analyst/Intelligence toolbox)."
+                    "Go to the ",
+                    shiny::tags$strong("Map"),
+                    " tab > ",
+                    shiny::tags$strong("Add Data"),
+                    " > ",
+                    shiny::tags$strong("Data From Path")
                   ),
                   shiny::tags$li(
-                    "Generate a new hexagon layer for your area at ",
-                    shiny::tags$strong("Resolution 10"),
-                    "."
+                    "Paste the URL above and click 'Add'."
                   ),
                   shiny::tags$li(
-                    "Import the CSV and use the 'Add Join' tool to append your data to the hexagon layer using the H3 Index."
+                    "Import your CSV and use the ",
+                    shiny::tags$strong("Add Join"),
+                    " tool to append your data using the H3 Index."
                   )
                 )
               )
