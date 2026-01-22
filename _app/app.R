@@ -280,17 +280,17 @@ layer_help_text <- list(
   "w_CU" = "Centers serving sub-regional areas with high density commercial and housing.",
   "w_CC" = "Centers serving specific cities with moderate density and mixed use.",
   "w_CN" = "Local centers serving immediate neighborhoods.",
-  "w_AA" = "Number of jobs accessible by car within a 30-minute drive.",
-  "w_AT" = "Number of jobs accessible by public transit within a 30-minute ride.",
+  "w_AA" = "Number of jobs accessible by car within a 40-minute drive.",
+  "w_AT" = "Number of jobs accessible by public transit within a 60-minute ride.",
   "w_TT" = "Proximity to UTA bus stops, TRAX stations, and FrontRunner stations.",
   "w_TF" = "Proximity to freeway entrance and exit ramps.",
-  "w_TA" = "Proximity to bike lanes, multi-use trails, and active transportation paths.",
+  "w_TA" = "Proximity to separated or buffered bike lanes, and multi-use trails.",
   "w_AC" = "Proximity to licensed childcare facilities.",
   "w_AH" = "Proximity to hospitals, clinics, and medical facilities.",
   "w_AE" = "Proximity to K-12 schools and higher education institutions.",
   "w_AG" = "Proximity to supermarkets and grocery stores.",
-  "w_AM" = "Proximity to community centers, libraries, and recreation halls.",
-  "w_AP" = "Proximity to local and public parks."
+  "w_AM" = "Proximity to community halls, recreation centers, and libraries.",
+  "w_AP" = "Proximity to public parks and open spaces."
 )
 
 sliderWithLayer <- function(inputId, label) {
@@ -658,7 +658,7 @@ ui <- bslib::page_navbar(
         sliderWithLayer(
           "w_AM",
           shiny::HTML(
-            "<i class='fa-solid fa-building' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Community Centers"
+            "<i class='fa-solid fa-landmark' style='width: 24px; text-align: center; margin-right: 4px; color: #233A57;'></i> Community Centers"
           )
         ),
         sliderWithLayer(
@@ -1549,7 +1549,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
         round(df$AM * MAX_H),
         "px;'></div><div style='font-size:12px; margin-top:2px; color:",
         c_am,
-        ";'><i class='fa-solid fa-building'></i></div></div>",
+        ";'><i class='fa-solid fa-landmark'></i></div></div>",
         "<div style='display:flex; flex-direction:column; align-items:center; width: 18px;'><div style='width:100%; border-radius:2px 2px 0 0; background:",
         c_ap,
         "; min-height: 1px; height:",
