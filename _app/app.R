@@ -870,9 +870,9 @@ server <- function(input, output, session) {
           shiny::tags$strong("Questions or Comments?"),
           shiny::br(),
           shiny::a(
-            href = "mailto:analytics@wfrc.utah.gov",
+            href = "mailto:christy.dahlberg@wfrc.utah.gov",
             shiny::icon("envelope"),
-            " WFRC Analytics Team",
+            " Christy Dahlberg",
             style = "color: #233A57; text-decoration: none;"
           )
         ),
