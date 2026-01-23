@@ -11,8 +11,151 @@ author:
 date: "2025-12-02"
 ---
 
-# [Step 1: Process Data Layers](1-prepare-data-layers.qmd)
+# Housing Accessibility To Opportunity (ATO) Calculator
 
-# [Step 2: Generate Isochrones](2-isochrone-generation.qmd)
+## Updated Methodology Report & Technical Documentation
 
-# [Step 3: Spatial Operations](3-spatial-operations.qmd)
+**Date:** January 23, 2026 **Prepared For:** Wasatch Front Regional Council (WFRC) **Version:** 2.0 (Rebuild)
+
+------------------------------------------------------------------------
+
+## 1. Introduction
+
+The **Housing Accessibility To Opportunity (ATO) Calculator** (formerly the Housing Suitability Tool) is a map-based planning instrument designed to assist housing and land use planning efforts.
+
+Consistent with the original intent of the Weber County Housing Affordability & Access Initiative, this tool serves as a conversation starter, visualization aid, and data-informed guide. It allows planners and stakeholders to identify locations that are most "suitable" for housing based on proximity to essential opportunities—employment, transportation, and community necessities.
+
+This updated methodology reflects a complete architectural rebuild of the tool. While the core planning principles remain consistent, the underlying data processing, spatial analysis, and scoring logic have been modernized to utilize high-performance computing methods, moving from simple static buffers to network-based accessibility analysis.
+
+------------------------------------------------------------------------
+
+## 2. Technical Architecture
+
+To handle the complexity of the Wasatch Front’s spatial data without sacrificing performance, the tool has migrated to a modern "Big Data" stack within the R ecosystem.
+
+### 2.1 The Core Stack
+
+-   **Language:** R (v4.5.2+)
+-   **Database Engine:** **DuckDB**. This allows for zero-copy data transfer and high-performance spatial joins without loading millions of geometries into system memory (RAM).
+-   **Data Format:** **GeoParquet**. A cloud-native file format that provides high compression and efficient input/output operations.
+-   **Network Analysis:** **OpenRouteService (ORS)**. Replaces simple geometric buffers with true street-network isochrones (travel time polygons).
+
+### 2.2 The Pipeline
+
+The analysis is executed via a four-stage Quarto sequence:
+
+1.  [**Data Acquisition:**](1-prepare-data-layers.qmd) Harvesting raw features from ArcGIS Online and local databases.
+2.  [**Preprocessing:**](2-process-layers.qmd) Generating H3 grids, ORS isochrones, and active transportation buffers.
+3.  [**Spatial Engine:**](3-spatial-operations.qmd) Performing massive spatial joins between the "Target Canvas" (Parcels/H3) and Amenity Layers using DuckDB.
+4.  [**Scoring & Normalization:**](4-ato-scoring.qmd) Converting raw metrics (minutes/distance) into normalized indices (0-1 scores).
+
+------------------------------------------------------------------------
+
+## 3. Data Sources and "The Canvas"
+
+The analysis is performed on two distinct "Canvases" (Target Geometries):
+
+1.  **Parcels:** High-resolution analysis using REMM (Real Estate Market Model) parcel geometries.
+2.  **H3 Hexagonal Grid:** A standardized hexagonal grid (Resolution `10`) used for regional visualization and gap analysis.
+
+### 3.1 Input Data Categories
+
+Data is aggregated from WFRC, UDOT, UTA, and State sources.
+
+| Category | Measure | Source Type | Details |
+|:-----------------|:-----------------|:-----------------|:-----------------|
+| **Places** | Centers (Metro, Urban, City, Neighborhood) | Polygon | Wasatch Choice Vision Centers |
+| **Employment** | Jobs by Auto / Jobs by Transit | TAZ Join | TAZ-level ATO data joined to parcels/hexagons |
+| **Transportation** | Transit Stops | Point | UTA Stops (Bus, TRAX, FrontRunner) |
+|  | Freeway Exits | Point | UDOT Interchange Locations |
+|  | Active Transport | Line | Bikeways (Trails, Buffered Lanes) |
+| **Necessities** | Childcare | Point | State Licensed Facilities |
+|  | Healthcare | Point | Licensed Healthcare Facilities |
+|  | Education | Point | K-12 Schools & Higher Ed |
+|  | Grocery | Point | SNAP-authorized retailers/Grocery |
+|  | Community Centers | Point | Libraries, Rec Centers |
+|  | Parks | Polygon | Public Parks & Open Spaces |
+
+------------------------------------------------------------------------
+
+## 4. Analytical Methodology
+
+A significant enhancement in Version 2.0 is the shift from *Euclidean Distance* (straight line) to *Network Travel Time* (isochrones).
+
+### 4.1 Isochrones (Time-Based Access)
+
+Instead of drawing a circle around a facility, the tool queries the **OpenRouteService API** to calculate the area reachable within specific time thresholds based on the actual street network. This accounts for barriers like rivers, highways, and disconnected streets.
+
+Different transport modes are applied to different amenities based on realistic use cases:
+
+-   **Walking Profile (foot-walking):** Applied to Grocery Stores, Elementary Schools, Local Transit Stops, Community Centers, and Childcare.
+-   **Biking Profile (cycling-regular):** Applied to Higher Education and Commuter Rail Stations.
+-   **Driving Profile (driving-car):** Applied to Healthcare Facilities and Freeway Exits.
+
+*Isochrones are generated for: `5`, `10`, `15`, `30`, and `60` minutes.*
+
+### 4.2 Buffers (Distance-Based Access)
+
+Certain linear features or large polygons still utilize distance buffers where network routing is less relevant or data is polygonal:
+
+-   **Active Transportation:** Buffered at `0.25`, `0.5`, `0.75`, `1.5`, and `3.0` miles.
+-   **Parks:** Uses a graded service area approach (`5` and `10`-minute walk access polygons provided by source, extended via buffering).
+
+### 4.3 Spatial Operations Engine
+
+Spatial enrichment is performed in **DuckDB**.
+
+1.  **Centroid Calculation:** For efficiency, Parcels and Hexagons are converted to centroids (points).
+2.  **Spatial Join:** These points are joined against the Isochrones and Buffers.
+3.  **Value Assignment:** If a parcel centroid falls within a `5`-minute isochrone, it is assigned a value of `300` (seconds). If it falls in multiple isochrones, the **minimum** time (fastest access) is retained.
+
+------------------------------------------------------------------------
+
+## 5. Scoring and Normalization
+
+The previous methodology used discrete scoring (e.g., "If inside `1/4` mile, score `10`; if inside `1/3` mile, score `5`"). The updated methodology uses **Continuous Normalization**. This prevents "cliffs" in the data where moving one foot across a boundary results in a massive score drop.
+
+### 5.1 Normalization Logic
+
+Raw values (seconds, meters, job counts) are converted to a standard `0.0` to `1.0` scale.
+
+#### A. Cost Metrics (Time/Distance)
+
+For metrics where "lower is better" (e.g., time to grocery store), we use **Inverse Normalization**. $$ Score = \frac{Global Minimum}{Value} $$
+
+-   *Logic:* If the closest grocery store in the region is 5 minutes away (Min), and a specific parcel is `5` minutes away, Score = `1.0`. If a parcel is `10` minutes away, Score = `0.5`.
+-   *Implementation:* See `score_and_export` function in `4-ato-scoring.qmd`.
+
+#### B. Benefit Metrics (Jobs/Opportunities)
+
+For metrics where "higher is better" (e.g., number of jobs accessible), we use **Linear Normalization**. $$ Score = \frac{Value}{Global Maximum} $$
+
+-   *Logic:* A location with access to 500k jobs (Max) gets a `1.0`. A location with 250k jobs gets `0.5`.
+
+### 5.2 Composite Scores
+
+Some factors are combinations of multiple data layers. These are calculated using a weighted maximum logic to ensure the "best available" option drives the score.
+
+-   **Transit Composite:** $$ Score = MAX(Local \times 0.5, Rapid \times 0.8, CRT \times 1.0) $$
+    -   *Intent:* Commuter Rail (CRT) is weighted higher than local bus, but having *any* access contributes to the score.
+-   **Education Composite:** $$ Score = MAX(K12 \times 0.8, HigherEd \times 1.0) $$
+-   **Active Transport Composite:** $$ Score = MAX(Class2 \times 0.5, Class1 \times 1.0, Trails \times 1.0) $$
+
+------------------------------------------------------------------------
+
+## 6. Version History: Changes from V1 (Weber PDF)
+
+The following table summarizes the key methodological shifts from the original Weber County PDF to the current ATO Calculator.
+
+| Feature | Original Methodology (PDF) | Updated Methodology (V2) | Rationale |
+|:-----------------|:-----------------|:-----------------|:-----------------|
+| **Analysis Platform** | Legacy ArcGIS / Python scripts | **R + DuckDB + GeoParquet** | Enables regional-scale analysis (millions of parcels) in minutes rather than hours. |
+| **Access Metric** | **Euclidean Buffers** (Radius) | **Network Isochrones** (Travel Time) | Buffers ignore rivers, highways, and lack of sidewalks. Isochrones reflect true travel capability. |
+| **Scoring Logic** | **Discrete Tiers** (`10`, `5`, `2.5`, `0`) | **Continuous Normalization** (`0.0` - `1.0`) | Continuous scoring provides nuance and eliminates arbitrary "cliffs" at buffer edges. |
+| **Data Granularity** | Parcel Centroids (assumed) | **Parcels & H3 Hexagons** | H3 grids allow for consistent visualization across empty/undeveloped land where parcels may be large or undefined. |
+| **Weighting** | High/Med/Low multipliers applied to raw integers | **User-Defined Sliders** (`0`-`1`) | The Shiny app allows real-time, fractional weighting by the end-user. |
+| **Land Use Filter** | Pre-processed filter | **Dynamic Client-Side Filter** | Users can toggle "Residential Only" or "All Land Uses" instantly in the browser. |
+
+### Note on "Centers"
+
+In the original PDF, "Centers" (Metro, Urban, City, Neighborhood) were scored as binary inclusions (`10` points if inside). In the updated application, Centers are currently treated as **Reference Layers** or overlays rather than direct components of the mathematical score, allowing the *components* of a center (jobs, transit, amenities) to drive the suitability score directly.
