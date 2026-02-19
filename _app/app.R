@@ -2180,6 +2180,10 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
               18,
               0.1
             ),
+            hover_options = list(
+              fill_extrusion_color = "yellow",
+              fill_extrusion_opacity = 1
+            ),
             tooltip = "tooltip_html" # REMOVE: from here
           ) |>
           # ADD THIS: Sets the tooltip column for hover
@@ -2201,6 +2205,10 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
               0.9,
               18,
               0.1
+            ),
+            hover_options = list(
+              fill_color = "yellow",
+              fill_opacity = 1
             ),
             tooltip = "tooltip_html" # REMOVE from here
           ) |>
