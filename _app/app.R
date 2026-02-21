@@ -1618,6 +1618,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
       center = c(-111.8910, 40.7608),
       zoom = 8,
       pitch = 0,
+      projection = "mercator",
       # preserveDrawingBuffer = TRUE
       canvasContextAttributes = list(
         preserveDrawingBuffer = TRUE
