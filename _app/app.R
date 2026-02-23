@@ -395,7 +395,7 @@ ui <- bslib::page_navbar(
   title = shiny::div(
     style = "display: flex; align-items: center;",
     shiny::img(src = "logo.png", style = "height:35px; margin-right:10px;"),
-    "Wasatch Front Housing ATO Calculator"
+    "Wasatch Front Housing Site Evaluator"
   ),
   theme = bslib::bs_theme(preset = "flatly"),
   header = tags$head(
@@ -446,7 +446,7 @@ ui <- bslib::page_navbar(
         }).then(canvas => {
           // 3. Create a fake link to trigger download
           var link = document.createElement('a');
-          link.download = 'ATO_Housing_Map.png';
+          link.download = 'HousingSiteEvaluator_Map.png';
           link.href = canvas.toDataURL('image/png');
           link.click();
         });
@@ -789,12 +789,12 @@ server <- function(input, output, session) {
         style = "margin-bottom: 15px;",
         shiny::img(src = "logo.png", style = "height: 60px; width: auto;")
       ),
-      shiny::h2("Housing ATO Calculator")
+      shiny::h2("Housing Site Evaluator")
     ),
     shiny::div(
       class = "splash-body",
       shiny::p(
-        "The Housing Access to Opportunities (ATO) Calculator is designed to assist housing and land use planning efforts across the Wasatch Front.",
+        "The Housing Site Evaluator is designed to assist housing and land use planning efforts across the Wasatch Front.",
         style = "font-size: 1.1rem; text-align: center; margin-bottom: 20px;"
       ),
       shiny::div(
@@ -1063,7 +1063,7 @@ library(dplyr)
 folder_path &lt;- "path/to/folder"
 
 # 1. Read the CSV
-df &lt;- read_csv(file.path(folder_path, "ATO_Filtered_Data.csv"))
+df &lt;- read_csv(file.path(folder_path, "HousingSiteEvaluator_Filtered_Data.csv"))
 
 # 2. Convert Strings to H3 Polygons
 sf_data &lt;- df |&gt;
@@ -1074,7 +1074,7 @@ sf_data &lt;- df |&gt;
   st_as_sf()
 
 # 3. Save as GeoJSON
-write_sf(sf_data, file.path(folder_path, "ATO_Filtered_Data.geojson"))
+write_sf(sf_data, file.path(folder_path, "HousingSiteEvaluator_Filtered_Data.geojson"))
 </code></pre>'
                 )
               )
@@ -1105,7 +1105,7 @@ import os
 folder_path = "path/to/folder"
 
 # 1. Read Data
-df = pd.read_csv(os.path.join(folder_path, "ATO_Filtered_Data.csv"))
+df = pd.read_csv(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.csv"))
 
 # 2. Create Geometry
 df["geometry"] = df["h3_index"].apply(lambda x: shape(h3.cells_to_geo([x])))
@@ -1114,7 +1114,7 @@ df["geometry"] = df["h3_index"].apply(lambda x: shape(h3.cells_to_geo([x])))
 gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
 
 # 4. Save as GeoJSON
-gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJSON")
+gdf.to_file(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.geojson"), driver="GeoJSON")
 </code></pre>'
                 )
               )
@@ -1457,7 +1457,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
       df$tooltip_html <- paste0(
         "<div style='font-family: sans-serif; padding: 12px; background: white; border-radius: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); min-width: 160px;'>",
         "<div style='margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:6px;'>",
-        "<div style='font-weight:bold; font-size:16px; color:#233A57;'>ATO Index: ",
+        "<div style='font-weight:bold; font-size:16px; color:#233A57;'>Site Index: ",
         # CHANGED: Use norm_score and force 2 decimals (0.00 - 1.00)
         sprintf("%.2f", df$norm_score),
         "</div>",
@@ -1632,7 +1632,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
       mapgl::add_screenshot_control(
         position = "top-left",
         hide_controls = FALSE,
-        filename = "ATO_Housing_Map",
+        filename = "HousingSiteEvaluator_Map",
         image_scale = 2
       ) |>
       # mapgl::add_draw_control(position = "top-left") |>
@@ -2236,7 +2236,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
       proxy |>
         mapgl::move_layer("lay_cities_line") |>
         mapgl::add_legend(
-          legend_title = "ATO Index",
+          legend_title = "Site Index",
           type = "categorical",
           values = legend_labels,
           colors = pal_colors,
@@ -2254,7 +2254,7 @@ gdf.to_file(os.path.join(folder_path, "ATO_Filtered_Data.geojson"), driver="GeoJ
   # --- 8. DATA DOWNLOAD HANDLER ---
   output$btn_dl_data <- shiny::downloadHandler(
     filename = function() {
-      "ATO_Filtered_Data.csv"
+      "HousingSiteEvaluator_Data.csv"
     },
     content = function(file) {
       shiny::req(input$comm_code)
