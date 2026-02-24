@@ -866,7 +866,9 @@ server <- function(input, output, session) {
       class = "splash-footer",
       shiny::fluidRow(
         shiny::column(
-          6,
+          width = 6,
+          offset = 3,
+          style = "text-align: center;",
           shiny::tags$strong("Questions or Comments?"),
           shiny::br(),
           shiny::a(
@@ -876,18 +878,18 @@ server <- function(input, output, session) {
             style = "color: #233A57; text-decoration: none;"
           )
         ),
-        shiny::column(
-          6,
-          style = "text-align: right;",
-          shiny::span("Built off the Weber Housing Location Explorer."),
-          shiny::br(),
-          shiny::a(
-            "View Methodology Story Map",
-            href = "http://bit.ly/weberhousing",
-            target = "_blank",
-            style = "color: #377EB8; font-weight: bold;"
-          )
-        )
+        # shiny::column(
+        #   6,
+        #   style = "text-align: right;",
+        #   shiny::span("Built off the Weber Housing Location Explorer."),
+        #   shiny::br(),
+        #   shiny::a(
+        #     "View Methodology Story Map",
+        #     href = "http://bit.ly/weberhousing",
+        #     target = "_blank",
+        #     style = "color: #377EB8; font-weight: bold;"
+        #   )
+        # )
       )
     )
   ))

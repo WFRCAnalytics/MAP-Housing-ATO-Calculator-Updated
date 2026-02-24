@@ -82,9 +82,9 @@ if (
 # Deploy
 rsconnect::deployApp(
   appDir = "_app",
-  appName = "Housing-ATO-Calculator",
-  appTitle = "Wasatch Front Housing ATO Calculator",
-  # appId = 16342069,
+  appName = "Housing-Site-Evaluator",
+  appTitle = "Wasatch Front Housing Site Evaluator",
+  # appId = 16745451,
   account = "wfrc",
   forceUpdate = TRUE
 )
