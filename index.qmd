@@ -11,7 +11,7 @@ author:
 date: "2025-12-02"
 ---
 
-# Housing Accessibility To Opportunity (ATO) Calculator
+# Housing Site Evaluator
 
 ## Updated Methodology Report & Technical Documentation
 
@@ -21,7 +21,7 @@ date: "2025-12-02"
 
 ## 1. Introduction
 
-The **Housing Accessibility To Opportunity (ATO) Calculator** (formerly the Housing Suitability Tool) is a map-based planning instrument designed to assist housing and land use planning efforts.
+The **Housing Site Evaluator** (formerly the Housing Suitability Tool) is a map-based planning instrument designed to assist housing and land use planning efforts.
 
 Consistent with the original intent of the Weber County Housing Affordability & Access Initiative, this tool serves as a conversation starter, visualization aid, and data-informed guide. It allows planners and stakeholders to identify locations that are most "suitable" for housing based on proximity to essential opportunities—employment, transportation, and community necessities.
 
@@ -145,7 +145,7 @@ Some factors are combinations of multiple data layers. These are calculated usin
 
 ## 6. Version History: Changes from V1 (Weber PDF)
 
-The following table summarizes the key methodological shifts from the original Weber County PDF to the current ATO Calculator.
+The following table summarizes the key methodological shifts from the original Weber County PDF to the current Site Evaluator.
 
 | Feature | Original Methodology (PDF) | Updated Methodology (V2) | Rationale |
 |:-----------------|:-----------------|:-----------------|:-----------------|
