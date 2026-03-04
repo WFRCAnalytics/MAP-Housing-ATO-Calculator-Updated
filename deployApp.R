@@ -82,9 +82,9 @@ if (
 # Deploy
 rsconnect::deployApp(
   appDir = "_app",
-  appName = "Housing-Site-Evaluator",
+  appName = "housing-site-evaluator",
   appTitle = "Wasatch Front Housing Site Evaluator",
-  # appId = 16745451,
+  # appId = 16816193,
   account = "wfrc",
   forceUpdate = TRUE
 )
