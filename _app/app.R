@@ -530,6 +530,72 @@ ui <- bslib::page_navbar(
         cursor: not-allowed !important;
         opacity: 0.65 !important;
       }
+
+      /* --- PINNED TOOLTIP: Hide native map tooltip when pinned --- */
+      .tooltip-pinned .maplibregl-popup {
+        display: none !important;
+      }
+    "
+    )),
+
+    # --- PINNED TOOLTIP JS: Mousemove bridge to sidebar ---
+    tags$script(HTML(
+      "
+      $(document).on('shiny:connected', function() {
+
+        function setupTooltipBridge() {
+          var widget = HTMLWidgets.find('#map');
+          if (!widget || !widget.getMap) {
+            setTimeout(setupTooltipBridge, 500);
+            return;
+          }
+          var map = widget.getMap();
+          if (!map) {
+            setTimeout(setupTooltipBridge, 500);
+            return;
+          }
+
+          var lastUpdate = 0;
+          var placeholder = '<div style=\"padding: 20px; text-align: center; color: #999; font-size: 0.9rem;\">' +
+                            '<i class=\"fa-solid fa-hand-pointer\"></i><br>Hover over a hexagon</div>';
+
+          map.on('mousemove', function(e) {
+            var mapEl = document.getElementById('map');
+            var container = document.getElementById('pinned-tooltip-content');
+            if (!mapEl || !container) return;
+            if (!mapEl.classList.contains('tooltip-pinned')) return;
+
+            // Throttle updates to ~50ms
+            var now = Date.now();
+            if (now - lastUpdate < 50) return;
+            lastUpdate = now;
+
+            var features = [];
+            ['h3_layer_2d', 'h3_layer_3d'].forEach(function(lid) {
+              try {
+                var f = map.queryRenderedFeatures(e.point, { layers: [lid] });
+                if (f && f.length) features = features.concat(f);
+              } catch(err) {}
+            });
+
+            if (features.length > 0 && features[0].properties.tooltip_html) {
+              container.innerHTML = features[0].properties.tooltip_html;
+            } else {
+              container.innerHTML = placeholder;
+            }
+          });
+
+          // Reset placeholder when cursor leaves map
+          map.getContainer().addEventListener('mouseleave', function() {
+            var container = document.getElementById('pinned-tooltip-content');
+            if (container && document.getElementById('map').classList.contains('tooltip-pinned')) {
+              container.innerHTML = placeholder;
+            }
+          });
+        }
+
+        setupTooltipBridge();
+      });
     "
     ))
   ),
@@ -690,7 +756,7 @@ ui <- bslib::page_navbar(
       "Limit to Opportunity Zones (OZ)",
       value = FALSE,
       status = "primary"
-    )
+    ),
   ),
   bslib::nav_panel(
     "",
@@ -750,10 +816,62 @@ ui <- bslib::page_navbar(
               status = "primary",
               inline = TRUE
             )
+          ),
+          shiny::div(
+            style = "white-space: nowrap;",
+            shinyWidgets::materialSwitch(
+              "pin_tooltip",
+              "Pin Tooltip",
+              value = FALSE,
+              status = "primary",
+              inline = TRUE
+            )
           )
         )
       ),
-      mapgl::maplibreOutput("map", height = "100%")
+      # --- MAP + PINNED TOOLTIP OVERLAY ---
+      shiny::div(
+        style = "position: relative; width: 100%; height: 100%; flex: 1;",
+        mapgl::maplibreOutput("map", height = "100%"),
+
+        # --- PINNED TOOLTIP: Bottom-left overlay (above scale bar) ---
+        shiny::div(
+          id = "pinned-tooltip-container",
+          style = paste0(
+            "display: none; ",
+            "position: absolute; bottom: 40px; left: 10px; z-index: 5; ",
+            "min-width: 160px; ",
+            "background: rgba(255, 255, 255, 0.92); ",
+            "backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); ",
+            "border: 1px solid rgba(0, 0, 0, 0.1); ",
+            "border-radius: 8px; ",
+            "box-shadow: 0 4px 15px rgba(0, 0, 0, 0.12); ",
+            "overflow: hidden; ",
+            "pointer-events: none;"
+          ),
+          # Header strip
+          shiny::div(
+            style = paste0(
+              "background: #233A57; color: white; ",
+              "padding: 5px 10px; ",
+              "font-family: 'Oswald', sans-serif; font-weight: 500; ",
+              "font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;"
+            ),
+            shiny::icon("thumbtack", style = "margin-right: 5px;"),
+            "Site Details"
+          ),
+          # Content area (updated by JS on mousemove)
+          shiny::div(
+            id = "pinned-tooltip-content",
+            shiny::div(
+              style = "padding: 15px; text-align: center; color: #999; font-size: 0.85rem;",
+              shiny::icon("hand-pointer"),
+              shiny::br(),
+              "Hover over a hexagon"
+            )
+          )
+        )
+      )
     )
   )
 )
@@ -1327,6 +1445,23 @@ gdf.to_file(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.geojso
     shinyjs::toggleState("z_mult", condition = input$map_3d)
   })
 
+  # --- PIN TOOLTIP TOGGLE HANDLER ---
+  shiny::observeEvent(input$pin_tooltip, {
+    if (input$pin_tooltip) {
+      # Pin: Hide native tooltip, show map overlay panel
+      shinyjs::runjs(
+        "document.getElementById('map').classList.add('tooltip-pinned');"
+      )
+      shinyjs::show("pinned-tooltip-container")
+    } else {
+      # Unpin: Restore native tooltip, hide map overlay panel
+      shinyjs::runjs(
+        "document.getElementById('map').classList.remove('tooltip-pinned');"
+      )
+      shinyjs::hide("pinned-tooltip-container")
+    }
+  })
+
   refresh_layer_control <- function(proxy, is_3d, ref_layers_list) {
     heatmap_id <- if (is_3d) "h3_layer_3d" else "h3_layer_2d"
     # GROUPED LAYERS
@@ -1377,9 +1512,7 @@ gdf.to_file(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.geojso
     df <- ds_h3 |>
       dplyr::filter(CommCode %in% !!input$comm_code)
 
-    if (input$oz_filter) {
-      df <- df |> dplyr::filter(OZ == 1)
-    }
+    # --- OZ Filter is now client-side via set_filter() (see apply_h3_filters) ---
 
     # Execute the query and load to memory
     df <- df |>
@@ -1567,24 +1700,42 @@ gdf.to_file(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.geojso
     return(df)
   })
 
-  # Add Client sided filter to filter land use
-  shiny::observeEvent(input$land_use_group, {
-    # Get the codes for the selected group (e.g., "Residential" -> c("SF", "MF"))
-    selected_codes <- unique(unlist(lu_mappings[input$land_use_group]))
+  # --- COMBINED CLIENT-SIDE FILTER HELPER (Land Use + OZ) ---
+  apply_h3_filters <- function(land_use_group, oz_filter) {
+    filters <- list()
 
-    # Create a MapLibre Filter Expression: ["in", "BC", "SF", "MF"]
-    # The "in" operator checks if the property "BC" matches any value in the list
-    filter_expr <- c(list("in", "BC"), as.list(selected_codes))
-
-    # If "All Land Uses" is selected (or nothing), clear the filter
-    if (input$land_use_group == "All Land Uses") {
-      filter_expr <- NULL
+    # Land use filter
+    if (land_use_group != "All Land Uses") {
+      selected_codes <- unique(unlist(lu_mappings[land_use_group]))
+      filters <- c(filters, list(c(list("in", "BC"), as.list(selected_codes))))
     }
 
-    # Apply Instant Filter
+    # Opportunity Zone filter
+    if (oz_filter) {
+      filters <- c(filters, list(list("==", "OZ", 1)))
+    }
+
+    # Combine: no filters -> NULL, one -> use it, multiple -> ["all", ...]
+    filter_expr <- if (length(filters) == 0) {
+      NULL
+    } else if (length(filters) == 1) {
+      filters[[1]]
+    } else {
+      c(list("all"), filters)
+    }
+
     mapgl::maplibre_proxy("map") |>
       mapgl::set_filter("h3_layer_2d", filter_expr) |>
       mapgl::set_filter("h3_layer_3d", filter_expr)
+  }
+
+  # Both observers call the same helper to avoid overwriting each other
+  shiny::observeEvent(input$land_use_group, {
+    apply_h3_filters(input$land_use_group, input$oz_filter)
+  })
+
+  shiny::observeEvent(input$oz_filter, {
+    apply_h3_filters(input$land_use_group, input$oz_filter)
   })
 
   # --- HELPER: CLIENT-SIDE EXPRESSION (For Instant Coloring) ---
