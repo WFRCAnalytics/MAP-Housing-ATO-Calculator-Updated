@@ -314,9 +314,9 @@ gdb_path <- here::here(dirs$results, "HousingSuitability_Centers202512.gdb")
 
 # Define inputs: Layer Name -> File Path
 to_export <- list(
-  "Parcels_Enriched" = fp_parcels_enriched,
-  "H3_Enriched" = fp_h3_enriched,
-  "Parcels_Scored" = fp_parcels_scored,
+  # "Parcels_Enriched" = fp_parcels_enriched,
+  # "H3_Enriched" = fp_h3_enriched,
+  # "Parcels_Scored" = fp_parcels_scored,
   "H3_Scored" = fp_h3_scored
 )
 

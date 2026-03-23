@@ -1259,7 +1259,7 @@ gdf.to_file(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.geojso
                 # The URL
                 shiny::div(
                   style = "background: #e9ecef; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; word-break: break-all; margin-bottom: 15px; color: #333;",
-                  "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/HousingSuitability_Centers202512_gdb/FeatureServer/2"
+                  "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/HousingSuitability_Centers202512_gdb/FeatureServer/0"
                 ),
 
                 shiny::hr(),
