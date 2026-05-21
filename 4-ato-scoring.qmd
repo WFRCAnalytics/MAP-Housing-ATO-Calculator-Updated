@@ -55,7 +55,6 @@ renv::restore()
 #| label: setup-libraries
 #| message: false
 #| warning: false
-
 library(dplyr)
 library(DBI)
 library(duckdb)
@@ -71,7 +70,6 @@ library(fs)
 
 ```{r}
 #| label: setup-dirs
-
 dirs <- list(
   results = here::here("_output")
 )
@@ -89,7 +87,6 @@ fp_h3_scored <- here::here(dirs$results, "h3_scored.parquet")
 
 ```{r}
 #| label: setup-crs
-
 # Projection Constants
 CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
@@ -123,8 +120,13 @@ This function encapsulates the entire scoring workflow so it can be applied iden
 
 ```{r}
 #| label: func-scoring
-
-score_and_export <- function(conn, input_path, output_path, table_name) {
+score_and_export <- function(
+  conn,
+  input_path,
+  output_path,
+  table_name,
+  keep_in_memory = FALSE
+) {
   message(glue::glue("📊 Scoring {table_name}..."))
 
   # 1. Load Data into View (Zero Copy)
@@ -260,24 +262,44 @@ score_and_export <- function(conn, input_path, output_path, table_name) {
 
   # The CTE 'scored_base' normalizes the data.
   # The outer SELECT calculates composites on those normalized values.
-  query <- glue::glue(
+  scored_cte <- glue::glue(
     "
-    COPY (
-      WITH scored_base AS (
-        SELECT
-          {select_static},
-          {select_scores}
-        FROM raw_{table_name}
-      )
+    WITH scored_base AS (
       SELECT
-        *
-        {select_comps}
-      FROM scored_base
-    ) TO '{output_path}' (FORMAT PARQUET)
+        {select_static},
+        {select_scores}
+      FROM raw_{table_name}
+    )
+    SELECT
+      *
+      {select_comps}
+    FROM scored_base
   "
   )
 
-  DBI::dbExecute(conn, query)
+  if (keep_in_memory) {
+    # Materialize into a DuckDB table so the sync step can read from memory
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "CREATE OR REPLACE TABLE scored_{table_name} AS ({scored_cte})"
+      )
+    )
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "COPY scored_{table_name} TO '{output_path}' (FORMAT PARQUET)"
+      )
+    )
+  } else {
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "COPY ({scored_cte}) TO '{output_path}' (FORMAT PARQUET)"
+      )
+    )
+  }
+
   DBI::dbExecute(conn, glue::glue("DROP VIEW raw_{table_name}"))
 }
 ```
@@ -300,14 +322,19 @@ score_and_export(
 
 ```{r}
 #| label: run-h3
-score_and_export(conn, fp_h3_enriched, fp_h3_scored, "targets_h3")
+score_and_export(
+  conn,
+  fp_h3_enriched,
+  fp_h3_scored,
+  "targets_h3",
+  keep_in_memory = TRUE
+)
 ```
 
 ### Export to GDB
 
 ```{r}
 #| label: export-gdb
-
 message("🌍 Converting Parquets to File Geodatabase...")
 
 # 1. Configuration
@@ -349,7 +376,6 @@ message("✅ GDB Export Complete!")
 
 ```{r}
 #| label: zip-gdb
-
 message("📦 Compressing GDB to Zip...")
 
 # Define Paths
@@ -373,7 +399,6 @@ Check a few records to ensure scores make sense (e.g., scores shouldn't be > 1.0
 ```{r}
 #| label: validate
 #| echo: false
-
 arrow::open_dataset(fp_parcels_scored) |> head() |> collect()
 ```
 
@@ -383,42 +408,77 @@ Copy scored H3 data to both the Shiny app (`_app/data/`) and the Vite app (`vite
 
 ```{r}
 #| label: sync-app-data
-
 message("📂 Syncing scored data to app directories...")
 
 # --- Paths ---
-src_h3        <- fp_h3_scored
-dst_h3_shiny  <- here::here("_app",     "data", "h3_scored")
-dst_h3_vite   <- here::here("vite-app", "public", "data", "h3_scored")
+# H3 data is read from the in-memory DuckDB table (scored_targets_h3),
+# populated by score_and_export(..., keep_in_memory = TRUE).
+h3_table <- "scored_targets_h3"
 
-src_bnd       <- here::here("_data", "processed", "base_layers", "Analysis_Boundary_WFRC_MAG.parquet")
-dst_bnd_shiny <- here::here("_app",     "data", "Analysis_Boundary_WFRC_MAG.parquet")
-dst_bnd_vite  <- here::here("vite-app", "public", "data", "Analysis_Boundary_WFRC_MAG.parquet")
+dst_h3_shiny <- here::here("_app", "data", "h3_scored")
+dst_h3_vite <- here::here("vite-app", "public", "data", "h3_scored")
 
-mun_api_url   <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
-dst_mun_shiny <- here::here("_app",     "data", "UtahMunicipalBoundaries.parquet")
-dst_mun_vite  <- here::here("vite-app", "public", "data", "UtahMunicipalBoundaries.parquet")
+src_bnd <- here::here(
+  "_data",
+  "processed",
+  "base_layers",
+  "Analysis_Boundary_WFRC_MAG.parquet"
+)
+dst_bnd_shiny <- here::here(
+  "_app",
+  "data",
+  "Analysis_Boundary_WFRC_MAG.parquet"
+)
+dst_bnd_vite <- here::here(
+  "vite-app",
+  "public",
+  "data",
+  "Analysis_Boundary_WFRC_MAG.parquet"
+)
 
-write_h3_partitioned <- function(src, dst) {
-  if (fs::dir_exists(dst)) fs::dir_delete(dst)
-  arrow::open_dataset(src) |>
-    dplyr::filter(!is.na(CommCode)) |>
-    sf::st_as_sf(crs = 4326) |>
+mun_api_url <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
+dst_mun_shiny <- here::here("_app", "data", "UtahMunicipalBoundaries.parquet")
+dst_mun_vite <- here::here(
+  "vite-app",
+  "public",
+  "data",
+  "UtahMunicipalBoundaries.parquet"
+)
+
+write_h3_partitioned <- function(conn, table_name, dst) {
+  if (fs::dir_exists(dst)) {
+    fs::dir_delete(dst)
+  }
+  DBI::dbGetQuery(
+    conn,
+    glue::glue(
+      "SELECT * EXCLUDE geometry, ST_AsText(geometry) AS geometry
+       FROM {table_name}
+       WHERE CommCode IS NOT NULL"
+    )
+  ) |>
+    sf::st_as_sf(wkt = "geometry", crs = 4326) |>
     arrow::write_dataset(path = dst, partitioning = "CommCode")
   message(glue::glue("  ✅ H3 scored → {dst}"))
 }
 
-write_municipalities <- function(h3_dst, out_path) {
-  mun_codes <- arrow::open_dataset(h3_dst) |>
-    dplyr::select(CommCode) |>
-    dplyr::distinct() |>
-    dplyr::filter(!is.na(CommCode)) |>
-    dplyr::collect() |>
-    dplyr::pull(CommCode)
+write_municipalities <- function(conn, table_name, out_path) {
+  mun_codes <- DBI::dbGetQuery(
+    conn,
+    glue::glue(
+      "SELECT DISTINCT CommCode FROM {table_name} WHERE CommCode IS NOT NULL"
+    )
+  )$CommCode
 
-  where_clause <- paste0("UGRCODE IN ('", paste(mun_codes, collapse = "','"), "')")
+  where_clause <- paste0(
+    "UGRCODE IN ('",
+    paste(mun_codes, collapse = "','"),
+    "')"
+  )
   query_url <- URLencode(paste0(
-    mun_api_url, "/query?where=", where_clause,
+    mun_api_url,
+    "/query?where=",
+    where_clause,
     "&outFields=UGRCODE,NAME&f=geojson&outSR=4326"
   ))
   sf::st_read(query_url, quiet = TRUE) |>
@@ -427,15 +487,16 @@ write_municipalities <- function(h3_dst, out_path) {
   message(glue::glue("  ✅ Municipalities → {out_path}"))
 }
 
-# Ensure vite-app public/data/ exists
+# Ensure destination directories exist
+fs::dir_create(here::here("_app", "data"))
 fs::dir_create(here::here("vite-app", "public", "data"))
 
-# 1. H3 scored partitions -> both apps
-write_h3_partitioned(src_h3, dst_h3_shiny)
-write_h3_partitioned(src_h3, dst_h3_vite)
+# 1. H3 scored partitions -> both apps (from DuckDB memory, no disk re-read)
+write_h3_partitioned(conn, h3_table, dst_h3_shiny)
+write_h3_partitioned(conn, h3_table, dst_h3_vite)
 
-# 2. Municipal boundaries -> both apps (download once, copy)
-write_municipalities(dst_h3_shiny, dst_mun_shiny)
+# 2. Municipal boundaries -> both apps (CommCodes from DuckDB, download once, copy)
+write_municipalities(conn, h3_table, dst_mun_shiny)
 fs::file_copy(dst_mun_shiny, dst_mun_vite, overwrite = TRUE)
 
 # 3. Regional boundary -> both apps
