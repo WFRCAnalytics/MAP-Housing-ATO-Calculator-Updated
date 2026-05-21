@@ -13,7 +13,23 @@ async function getConn() {
   }
   const worker = new Worker(EH.mainWorker)
   const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING), worker)
-  await db.instantiate(EH.mainModule)
+  try {
+    await db.instantiate(EH.mainModule)
+  } catch (e) {
+    // Browser extensions can intercept the wasm fetch and change its MIME type,
+    // breaking WebAssembly.instantiateStreaming(). Workaround: fetch as ArrayBuffer,
+    // re-wrap in a Blob with the correct type, and use a blob URL instead.
+    // Blob URLs are not interceptable by extensions.
+    if (!(e instanceof TypeError) || !e.message.includes('MIME type')) throw e
+    const resp = await fetch(EH.mainModule)
+    const buf = await resp.arrayBuffer()
+    const blobUrl = URL.createObjectURL(new Blob([buf], { type: 'application/wasm' }))
+    try {
+      await db.instantiate(blobUrl)
+    } finally {
+      URL.revokeObjectURL(blobUrl)
+    }
+  }
   _conn = await db.connect()
   return _conn
 }
