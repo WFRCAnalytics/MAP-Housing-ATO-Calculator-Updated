@@ -12,9 +12,6 @@
 #' @param crs Target EPSG code (default `CRS_WGS`).
 #' @param partitioning Character vector of columns to partition by (e.g. "co_name").
 #' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
-#' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}
-#'   (e.g., \code{compression = "snappy"}, \code{hive_style = FALSE}).
-#'
 #' @return A string containing the full path to the saved file or directory.
 #' @export
 download_feature_layer <- function(
@@ -24,11 +21,10 @@ download_feature_layer <- function(
   where = "1=1",
   crs = CRS_WGS,
   partitioning = NULL,
-  overwrite = FALSE,
-  ...
+  overwrite = FALSE
 ) {
   # 1. Dependency Check
-  required_pkgs <- c("arcgislayers", "janitor", "arrow", "sf", "dplyr")
+  required_pkgs <- c("arcgislayers", "janitor", "sf", "dplyr", "duckdb", "DBI", "glue")
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
   ]
@@ -70,31 +66,40 @@ download_feature_layer <- function(
       # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.
       sf::st_geometry(sf_obj) <- "geometry"
 
-      # Prepare GeoParquet
-      arrow_table <- as_geoparquet_table(sf_obj)
+      # Write via DuckDB — produces null CRS in GeoParquet metadata (DuckDB 1.5 compatible)
+      con_write <- DBI::dbConnect(duckdb::duckdb())
+      on.exit(DBI::dbDisconnect(con_write, shutdown = TRUE), add = TRUE)
+      DBI::dbExecute(con_write, "INSTALL spatial; LOAD spatial;")
+      DBI::dbExecute(con_write, "SET geometry_always_xy = true")
 
-      # 6. Write (Conditional with Ellipsis)
+      df_out <- sf::st_drop_geometry(sf_obj)
+      df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(sf_obj))
+      duckdb::duckdb_register(con_write, "_write_tmp", df_out)
+
       if (!is.null(partitioning)) {
-        arrow::write_dataset(
-          dataset = arrow_table,
-          path = out_fp,
-          format = "parquet",
-          partitioning = partitioning,
-          existing_data_behavior = "overwrite",
-          ...
+        if (dir.exists(out_fp)) unlink(out_fp, recursive = TRUE)
+        dir.create(out_fp, recursive = TRUE)
+        partition_cols <- paste(partitioning, collapse = ", ")
+        DBI::dbExecute(
+          con_write,
+          glue::glue(
+            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{out_fp}' (FORMAT PARQUET, PARTITION_BY ({partition_cols}))"
+          )
         )
         message(paste("💾 Saved Partitioned Dataset:", out_fp))
       } else {
-        arrow::write_parquet(
-          x = arrow_table,
-          sink = out_fp,
-          ...
+        DBI::dbExecute(
+          con_write,
+          glue::glue(
+            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{out_fp}' (FORMAT PARQUET)"
+          )
         )
         message(paste("💾 Saved Parquet File:", out_fp))
       }
 
-      # MEMORY OPTIMIZATION
-      rm(sf_obj, arrow_table)
+      duckdb::duckdb_unregister(con_write, "_write_tmp")
+
+      rm(sf_obj, df_out)
       gc()
 
       return(out_fp)

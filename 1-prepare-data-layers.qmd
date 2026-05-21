@@ -98,7 +98,6 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
-source(here::here(dirs$source, "as_geoparquet_table.R")) # Write Geoparquet metadata
 source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
 source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
@@ -419,18 +418,29 @@ fp_ato_csv <- here::here(dirs$raw, "WFv920_OY_2023_Access_to_Opportunity.csv")
 if (file.exists(fp_taz_ato)) {
   message("✅ TAZ ATO layer already exists: ", fp_taz_ato)
 } else {
-  # Single Pipeline: Read TAZ -> Clean -> Join(Read CSV -> Clean) -> Save
-  arrow::read_parquet(fp_wf_taz) |> # Read LHS (Geometry) to memory
-    sf::st_as_sf(crs = CRS_WGS) |> # Convert to SF (EPSG:4326)
-    janitor::clean_names() |> # Clean LHS names
+  # Read TAZ + join CSV
+  sf_joined <- arrow::read_parquet(fp_wf_taz) |>
+    sf::st_as_sf(crs = CRS_WGS) |>
+    janitor::clean_names() |>
     dplyr::left_join(
-      # Nested Pipeline: Read RHS (Attributes) -> Clean Names
       arrow::read_csv_arrow(fp_ato_csv) |>
-        janitor::clean_names(),
+        janitor::clean_names() |>
+        dplyr::collect(),
       by = "co_tazid"
-    ) |>
-    as_geoparquet_table() |> # Convert back to Arrow with Metadata
-    arrow::write_parquet(fp_taz_ato)
+    )
+
+  # Write via DuckDB (null CRS, DuckDB 1.5 compatible)
+  con_ato <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(con_ato, shutdown = TRUE))
+  DBI::dbExecute(con_ato, "INSTALL spatial; LOAD spatial;")
+  DBI::dbExecute(con_ato, "SET geometry_always_xy = true")
+  df_out <- sf::st_drop_geometry(sf_joined)
+  df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(sf_joined))
+  duckdb::duckdb_register(con_ato, "_write_tmp", df_out)
+  DBI::dbExecute(con_ato, glue::glue(
+    "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{fp_taz_ato}' (FORMAT PARQUET)"
+  ))
+  duckdb::duckdb_unregister(con_ato, "_write_tmp")
 
   message("✅ Joined and saved to: ", fp_taz_ato)
 }

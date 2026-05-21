@@ -163,7 +163,6 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 
-source(here::here(dirs$source, "as_geoparquet_table.R")) # Write Geoparquet metadata
 source(here::here(dirs$source, "process_isochrones.R")) # Generate isochrones using OpenRouteService API
 source(here::here(dirs$source, "create_buffer.R")) # Generate equidistant buffers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
