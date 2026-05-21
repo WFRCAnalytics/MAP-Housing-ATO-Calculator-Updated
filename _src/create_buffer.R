@@ -14,7 +14,7 @@ create_buffer <- function(
   processed_dir = dirs$processed
 ) {
   # 1. Dependency Check
-  required_pkgs <- c("duckdb", "duckspatial", "glue", "DBI")
+  required_pkgs <- c("duckdb", "glue", "DBI")
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
   ]
@@ -42,7 +42,8 @@ create_buffer <- function(
 
   tryCatch(
     {
-      duckspatial::ddbs_load(con)
+      DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
+      DBI::dbExecute(con, "SET geometry_always_xy = true")
 
       query <- glue::glue(
         "

@@ -18,36 +18,7 @@ execute:
 ## Install and Load Libraries
 
 ```r
-install.packages("pak") # https://github.com/r-lib/pak
-
-pak::pak(
-  c(
-    "tidyverse",   # https://github.com/tidyverse/tidyverse/
-    "sf",          # https://github.com/r-spatial/sf/
-    "openrouteservice", # https://github.com/GIScience/openrouteservice-r/
-    "DBI",         # https://github.com/r-dbi/DBI/
-    "duckdb",      # https://github.com/duckdb/duckdb-r/
-    "duckplyr",    # https://github.com/tidyverse/duckplyr/
-    "duckspatial", # https://github.com/Cidree/duckspatial/
-    "arrow",       # https://github.com/apache/arrow/tree/main/r
-    "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
-    "janitor",     # https://github.com/sfirke/janitor/
-    "mapgl",       # https://github.com/walkerke/mapgl/
-    "here",        # https://github.com/r-lib/here/
-    "fs",          # https://github.com/r-lib/fs/
-    "zip"          # https://github.com/r-lib/zip
-    ),
-    dependencies = TRUE
-  )
-```
-
-OR,
-
-```r
-install.packages("pak") # https://github.com/r-lib/pak
-
-pak::pak("renv", dependencies = TRUE) # https://github.com/rstudio/renv/
-
+install.packages("renv")
 renv::restore()
 ```
 
@@ -62,8 +33,6 @@ library(sf)
 library(openrouteservice)
 library(DBI)
 library(duckdb)
-library(duckplyr)
-library(duckspatial)
 library(arrow)
 library(geoarrow)
 library(janitor)
@@ -204,70 +173,6 @@ source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files 
 
 ## Set Regional Boundary
 
-```r
-#| label: prep-boundary
-
-# -----------------------------------------------------------------------------
-# DOESN'T WORK CURRENTLY BECAUSE {duckspatial} IS STILL UNDER DEVELOPMENT
-# -----------------------------------------------------------------------------
-
-fp_regional_bound <- here::here(sub_dirs$base, "RegionalBoundaryComponents.parquet")
-fp_boundary_wftdm <- here::here(sub_dirs$base, "Analysis_Boundary_WFRC_MAG.parquet")
-
-if (file.exists(fp_boundary_wftdm)) {
-  message("✅ Analysis boundary already exists: ", fp_boundary_wftdm)
-} else {
-
-  # 1. Connection Management (duckspatial)
-  # Uses ddbs_create_conn for standardized in-memory DB setup
-  conn <- duckspatial::ddbs_create_conn()
-  on.exit(duckspatial::ddbs_stop_conn(conn), add = TRUE)
-
-  # 2. Extension Management (duckspatial)
-  duckspatial::ddbs_load(conn)
-  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
-
-  # 3. Define Lazy Source (duckplyr)
-  # duckplyr works seamlessly with DuckDB connections
-  tbl_boundary <- dplyr::tbl(conn, paste0("read_parquet('", fp_regional_bound, "')"))
-
-  # 4. Build Pipeline
-  processed_boundary <- tbl_boundary |>
-
-    # Filter using duckplyr (optimized translation)
-    duckplyr::filter(plan_org %in% c('MAG MPO', 'WFRC MPO')) |>
-
-    # A. Initial Dissolve
-    # MISSING FUNCTION: ddbs_union_agg()
-    duckplyr::summarise(geom = ddbs_union_agg(geometry)) |>
-
-    # B. Explode MultiPolygons
-    # MISSING FUNCTION: ddbs_dump() returns a list/struct
-    duckplyr::mutate(parts = ddbs_dump(geom)) |>
-
-    # Unnest is a tidyr verb, but handled by dbplyr/duckplyr backend
-    tidyr::unnest_longer(parts) |>
-
-    # C. Remove Holes (ExteriorRing -> MakePolygon)
-    # MISSING FUNCTIONS: ddbs_exterior_ring(), ddbs_make_polygon()
-    duckplyr::mutate(
-      # Accessing struct field '.geom' from the dump result
-      outer_ring = ddbs_exterior_ring(parts$geom),
-      clean_poly = ddbs_make_polygon(outer_ring)
-    ) |>
-
-    # D. Re-Aggregate and Convert to WKB
-    # MISSING FUNCTIONS: ddbs_union_agg(), ddbs_as_wkb()
-    duckplyr::summarise(geometry = ddbs_as_wkb(ddbs_union_agg(clean_poly)))
-
-  # 5. Execute & Write (Zero-Copy)
-  # We convert the duckplyr lazy object to SQL and execute COPY
-  query_sql <- dbplyr::sql_render(processed_boundary)
-  DBI::dbExecute(conn, glue::glue("COPY ({query_sql}) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)"))
-
-  message("✅ Analysis boundary created (Duck-Native): ", fp_boundary_wftdm)
-}
-```
 
 ```{r}
 #| label: prep-boundary
@@ -358,63 +263,6 @@ arrow::open_dataset(fp_boundary_wftdm) |>
 
 ## Generate H3 Hexagons
 
-```r
-#| label: gen-h3-grid
-
-# -----------------------------------------------------------------------------
-# DOESN'T WORK CURRENTLY BECAUSE {duckspatial} IS STILL UNDER DEVELOPMENT
-# -----------------------------------------------------------------------------
-
-fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
-H3_RES     <- 11
-
-if (file.exists(fp_h3_grid)) {
-  message("✅ H3 Grid already exists: ", fp_h3_grid)
-} else {
-
-  conn <- duckspatial::ddbs_create_conn()
-  on.exit(duckspatial::ddbs_stop_conn(conn), add = TRUE)
-
-  duckspatial::ddbs_load(conn)
-  DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
-  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
-
-  # Define Lazy Table from the cleaned boundary
-  tbl_clean_boundary <- dplyr::tbl(conn, paste0("read_parquet('", fp_boundary_wftdm, "')"))
-
-  h3_grid <- tbl_clean_boundary |>
-
-    # A. Dump MultiPolygons (Using hypothetical wrapper)
-    # MISSING FUNCTION: ddbs_dump()
-    duckplyr::mutate(parts = ddbs_dump(geometry)) |>
-    tidyr::unnest_longer(parts) |>
-
-    # B. Convert to WKT (Using hypothetical wrapper)
-    # MISSING FUNCTION: ddbs_as_text()
-    duckplyr::mutate(wkt_geom = ddbs_as_text(parts$geom)) |>
-
-    # C. H3 Polyfill (Manual SQL as requested)
-    # DuckDB's H3 extension functions are not standard OGC, so we inject SQL
-    duckplyr::mutate(
-      h3_indices = dbplyr::sql(glue::glue("h3_polygon_wkt_to_cells(wkt_geom, {H3_RES})"))
-    ) |>
-    tidyr::unnest_longer(h3_indices) |>
-
-    # D. Convert H3 Index back to Geometry (Manual SQL)
-    duckplyr::transmute(
-      h3_index = h3_indices,
-      geometry = dbplyr::sql("h3_cell_to_boundary_wkb(h3_indices)")
-    ) |>
-
-    duckplyr::distinct()
-
-  # Write Result
-  query_h3_sql <- dbplyr::sql_render(h3_grid)
-  DBI::dbExecute(conn, glue::glue("COPY ({query_h3_sql}) TO '{fp_h3_grid}' (FORMAT PARQUET)"))
-
-  message("✅ H3 Grid saved to: ", fp_h3_grid)
-}
-```
 
 ```{r}
 #| label: gen-h3-grid

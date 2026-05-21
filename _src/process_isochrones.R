@@ -118,6 +118,7 @@ process_isochrones <- function(
   tryCatch(
     {
       DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+      DBI::dbExecute(conn, "SET geometry_always_xy = true")
       # DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 
       # --- QUERY CONSTRUCTION ---
@@ -263,14 +264,20 @@ process_isochrones <- function(
           sf::st_crs(final_iso) <- 4326
         }
 
-        arrow_table <- as_geoparquet_table(final_iso)
-
-        arrow::write_parquet(arrow_table, out_fp)
+        # Write via DuckDB so the output uses null CRS (DuckDB-readable) instead
+        # of the WKT-string CRS that geoarrow writes, which DuckDB 1.5 rejects.
+        df_out <- sf::st_drop_geometry(final_iso)
+        df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(final_iso))
+        duckdb::duckdb_register(conn, "_iso_write", df_out)
+        DBI::dbExecute(
+          conn,
+          glue::glue(
+            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _iso_write) TO '{out_fp}' (FORMAT PARQUET)"
+          )
+        )
+        duckdb::duckdb_unregister(conn, "_iso_write")
         message(paste("💾 Saved:", out_fp))
         return(out_fp)
-
-        rm(final_iso, arrow_table)
-        gc()
       } else {
         warning("❌ No isochrones generated.")
         return(NULL)
