@@ -1,7 +1,11 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: Arial, 'Open Sans', sans-serif;
+  font-family: Lato, Arial, 'Open Sans', sans-serif;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #212529;
   height: 100vh;
   overflow: hidden;
 }
@@ -48,6 +52,7 @@ h1, h2, h3, h4, h5 {
   flex-direction: column;
   background: white;
   border-right: 1px solid #dee2e6;
+  font-family: 'Open Sans', sans-serif;
 }
 
 /* Step 1 + city picker live here — outside the scroll container so the
@@ -119,7 +124,7 @@ h1, h2, h3, h4, h5 {
   width: 100%; padding: 6px 10px; border: 1px solid #ced4da;
   border-radius: 4px; font-size: 0.9rem; color: #333;
   background: white; cursor: pointer; margin-bottom: 10px;
-  font-family: Arial, 'Open Sans', sans-serif;
+  font-family: 'Open Sans', sans-serif;
 }
 .lu-select:focus { outline: none; border-color: #5a87c6; box-shadow: 0 0 0 2px rgba(90,135,198,0.2); }
 
@@ -142,22 +147,22 @@ h1, h2, h3, h4, h5 {
 #map-legend {
   position: absolute; bottom: 30px; right: 10px; z-index: 5;
   background: rgba(255,255,255,0.8); border: 1px solid #cccccc;
-  border-radius: 4px; padding: 10px 14px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.2); pointer-events: none;
+  border-radius: 10px; padding: 10px 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.2); pointer-events: none;
 }
 .legend-title {
   font-family: 'Oswald', sans-serif; font-weight: 500; color: #333;
-  font-size: 0.85rem; margin-bottom: 8px;
+  font-size: 14px; line-height: 20px; margin-bottom: 10px; margin-top: 0;
 }
-.legend-items { display: flex; flex-direction: column; gap: 4px; }
-.legend-item { display: flex; align-items: center; gap: 8px; }
-.legend-swatch { width: 20px; height: 12px; border-radius: 2px; flex-shrink: 0; }
-.legend-label { font-family: 'Open Sans', Arial, sans-serif; font-size: 0.8rem; color: #333; }
+.legend-items { display: flex; flex-direction: column; gap: 5px; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 20px; height: 20px; border-radius: 2px; flex-shrink: 0; }
+.legend-label { font-family: 'Open Sans', Arial, sans-serif; font-size: 14px; color: #333; }
 
 /* ── Slider rows ── */
 .slider-row { margin-bottom: 6px; }
 .slider-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
-.slider-label { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: #444; font-family: 'Oswald', sans-serif; font-weight: 500; }
+.slider-label { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: #444; font-family: 'Oswald', sans-serif; font-weight: 500; text-transform: uppercase; }
 .slider-label i.fa-solid { width: 18px; text-align: center; color: #233A57; font-size: 0.9rem; }
 .help-icon { color: #9aa5b1; cursor: help; font-size: 0.85rem; }
 
@@ -193,7 +198,7 @@ h1, h2, h3, h4, h5 {
 }
 #global-tooltip.visible { opacity: 1; visibility: visible; }
 .layer-toggle-btn {
-  color: #ccc; cursor: pointer; font-size: 1rem; transition: color 0.2s;
+  color: #ccc; cursor: pointer; font-size: 1.1rem; transition: color 0.2s;
   padding: 0 2px; border: none; background: none; line-height: 1;
 }
 .layer-toggle-btn:hover { color: #5a87c6; }
@@ -236,7 +241,7 @@ input[type="range"] { width: 100%; accent-color: #2c3e50; height: 4px; cursor: p
 /* ── Map area ── */
 #map-area { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 #map-controls-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: white; border-bottom: 1px solid #dee2e6; flex-shrink: 0; flex-wrap: wrap; }
-.ctrl-label { font-family: 'Oswald', sans-serif; font-weight: 700; color: #233A57; font-size: 0.9rem; white-space: nowrap; text-transform: uppercase; }
+.ctrl-label { font-family: 'Oswald', sans-serif; font-weight: 700; color: #233A57; font-size: 1rem; white-space: nowrap; text-transform: uppercase; }
 .ctrl-group { display: flex; align-items: center; gap: 6px; }
 #z-mult { width: 65px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem; }
 .switch-wrap { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 0.88rem; font-family: 'Oswald', sans-serif; font-weight: 500; color: #233A57; text-transform: uppercase; }
@@ -270,42 +275,42 @@ input[type="range"] { width: 100%; accent-color: #2c3e50; height: 4px; cursor: p
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; display: flex; align-items: center; justify-content: center; }
 .modal-box { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.25); max-width: 760px; width: 94%; max-height: 90vh; display: flex; flex-direction: column; }
 .modal-header-grad { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); color: white; padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 4px solid #377EB8; flex-shrink: 0; }
-.modal-title h2 { font-family: 'Oswald', sans-serif; font-size: 1.4rem; color: white; text-transform: uppercase; }
-.modal-title p { font-size: 0.88rem; opacity: 0.9; margin-top: 4px; }
+.modal-title h2 { font-family: 'Oswald', sans-serif; font-size: 1.6rem; color: white; text-transform: uppercase; letter-spacing: 0.5px; }
+.modal-title p { font-family: 'Open Sans', sans-serif; font-size: 0.9rem; font-weight: 300; opacity: 0.9; margin-top: 4px; }
 .modal-close-btn { background: none; border: none; color: rgba(255,255,255,0.7); font-size: 1.4rem; cursor: pointer; padding: 0 4px; }
 .modal-close-btn:hover { color: white; }
-.modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; background: #fcfcfc; }
+.modal-body { padding: 25px 30px; overflow-y: auto; flex: 1; background: #fcfcfc; font-family: 'Open Sans', sans-serif; }
 .modal-footer { padding: 12px 22px; background: #f1f1f1; border-top: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-.modal-footer-note { font-size: 0.82rem; color: #888; font-style: italic; }
+.modal-footer-note { font-size: 0.85rem; color: #888; font-style: italic; }
 .btn-brand { background: #233A57; color: white; border: none; padding: 8px 22px; font-family: 'Oswald', sans-serif; text-transform: uppercase; border-radius: 4px; cursor: pointer; }
 .btn-brand:hover { background: #e8572d; }
 
 /* ── Tab nav ── */
 .tab-nav { display: flex; gap: 4px; border-bottom: 2px solid #dee2e6; margin-bottom: 14px; }
-.tab-btn { padding: 6px 16px; background: none; border: none; font-family: 'Oswald', sans-serif; font-size: 0.9rem; color: #6c757d; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color 0.2s; }
+.tab-btn { padding: 6px 16px; background: none; border: none; font-family: 'Open Sans', sans-serif; font-size: 1rem; font-weight: 600; line-height: 24px; color: #6c757d; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color 0.2s; }
 .tab-btn.active { color: #233A57; border-bottom-color: #233A57; }
 .tab-btn:hover { color: #233A57; }
-.info-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 10px 14px; margin-bottom: 14px; font-size: 0.88rem; color: #444; line-height: 1.5; }
+.info-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 12px 18px; margin-bottom: 20px; font-size: 0.95rem; color: #444; line-height: 1.5; }
 pre { margin: 0; }
-code.hljs { border-radius: 6px; font-size: 0.88em; padding: 14px !important; }
-.url-box { background: #e9ecef; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 0.78rem; word-break: break-all; margin-bottom: 12px; color: #333; }
+code.hljs { border-radius: 6px; font-family: 'Fira Code', Consolas, monospace; font-size: 0.9em; padding: 15px !important; background-color: #282c34; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); }
+.url-box { background: #e9ecef; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; word-break: break-all; margin-bottom: 15px; color: #333; }
 
 /* ── Splash ── */
 .splash-header { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); padding: 28px 24px; text-align: center; }
 .splash-header img { height: 58px; margin-bottom: 10px; }
-.splash-header h2 { font-family: 'Oswald', sans-serif; color: white; font-size: 1.8rem; }
-.splash-body { padding: 20px 26px; }
-.splash-body > p { font-size: 1rem; color: #444; text-align: center; margin-bottom: 16px; }
+.splash-header h2 { font-family: 'Oswald', sans-serif; color: white; font-size: 1.8rem; letter-spacing: 1px; }
+.splash-body { padding: 25px 35px; color: #444; font-family: 'Open Sans', sans-serif; }
+.splash-body > p { font-size: 1.1rem; text-align: center; margin-bottom: 16px; }
 .feature-grid { display: flex; gap: 14px; margin: 14px 0; }
 .feature-item { flex: 1; padding: 14px 10px; background: #f8f9fa; border-radius: 8px; transition: transform 0.2s; text-align: center; }
 .feature-item:hover { transform: translateY(-2px); background: #f0f4f8; }
-.feature-icon { font-size: 1.6rem; color: #e8572d; margin-bottom: 8px; }
-.feature-title { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; color: #233A57; margin-bottom: 4px; }
-.feature-text { font-size: 0.76rem; color: #666; }
-.instruction-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 14px; margin: 14px 0; font-size: 0.88rem; line-height: 1.6; color: #444; }
-.splash-footer { background: #f1f1f1; padding: 12px 26px; font-size: 0.82rem; border-top: 1px solid #ddd; text-align: center; }
+.feature-icon { font-size: 1.8rem; color: #e8572d; margin-bottom: 10px; }
+.feature-title { font-weight: 700; font-size: 0.9rem; text-transform: uppercase; color: #233A57; margin-bottom: 5px; }
+.feature-text { font-size: 0.8rem; }
+.instruction-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 15px; margin: 20px 0; font-size: 0.95rem; line-height: 1.5; color: #444; }
+.splash-footer { background: #f1f1f1; padding: 15px 35px; font-size: 0.85rem; border-top: 1px solid #ddd; text-align: center; }
 .splash-footer a { color: #233A57; text-decoration: none; }
-.btn-get-started { background: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.05rem; padding: 10px 36px; border-radius: 30px; border: none; cursor: pointer; transition: all 0.3s; display: block; width: 100%; margin-top: 14px; }
+.btn-get-started { background: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.1rem; padding: 10px 36px; border-radius: 30px; border: none; cursor: pointer; transition: all 0.3s; display: block; width: 100%; margin-top: 14px; }
 .btn-get-started:hover { background: #e8572d; }
 
 /* ── Layer Control Panel ── */

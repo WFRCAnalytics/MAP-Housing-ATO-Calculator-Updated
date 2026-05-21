@@ -24,7 +24,7 @@ const minScore = inject('minScore')
 const maxScore = inject('maxScore')
 
 const pinnedContent = ref('')
-const placeholder = `<div style="padding:20px;text-align:center;color:#999;font-size:0.85rem;"><i class="fa-solid fa-hand-pointer"></i><br>Hover over a hexagon</div>`
+const placeholder = `<div style="padding:20px;text-align:center;color:#999;font-size:0.9rem;"><i class="fa-solid fa-hand-pointer"></i><br>Hover over a hexagon</div>`
 
 let popup = null
 let hoverHandler = null

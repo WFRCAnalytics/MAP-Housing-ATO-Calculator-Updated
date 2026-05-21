@@ -55,7 +55,7 @@ import Tooltip from './components/Tooltip.vue'
 import SplashModal from './components/SplashModal.vue'
 import DownloadModal from './components/DownloadModal.vue'
 import Legend from './components/Legend.vue'
-import { initMap } from './composables/useMap.js'
+import { initMap, setExtentBounds } from './composables/useMap.js'
 import { loadCities, loadMunicipalData } from './composables/useData.js'
 import { computeScores, buildColorExpression, buildExtrusionExpr } from './composables/useScoring.js'
 import { toggleLayer } from './composables/useLayers.js'
@@ -76,6 +76,7 @@ const layerVisible = reactive({
 })
 
 const cities = ref([])
+const selectedCommCodes = ref([])
 const landUse = ref('All Land Uses')
 const ozOnly = ref(false)
 const is3D = ref(false)
@@ -122,13 +123,11 @@ function setupMapLayers() {
     l => l.type === 'symbol' && l.layout?.['text-field']
   )?.id
 
-  // Hide Carto road and building layers. Roads are replaced by our single
-  // toggleable roads-major layer; buildings would otherwise render above H3.
+  // Hide Carto road layers — replaced by our toggleable roads-major layer.
   style.layers.forEach(l => {
     if (
       l['source-layer'] === 'transportation' ||
-      l['source-layer'] === 'transportation_name' ||
-      l['source-layer'] === 'building'
+      l['source-layer'] === 'transportation_name'
     ) {
       try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
     }
@@ -186,7 +185,7 @@ function setupMapLayers() {
   // ── Selected city border line (above hexagons, below roads) ────────────
   map.addLayer({
     id: 'lay_cities_line', type: 'line', source: 'src-cities',
-    paint: { 'line-color': '#555555', 'line-width': 1.5, 'line-opacity': 0.6 },
+    paint: { 'line-color': '#233A57', 'line-width': 3, 'line-opacity': 0.9 },
   }, firstLabelId)
 
   // ── Roads — topmost data layer, above H3 & all boundaries, below labels ─
@@ -218,6 +217,14 @@ function setupMapLayers() {
   } catch (e) {
     console.warn('Carto roads layer unavailable:', e)
   }
+
+  // Move Carto building layers below our bottommost custom layer so they
+  // render under municipal boundaries and H3 hexagons.
+  style.layers
+    .filter(l => l['source-layer'] === 'building')
+    .forEach(l => {
+      try { map.moveLayer(l.id, 'all-mun-fill') } catch {}
+    })
 }
 
 // ── City picker + background boundary layer ────────────
@@ -239,6 +246,7 @@ async function fetchCities() {
 
 // ── City selection ─────────────────────────────────────
 async function onCitiesChange(commCodes) {
+  selectedCommCodes.value = commCodes ?? []
   if (!commCodes?.length) {
     cachedRows = []
     hasData.value = false
@@ -295,7 +303,9 @@ function fitToH3(geojson) {
       if (lat > maxLat) maxLat = lat
     })
   })
-  mapInstance.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 40, maxZoom: 13, duration: 800 })
+  const bounds = [[minLng, minLat], [maxLng, maxLat]]
+  setExtentBounds(bounds)
+  mapInstance.fitBounds(bounds, { padding: 40, maxZoom: 13, duration: 800 })
 }
 
 // ── Colors ─────────────────────────────────────────────
@@ -384,9 +394,20 @@ async function onToggleLayer(id) {
   if (!map) return
 
   if (id === 'roads-major') {
-    const vis = newVis ? 'visible' : 'none'
-    if (map.getLayer('roads-major')) map.setLayoutProperty('roads-major', 'visibility', vis)
-    if (map.getLayer('roads-minor')) map.setLayoutProperty('roads-minor', 'visibility', vis)
+    if (map.getLayer('roads-major')) {
+      if (newVis) {
+        // Move above H3 and city polygons, just before label layers
+        const firstLabel = map.getStyle().layers.find(
+          l => l.type === 'symbol' && l.layout?.['text-field']
+        )?.id
+        map.moveLayer('roads-major', firstLabel)
+        if (map.getLayer('roads-minor')) map.moveLayer('roads-minor', firstLabel)
+      } else {
+        // Move below H3 hexagons (still visible, under data layers)
+        map.moveLayer('roads-major', 'h3_layer_2d')
+        if (map.getLayer('roads-minor')) map.moveLayer('roads-minor', 'h3_layer_2d')
+      }
+    }
   } else if (id === 'h3-heatmap') {
     const activeLayer = is3D.value ? 'h3_layer_3d' : 'h3_layer_2d'
     if (map.getLayer(activeLayer)) {
@@ -394,6 +415,8 @@ async function onToggleLayer(id) {
     }
   } else if (id === 'city-bounds') {
     const vis = newVis ? 'visible' : 'none'
+    if (map.getLayer('all-mun-fill')) map.setLayoutProperty('all-mun-fill', 'visibility', vis)
+    if (map.getLayer('all-mun-line')) map.setLayoutProperty('all-mun-line', 'visibility', vis)
     if (map.getLayer('lay_cities_fill')) map.setLayoutProperty('lay_cities_fill', 'visibility', vis)
     if (map.getLayer('lay_cities_line')) map.setLayoutProperty('lay_cities_line', 'visibility', vis)
   } else {
@@ -435,12 +458,86 @@ function onDownload() {
 // ── Screenshot ─────────────────────────────────────────
 function onScreenshot() {
   if (!mapInstance) return
-  // triggerRepaint forces WebGL to flush the current frame so toDataURL()
-  // reads real pixels instead of a cleared buffer.
   mapInstance.once('render', () => {
-    const canvas = mapInstance.getCanvas()
+    const mapCanvas = mapInstance.getCanvas()
+    const W = mapCanvas.width
+    const H = mapCanvas.height
+    const dpr = window.devicePixelRatio || 1
+    const hdrH = Math.round(75 * dpr)
+
+    const out = document.createElement('canvas')
+    out.width = W
+    out.height = H + hdrH
+    const ctx = out.getContext('2d')
+
+    // ── Header ───────────────────────────────────────
+    ctx.fillStyle = '#233A57'
+    ctx.fillRect(0, 0, W, hdrH)
+
+    const pad = Math.round(14 * dpr)
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `bold ${Math.round(24 * dpr)}px Oswald, Arial, sans-serif`
+    ctx.textBaseline = 'alphabetic'
+    ctx.fillText('Wasatch Front Housing Site Evaluator', pad, Math.round(34 * dpr))
+
+    const cityNames = selectedCommCodes.value
+      .map(c => allMunicipalities?.cities.find(x => x.value === c)?.label ?? c)
+      .join(', ')
+    if (cityNames) {
+      ctx.font = `${Math.round(18 * dpr)}px Arial, sans-serif`
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'
+      // Truncate if too wide
+      let label = cityNames
+      while (label.length > 4 && ctx.measureText(label).width > W - pad * 2) {
+        label = label.slice(0, -4) + '…'
+      }
+      ctx.fillText(label, pad, Math.round(62 * dpr))
+    }
+
+    // ── Map ──────────────────────────────────────────
+    ctx.drawImage(mapCanvas, 0, hdrH)
+
+    // ── Legend ───────────────────────────────────────
+    if (hasData.value) {
+      const PALETTE = ['#EDF8B1', '#C7E9B4', '#7FCDBB', '#41B6C4', '#1D91C0', '#225EA8']
+      const LABELS  = ['0.00', '0.20', '0.40', '0.60', '0.80', '1.00']
+      const s   = Math.round(20 * dpr)
+      const gap = Math.round(5 * dpr)
+      const lp  = Math.round(12 * dpr)
+      const titleH = Math.round(21 * dpr)
+      const boxW = lp + s + Math.round(45 * dpr) + lp
+      const boxH = lp + titleH + PALETTE.length * (s + gap) - gap + lp
+      const bx = Math.round(10 * dpr)
+      const by = H + hdrH - boxH - Math.round(10 * dpr)
+
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'
+      ctx.beginPath()
+      if (ctx.roundRect) {
+        ctx.roundRect(bx, by, boxW, boxH, Math.round(4 * dpr))
+      } else {
+        ctx.rect(bx, by, boxW, boxH)
+      }
+      ctx.fill()
+
+      ctx.fillStyle = '#233A57'
+      ctx.font = `bold ${Math.round(14 * dpr)}px Oswald, Arial, sans-serif`
+      ctx.textBaseline = 'top'
+      ctx.fillText('SITE INDEX', bx + lp, by + lp)
+
+      PALETTE.forEach((color, i) => {
+        const iy = by + lp + titleH + i * (s + gap)
+        ctx.fillStyle = color
+        ctx.fillRect(bx + lp, iy, s, s)
+        ctx.fillStyle = '#333333'
+        ctx.font = `${Math.round(14 * dpr)}px Arial, sans-serif`
+        ctx.textBaseline = 'middle'
+        ctx.fillText(LABELS[i], bx + lp + s + Math.round(4 * dpr), iy + s / 2)
+      })
+    }
+
+    // ── Download ─────────────────────────────────────
     const link = document.createElement('a')
-    link.href = canvas.toDataURL('image/png')
+    link.href = out.toDataURL('image/png')
     link.download = 'HousingSiteEvaluator_Map.png'
     link.click()
   })
