@@ -104,43 +104,21 @@ export async function loadCities(commCodes, weights) {
   return { geojson, rows, minScore, maxScore }
 }
 
-// ── WKB hex → GeoJSON geometry (Polygon / MultiPolygon) ──
-// R writes sf geometry as WKB binary; DuckDB hex() encodes it for JS parsing.
-function wkbToGeoJSON(hexStr) {
-  if (!hexStr) return null
-  const bytes = new Uint8Array(hexStr.length / 2)
-  for (let i = 0; i < bytes.length; i++)
-    bytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16)
-  const dv = new DataView(bytes.buffer)
-  let p = 0
-  let le = true
-
-  const u8  = () => dv.getUint8(p++)
-  const u32 = () => { const v = dv.getUint32(p, le); p += 4; return v }
-  const f64 = () => { const v = dv.getFloat64(p, le); p += 8; return v }
-
-  function readGeom() {
-    le = u8() === 1
-    let type = u32()
-    if (type & 0x20000000) { p += 4; type &= ~0x20000000 } // EWKB SRID
-    if (type === 3) { // Polygon
-      const rings = []
-      const nRings = u32()
-      for (let i = 0; i < nRings; i++) {
-        const n = u32(); const pts = []
-        for (let j = 0; j < n; j++) pts.push([f64(), f64()])
-        rings.push(pts)
-      }
-      return { type: 'Polygon', coordinates: rings }
+// ── GeoArrow struct → GeoJSON geometry ──────────────────
+// arrow::write_parquet() on an sf object stores geometry as GeoArrow native:
+// STRUCT(x DOUBLE, y DOUBLE)[][][] = [polygon][ring][point].
+// DuckDB's to_json() serializes this as [[[{x,y},...],...],...] for JS parsing.
+function structToGeoJSON(jsonStr) {
+  if (!jsonStr) return null
+  try {
+    const data = JSON.parse(jsonStr)
+    if (!Array.isArray(data) || data.length === 0) return null
+    const rings2d = rings => rings.map(ring => ring.map(pt => [pt.x, pt.y]))
+    if (data.length === 1) {
+      return { type: 'Polygon', coordinates: rings2d(data[0]) }
     }
-    if (type === 6) { // MultiPolygon
-      const n = u32(); const polys = []
-      for (let i = 0; i < n; i++) polys.push(readGeom().coordinates)
-      return { type: 'MultiPolygon', coordinates: polys }
-    }
-    return null
-  }
-  try { return readGeom() } catch { return null }
+    return { type: 'MultiPolygon', coordinates: data.map(poly => rings2d(poly)) }
+  } catch { return null }
 }
 
 // ── Municipal boundaries — loaded once from parquet, like R Shiny's cities_sf ─
@@ -151,12 +129,12 @@ export async function loadMunicipalData() {
   const conn = await getConn()
   const url = `${DATA_BASE_URL}/UtahMunicipalBoundaries.parquet`
   const table = await conn.query(
-    `SELECT "UGRCODE", "NAME", hex("geometry") AS geom_hex FROM read_parquet('${url}') ORDER BY "NAME"`
+    `SELECT "UGRCODE", "NAME", CAST(to_json("geometry") AS VARCHAR) AS geom_json FROM read_parquet('${url}') ORDER BY "NAME"`
   )
   const rows = tableToRows(table)
   const features = rows
     .map(r => {
-      const geom = wkbToGeoJSON(r.geom_hex)
+      const geom = structToGeoJSON(r.geom_json)
       return geom
         ? { type: 'Feature', geometry: geom, properties: { UGRCODE: String(r.UGRCODE), NAME: String(r.NAME) } }
         : null
