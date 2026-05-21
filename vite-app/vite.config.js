@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
-  base: '/MAP-Housing-ATO-Calculator-Updated/',
+  base: '/housing-site-evaluator/',
   build: {
     outDir: 'dist',
     assetsInlineLimit: 0,

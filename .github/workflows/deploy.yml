@@ -1,4 +1,4 @@
-name: Deploy Housing Evaluator to GitHub Pages
+name: Deploy Housing Evaluator
 
 on:
   push:
@@ -47,7 +47,17 @@ jobs:
         with:
           path: vite-app/dist
 
-  deploy:
+      - name: Deploy to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: vite-app/dist/
+          server-dir: housing-site-evaluator/
+          dangerous-clean-slate: false
+
+  deploy-pages:
     needs: build
     runs-on: ubuntu-latest
     environment:
