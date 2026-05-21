@@ -1,0 +1,3 @@
+# DuckDB-WASM requires application/wasm MIME type for WebAssembly.instantiateStreaming().
+# Apache shared hosting does not include this by default.
+AddType application/wasm .wasm
