@@ -1,0 +1,228 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Arial, 'Open Sans', sans-serif;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+h1, h2, h3, h4, h5 {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 700;
+  color: #233A57;
+  text-transform: uppercase;
+}
+
+/* ── Navbar ── */
+#navbar {
+  background-color: #233A57;
+  padding: 0 15px;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+#navbar img { height: 35px; }
+#navbar span {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 700;
+  color: white;
+  font-size: 1.3rem;
+  text-transform: uppercase;
+}
+
+/* ── Layout ── */
+#app-layout {
+  display: flex;
+  height: calc(100vh - 45px);
+}
+
+/* ── Sidebar ── */
+#sidebar {
+  width: 350px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: white;
+  border-right: 1px solid #dee2e6;
+}
+#sidebar-inner { padding: 12px 14px; }
+
+.step-header {
+  font-family: 'Oswald', sans-serif;
+  font-weight: 500;
+  color: #233A57;
+  text-transform: uppercase;
+  font-size: 1rem;
+  display: block;
+  margin-bottom: 6px;
+  margin-top: 10px;
+}
+.step-desc { font-size: 0.85rem; color: #6c757d; margin-bottom: 8px; line-height: 1.4; }
+
+/* ── Tom Select overrides ── */
+.ts-wrapper { margin-bottom: 10px; }
+.ts-control { min-height: 36px; max-height: 110px; overflow-y: auto; }
+.ts-dropdown { z-index: 9999 !important; }
+
+/* ── Accordion ── */
+.accordion { margin-bottom: 8px; }
+.accordion-item { border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 4px; overflow: hidden; }
+.accordion-button {
+  background: none; border: none; width: 100%; text-align: left; padding: 8px 12px;
+  font-family: 'Oswald', sans-serif; font-weight: 500; color: #5a87c6;
+  text-transform: uppercase; font-size: 0.9rem; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.accordion-button:hover { background: #f8f9fa; }
+.accordion-body { padding: 8px 12px; border-top: 1px solid #dee2e6; }
+
+/* ── Land use radio ── */
+.lu-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.lu-option { display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer; }
+.lu-option input { cursor: pointer; }
+
+/* ── Slider rows ── */
+.slider-row { margin-bottom: 6px; }
+.slider-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.slider-label { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: #444; font-family: 'Oswald', sans-serif; font-weight: 500; }
+.slider-label i.fa-solid { width: 18px; text-align: center; color: #233A57; font-size: 0.9rem; }
+.help-icon { color: #9aa5b1; cursor: help; font-size: 0.75rem; position: relative; }
+.help-icon:hover::after {
+  content: attr(data-tip); position: absolute; left: 20px; top: -4px;
+  background: #333; color: white; padding: 4px 8px; border-radius: 4px;
+  font-size: 0.75rem; white-space: normal; max-width: 200px; z-index: 9999; pointer-events: none;
+}
+.layer-toggle-btn {
+  color: #ccc; cursor: pointer; font-size: 1rem; transition: color 0.2s;
+  padding: 0 2px; border: none; background: none; line-height: 1;
+}
+.layer-toggle-btn:hover { color: #5a87c6; }
+.layer-toggle-btn.active { color: #2c3e50; }
+input[type="range"] { width: 100%; accent-color: #2c3e50; height: 4px; cursor: pointer; }
+
+/* ── Toggle-only layer row ── */
+.toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.toggle-row-label { font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 0.85rem; color: #444; display: flex; align-items: center; gap: 4px; }
+
+/* ── Buttons ── */
+.btn { padding: 5px 12px; border-radius: 4px; font-family: 'Oswald', sans-serif; font-weight: 500; cursor: pointer; border: 1px solid; transition: all 0.2s; font-size: 0.85rem; display: inline-flex; align-items: center; gap: 5px; }
+.btn-outline-secondary { color: #6c757d; border-color: #6c757d; background: white; }
+.btn-outline-secondary:hover { background: #6c757d; color: white; }
+.btn-outline-primary { color: #2c7fb8; border-color: #2c7fb8; background: white; }
+.btn-outline-primary:hover { background: #2c7fb8; color: white; }
+.btn-sm { padding: 4px 10px; font-size: 0.8rem; }
+.btn-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.btn-row .btn { flex: 1; justify-content: center; }
+.btn.disabled, .btn:disabled { opacity: 0.55; pointer-events: none; cursor: not-allowed; }
+
+/* ── OZ toggle ── */
+.oz-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.oz-label { font-family: 'Oswald', sans-serif; font-size: 0.9rem; color: #233A57; font-weight: 500; cursor: pointer; }
+input[type="checkbox"].oz-check { cursor: pointer; accent-color: #233A57; width: 18px; height: 18px; }
+
+/* ── Map area ── */
+#map-area { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+#map-controls-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: white; border-bottom: 1px solid #dee2e6; flex-shrink: 0; flex-wrap: wrap; }
+.ctrl-label { font-family: 'Oswald', sans-serif; font-weight: 700; color: #233A57; font-size: 0.95rem; white-space: nowrap; }
+#z-mult { width: 65px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem; }
+.switch-wrap { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 0.9rem; font-family: 'Oswald', sans-serif; font-weight: 500; }
+.switch-wrap input { cursor: pointer; accent-color: #233A57; width: 36px; height: 18px; }
+#map { flex: 1; min-height: 0; }
+
+/* ── Pinned tooltip ── */
+#pinned-tooltip-container {
+  position: absolute; bottom: 40px; left: 10px; z-index: 5; min-width: 160px;
+  background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,0,0,0.1); border-radius: 8px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.12); overflow: hidden; pointer-events: none;
+}
+#pinned-tooltip-header { background: #233A57; color: white; padding: 5px 10px; font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 5px; }
+#pinned-tooltip-content { min-height: 60px; }
+.tooltip-placeholder { padding: 15px; text-align: center; color: #999; font-size: 0.85rem; }
+.tooltip-pinned .maplibregl-popup { display: none !important; }
+
+/* ── Loading overlay ── */
+#loading-overlay {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(255,255,255,0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.9); border-radius: 50px; padding: 12px 28px;
+  display: flex; align-items: center; gap: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  z-index: 100; pointer-events: none;
+}
+.loading-spinner { width: 20px; height: 20px; border: 2px solid #dee2e6; border-top-color: #233A57; border-radius: 50%; animation: spin 0.7s linear infinite; }
+.loading-text { font-family: 'Oswald', sans-serif; font-size: 1rem; font-weight: 500; color: #233A57; letter-spacing: 0.5px; white-space: nowrap; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Modal ── */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.modal-box { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.25); max-width: 760px; width: 94%; max-height: 90vh; display: flex; flex-direction: column; }
+.modal-header-grad { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); color: white; padding: 22px 28px; display: flex; align-items: center; justify-content: space-between; border-bottom: 4px solid #377EB8; flex-shrink: 0; }
+.modal-title h2 { font-family: 'Oswald', sans-serif; font-size: 1.4rem; color: white; text-transform: uppercase; }
+.modal-title p { font-size: 0.88rem; opacity: 0.9; margin-top: 4px; }
+.modal-close-btn { background: none; border: none; color: rgba(255,255,255,0.7); font-size: 1.4rem; cursor: pointer; padding: 0 4px; }
+.modal-close-btn:hover { color: white; }
+.modal-body { padding: 18px 22px; overflow-y: auto; flex: 1; background: #fcfcfc; }
+.modal-footer { padding: 12px 22px; background: #f1f1f1; border-top: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.modal-footer-note { font-size: 0.82rem; color: #888; font-style: italic; }
+.btn-brand { background: #233A57; color: white; border: none; padding: 8px 22px; font-family: 'Oswald', sans-serif; text-transform: uppercase; border-radius: 4px; cursor: pointer; }
+.btn-brand:hover { background: #e8572d; }
+
+/* ── Tab nav ── */
+.tab-nav { display: flex; gap: 4px; border-bottom: 2px solid #dee2e6; margin-bottom: 14px; }
+.tab-btn { padding: 6px 16px; background: none; border: none; font-family: 'Oswald', sans-serif; font-size: 0.9rem; color: #6c757d; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: color 0.2s; }
+.tab-btn.active { color: #233A57; border-bottom-color: #233A57; }
+.tab-btn:hover { color: #233A57; }
+.info-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 10px 14px; margin-bottom: 14px; font-size: 0.88rem; color: #444; line-height: 1.5; }
+pre { margin: 0; }
+code.hljs { border-radius: 6px; font-size: 0.88em; padding: 14px !important; }
+.url-box { background: #e9ecef; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 0.78rem; word-break: break-all; margin-bottom: 12px; color: #333; }
+
+/* ── Splash ── */
+.splash-header { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); padding: 28px 24px; text-align: center; }
+.splash-header img { height: 58px; margin-bottom: 10px; }
+.splash-header h2 { font-family: 'Oswald', sans-serif; color: white; font-size: 1.8rem; }
+.splash-body { padding: 20px 26px; }
+.splash-body > p { font-size: 1rem; color: #444; text-align: center; margin-bottom: 16px; }
+.feature-grid { display: flex; gap: 14px; margin: 14px 0; }
+.feature-item { flex: 1; padding: 14px 10px; background: #f8f9fa; border-radius: 8px; transition: transform 0.2s; text-align: center; }
+.feature-item:hover { transform: translateY(-2px); background: #f0f4f8; }
+.feature-icon { font-size: 1.6rem; color: #e8572d; margin-bottom: 8px; }
+.feature-title { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; color: #233A57; margin-bottom: 4px; }
+.feature-text { font-size: 0.76rem; color: #666; }
+.instruction-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 14px; margin: 14px 0; font-size: 0.88rem; line-height: 1.6; color: #444; }
+.splash-footer { background: #f1f1f1; padding: 12px 26px; font-size: 0.82rem; border-top: 1px solid #ddd; text-align: center; }
+.splash-footer a { color: #233A57; text-decoration: none; }
+.btn-get-started { background: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.05rem; padding: 10px 36px; border-radius: 30px; border: none; cursor: pointer; transition: all 0.3s; display: block; width: 100%; margin-top: 14px; }
+.btn-get-started:hover { background: #e8572d; }
+
+/* ── Layer Control Panel ── */
+#layer-control-panel {
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  background: white; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15); min-width: 180px;
+}
+.lc-header {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; background: #233A57; color: white;
+  border: none; padding: 8px 12px; cursor: pointer;
+  font-family: 'Oswald', sans-serif; font-weight: 500;
+  font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.lc-header:hover { background: #2c4a6e; }
+.lc-body { padding: 4px 0; }
+.lc-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 10px; font-size: 0.82rem; color: #444;
+}
+.lc-section-label {
+  font-family: 'Oswald', sans-serif; font-weight: 500;
+  font-size: 0.72rem; color: #aaa; text-transform: uppercase;
+  padding: 6px 10px 2px; letter-spacing: 0.5px;
+}
+
+/* MapLibre overrides */
+.maplibregl-ctrl-group { border-radius: 8px !important; }
+.maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }

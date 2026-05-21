@@ -61,6 +61,7 @@ library(DBI)
 library(duckdb)
 library(arrow)
 library(geoarrow)
+library(sf)
 library(glue)
 library(here)
 library(fs)
@@ -374,6 +375,74 @@ Check a few records to ensure scores make sense (e.g., scores shouldn't be > 1.0
 #| echo: false
 
 arrow::open_dataset(fp_parcels_scored) |> head() |> collect()
+```
+
+## Sync Data to App Directories
+
+Copy scored H3 data to both the Shiny app (`_app/data/`) and the Vite app (`vite-app/public/data/`).
+
+```{r}
+#| label: sync-app-data
+
+message("📂 Syncing scored data to app directories...")
+
+# --- Paths ---
+src_h3        <- fp_h3_scored
+dst_h3_shiny  <- here::here("_app",     "data", "h3_scored")
+dst_h3_vite   <- here::here("vite-app", "public", "data", "h3_scored")
+
+src_bnd       <- here::here("_data", "processed", "base_layers", "Analysis_Boundary_WFRC_MAG.parquet")
+dst_bnd_shiny <- here::here("_app",     "data", "Analysis_Boundary_WFRC_MAG.parquet")
+dst_bnd_vite  <- here::here("vite-app", "public", "data", "Analysis_Boundary_WFRC_MAG.parquet")
+
+mun_api_url   <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
+dst_mun_shiny <- here::here("_app",     "data", "UtahMunicipalBoundaries.parquet")
+dst_mun_vite  <- here::here("vite-app", "public", "data", "UtahMunicipalBoundaries.parquet")
+
+write_h3_partitioned <- function(src, dst) {
+  if (fs::dir_exists(dst)) fs::dir_delete(dst)
+  arrow::open_dataset(src) |>
+    dplyr::filter(!is.na(CommCode)) |>
+    sf::st_as_sf(crs = 4326) |>
+    arrow::write_dataset(path = dst, partitioning = "CommCode")
+  message(glue::glue("  ✅ H3 scored → {dst}"))
+}
+
+write_municipalities <- function(h3_dst, out_path) {
+  mun_codes <- arrow::open_dataset(h3_dst) |>
+    dplyr::select(CommCode) |>
+    dplyr::distinct() |>
+    dplyr::filter(!is.na(CommCode)) |>
+    dplyr::collect() |>
+    dplyr::pull(CommCode)
+
+  where_clause <- paste0("UGRCODE IN ('", paste(mun_codes, collapse = "','"), "')")
+  query_url <- URLencode(paste0(
+    mun_api_url, "/query?where=", where_clause,
+    "&outFields=UGRCODE,NAME&f=geojson&outSR=4326"
+  ))
+  sf::st_read(query_url, quiet = TRUE) |>
+    sf::st_transform(4326) |>
+    arrow::write_parquet(out_path)
+  message(glue::glue("  ✅ Municipalities → {out_path}"))
+}
+
+# Ensure vite-app public/data/ exists
+fs::dir_create(here::here("vite-app", "public", "data"))
+
+# 1. H3 scored partitions -> both apps
+write_h3_partitioned(src_h3, dst_h3_shiny)
+write_h3_partitioned(src_h3, dst_h3_vite)
+
+# 2. Municipal boundaries -> both apps (download once, copy)
+write_municipalities(dst_h3_shiny, dst_mun_shiny)
+fs::file_copy(dst_mun_shiny, dst_mun_vite, overwrite = TRUE)
+
+# 3. Regional boundary -> both apps
+fs::file_copy(src_bnd, dst_bnd_shiny, overwrite = TRUE)
+fs::file_copy(src_bnd, dst_bnd_vite, overwrite = TRUE)
+
+message("✅ Data sync complete!")
 ```
 
 ## Cleanup
