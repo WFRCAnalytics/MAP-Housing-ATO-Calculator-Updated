@@ -42,6 +42,7 @@
 
   <SplashModal v-if="showSplash" @close="showSplash = false" />
   <DownloadModal v-if="showDownload" @close="showDownload = false" />
+  <div id="global-tooltip"></div>
 </template>
 
 <script setup>

@@ -36,7 +36,7 @@
             <div v-for="def in CENTER_DEFS" :key="def.id" class="toggle-row">
               <div class="toggle-row-label">
                 <span>{{ def.label }}</span>
-                <i class="fa-regular fa-circle-question help-icon" :data-tip="def.help"></i>
+                <i class="fa-regular fa-circle-question help-icon" v-tooltip="def.help"></i>
               </div>
               <button
                 class="layer-toggle-btn"

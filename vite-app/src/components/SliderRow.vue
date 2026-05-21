@@ -4,7 +4,7 @@
       <div class="slider-label">
         <i :class="`fa-solid ${def.icon}`"></i>
         <span>{{ def.label }}</span>
-        <i class="fa-regular fa-circle-question help-icon" :data-tip="def.help"></i>
+        <i class="fa-regular fa-circle-question help-icon" v-tooltip="def.help"></i>
       </div>
       <button
         class="layer-toggle-btn"

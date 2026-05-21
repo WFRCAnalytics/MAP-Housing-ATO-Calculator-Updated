@@ -159,12 +159,39 @@ h1, h2, h3, h4, h5 {
 .slider-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
 .slider-label { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; color: #444; font-family: 'Oswald', sans-serif; font-weight: 500; }
 .slider-label i.fa-solid { width: 18px; text-align: center; color: #233A57; font-size: 0.9rem; }
-.help-icon { color: #9aa5b1; cursor: help; font-size: 0.75rem; position: relative; }
-.help-icon:hover::after {
-  content: attr(data-tip); position: absolute; left: 20px; top: -4px;
-  background: #333; color: white; padding: 4px 8px; border-radius: 4px;
-  font-size: 0.75rem; white-space: normal; max-width: 200px; z-index: 9999; pointer-events: none;
+.help-icon { color: #9aa5b1; cursor: help; font-size: 0.85rem; }
+
+/* Global tooltip — rendered at body level (position:fixed) to escape overflow:auto clipping */
+#global-tooltip {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 400;
+  line-height: 1.4;
+  max-width: 220px;
+  text-align: left;
+  z-index: 99999;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-50%) translateY(-100%);
+  transition: opacity 0.15s, visibility 0.15s;
+  white-space: normal;
 }
+#global-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.85);
+}
+#global-tooltip.visible { opacity: 1; visibility: visible; }
 .layer-toggle-btn {
   color: #ccc; cursor: pointer; font-size: 1rem; transition: color 0.2s;
   padding: 0 2px; border: none; background: none; line-height: 1;
