@@ -1,0 +1,21 @@
+# Correct MIME type for WebAssembly — required for DuckDB-WASM to initialise.
+# Without this, Apache serves .wasm as application/octet-stream and
+# WebAssembly.instantiateStreaming() refuses to compile it, hanging the app.
+AddType application/wasm .wasm
+
+# Correct MIME type for ES module workers
+AddType text/javascript .js
+
+# Enable gzip for large assets
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/wasm
+</IfModule>
+
+# Cache static assets aggressively (Vite hashes filenames on every build)
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType application/wasm            "access plus 1 year"
+  ExpiresByType application/javascript      "access plus 1 year"
+  ExpiresByType text/css                    "access plus 1 year"
+  ExpiresByType application/octet-stream    "access plus 1 month"
+</IfModule>
