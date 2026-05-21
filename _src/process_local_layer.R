@@ -118,14 +118,35 @@ process_local_layer <- function(
       DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
       DBI::dbExecute(con, "SET geometry_always_xy = true")
 
-      # Inspect schema to map original column names → cleaned names
-      schema <- DBI::dbGetQuery(con, glue::glue(
-        "DESCRIBE SELECT * FROM ST_Read('{dsn_path}'{layer_sql}) LIMIT 0"
+      # Inspect schema via a temporary view — more reliable than DESCRIBE on
+      # a table function, and duckdb_columns() returns a stable data_type field
+      DBI::dbExecute(con, glue::glue(
+        "CREATE OR REPLACE VIEW _schema_probe AS
+         SELECT * FROM ST_Read('{dsn_path}'{layer_sql})"
       ))
-      orig_names <- schema$column_name
-      geom_idx   <- which(schema$column_type == "GEOMETRY")
+      schema <- DBI::dbGetQuery(
+        con,
+        "SELECT column_name, data_type
+         FROM duckdb_columns()
+         WHERE table_name = '_schema_probe'"
+      )
+      DBI::dbExecute(con, "DROP VIEW IF EXISTS _schema_probe")
 
-      if (length(geom_idx) == 0) stop("No GEOMETRY column found in source")
+      orig_names <- schema$column_name
+
+      # Match geometry column: by data_type (case-insensitive) then by name pattern
+      geom_idx <- which(grepl("^GEOMETRY$", schema$data_type, ignore.case = TRUE))
+      if (length(geom_idx) == 0) {
+        geom_idx <- which(grepl(
+          "^(geom|geometry|shape|wkb_geometry|the_geom)$",
+          schema$column_name, ignore.case = TRUE
+        ))
+      }
+      if (length(geom_idx) == 0) {
+        message("Schema returned by DuckDB (no GEOMETRY found):")
+        print(schema)
+        stop("No GEOMETRY column found in source")
+      }
 
       geom_col       <- orig_names[geom_idx[1]]
       non_geom_orig  <- orig_names[-geom_idx]
