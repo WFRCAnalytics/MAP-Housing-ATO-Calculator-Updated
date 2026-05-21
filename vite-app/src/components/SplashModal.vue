@@ -2,7 +2,7 @@
   <div class="modal-backdrop" @click.self="$emit('close')">
     <div class="modal-box">
       <div class="splash-header">
-        <img src="https://wfrc.org/wp-content/uploads/2021/02/WFRC_logo_white.png" alt="WFRC Logo" />
+        <img :src="logoUrl" alt="WFRC Logo" />
         <h2>Housing Site Evaluator</h2>
       </div>
       <div class="splash-body">
@@ -43,4 +43,5 @@
 
 <script setup>
 defineEmits(['close'])
+const logoUrl = `${import.meta.env.BASE_URL}logo.png`
 </script>

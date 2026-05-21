@@ -29,7 +29,7 @@ defineProps({
 })
 defineEmits(['toggle-layer'])
 
-const open = ref(true)
+const open = ref(false)
 
 const mapItems = [
   { id: 'roads-major', label: 'Major Roads' },

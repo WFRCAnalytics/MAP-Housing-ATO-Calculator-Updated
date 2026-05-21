@@ -2,12 +2,9 @@
   <Teleport to="#map-area">
     <div id="pinned-tooltip-container" v-if="pinned">
       <div id="pinned-tooltip-header">
-        <i class="fa-solid fa-thumbtack"></i> Selected Site
+        <i class="fa-solid fa-thumbtack"></i> Site Details
       </div>
-      <div
-        id="pinned-tooltip-content"
-        v-html="pinnedContent || '<div class=\'tooltip-placeholder\'>Click a hexagon to pin its data</div>'"
-      ></div>
+      <div id="pinned-tooltip-content" v-html="pinnedContent || placeholder"></div>
     </div>
   </Teleport>
 </template>
@@ -27,15 +24,23 @@ const minScore = inject('minScore')
 const maxScore = inject('maxScore')
 
 const pinnedContent = ref('')
+const placeholder = `<div style="padding:20px;text-align:center;color:#999;font-size:0.85rem;"><i class="fa-solid fa-hand-pointer"></i><br>Hover over a hexagon</div>`
+
 let popup = null
 let hoverHandler = null
 let leaveHandler = null
-let clickHandler = null
+let hoveredId = null
+
+const H3_LAYERS = ['h3_layer_2d', 'h3_layer_3d']
 
 function buildHTML(featureProps) {
-  const p = featureProps
-  const norm = computeNormScore(p, weights, minScore.value, maxScore.value)
-  return buildTooltipHTML({ ...p, norm_score: norm })
+  const norm = computeNormScore(featureProps, weights, minScore.value, maxScore.value)
+  return buildTooltipHTML({ ...featureProps, norm_score: norm })
+}
+
+function setHover(id, on) {
+  if (id == null) return
+  props.map.setFeatureState({ source: 'h3-source', id }, { hover: on })
 }
 
 onMounted(() => {
@@ -49,33 +54,46 @@ onMounted(() => {
   hoverHandler = (e) => {
     if (!e.features?.length) return
     props.map.getCanvas().style.cursor = 'pointer'
-    if (!props.pinned) {
-      const html = buildHTML(e.features[0].properties)
+
+    const id = e.features[0].id
+    if (id !== hoveredId) {
+      setHover(hoveredId, false)
+      hoveredId = id
+      setHover(hoveredId, true)
+    }
+
+    const html = buildHTML(e.features[0].properties)
+    if (props.pinned) {
+      pinnedContent.value = html
+    } else {
       popup.setLngLat(e.lngLat).setHTML(html).addTo(props.map)
     }
   }
 
   leaveHandler = () => {
     props.map.getCanvas().style.cursor = ''
-    if (!props.pinned) popup.remove()
+    setHover(hoveredId, false)
+    hoveredId = null
+    if (props.pinned) {
+      pinnedContent.value = ''
+    } else {
+      popup.remove()
+    }
   }
 
-  clickHandler = (e) => {
-    if (!props.pinned || !e.features?.length) return
-    pinnedContent.value = buildHTML(e.features[0].properties)
+  for (const layer of H3_LAYERS) {
+    props.map.on('mousemove', layer, hoverHandler)
+    props.map.on('mouseleave', layer, leaveHandler)
   }
-
-  props.map.on('mousemove', 'h3_layer_2d', hoverHandler)
-  props.map.on('mouseleave', 'h3_layer_2d', leaveHandler)
-  props.map.on('click', 'h3_layer_2d', clickHandler)
 })
 
 onUnmounted(() => {
   if (popup) popup.remove()
   if (props.map && hoverHandler) {
-    props.map.off('mousemove', 'h3_layer_2d', hoverHandler)
-    props.map.off('mouseleave', 'h3_layer_2d', leaveHandler)
-    props.map.off('click', 'h3_layer_2d', clickHandler)
+    for (const layer of H3_LAYERS) {
+      props.map.off('mousemove', layer, hoverHandler)
+      props.map.off('mouseleave', layer, leaveHandler)
+    }
   }
 })
 

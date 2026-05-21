@@ -1,54 +1,55 @@
 <template>
   <div id="map-controls-bar">
-    <span class="ctrl-label">Z-Scale:</span>
-    <input
-      id="z-mult"
-      type="number"
-      :value="zMult"
-      min="0.1"
-      max="20"
-      step="0.1"
-      :disabled="!is3D"
-      @input="$emit('update:zMult', parseFloat($event.target.value) || 1)"
-    />
+    <!-- LEFT: action buttons -->
+    <button
+      class="btn btn-outline-primary btn-sm"
+      :class="{ disabled: !hasData }"
+      :disabled="!hasData"
+      @click="$emit('download')"
+    >
+      <i class="fa-solid fa-download"></i> Download Data
+    </button>
+    <button
+      class="btn btn-outline-secondary btn-sm"
+      :class="{ disabled: !hasData }"
+      :disabled="!hasData"
+      @click="$emit('screenshot')"
+    >
+      <i class="fa-solid fa-camera"></i> Download Map
+    </button>
+
+    <div style="flex:1"></div>
+
+    <!-- RIGHT: Z-SCALE + 3D + Pin -->
+    <div class="ctrl-group">
+      <label class="ctrl-label" for="z-mult">Z-Scale:</label>
+      <input
+        id="z-mult"
+        type="number"
+        :value="zMult"
+        min="0.5"
+        max="20"
+        step="0.5"
+        :disabled="!is3D"
+        @input="$emit('update:zMult', parseFloat($event.target.value) || 1)"
+      />
+    </div>
 
     <div class="switch-wrap">
-      <input
-        type="checkbox"
-        :checked="is3D"
-        @change="$emit('update:is3D', $event.target.checked)"
-      />
+      <label class="toggle-switch">
+        <input type="checkbox" :checked="is3D" @change="$emit('update:is3D', $event.target.checked)" />
+        <span class="toggle-slider"></span>
+      </label>
       <span>3D View</span>
     </div>
 
     <div class="switch-wrap">
-      <input
-        type="checkbox"
-        :checked="pinnedTooltip"
-        @change="$emit('update:pinnedTooltip', $event.target.checked)"
-      />
+      <label class="toggle-switch">
+        <input type="checkbox" :checked="pinnedTooltip" @change="$emit('update:pinnedTooltip', $event.target.checked)" />
+        <span class="toggle-slider"></span>
+      </label>
       <span>Pin Tooltip</span>
     </div>
-
-    <div style="flex:1"></div>
-
-    <button
-      class="btn btn-outline-secondary btn-sm"
-      :disabled="!hasData"
-      @click="$emit('screenshot')"
-      title="Download map screenshot"
-    >
-      <i class="fa-solid fa-camera"></i> Screenshot
-    </button>
-
-    <button
-      class="btn btn-outline-primary btn-sm"
-      :disabled="!hasData"
-      @click="$emit('download')"
-      title="Download filtered data as CSV"
-    >
-      <i class="fa-solid fa-download"></i> Download Data
-    </button>
   </div>
 </template>
 

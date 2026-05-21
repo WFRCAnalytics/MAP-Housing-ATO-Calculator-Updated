@@ -1,7 +1,7 @@
 <template>
   <nav id="navbar">
-    <img src="https://wfrc.org/wp-content/uploads/2021/02/WFRC_logo_white.png" alt="WFRC" />
-    <span>Housing Site Evaluator</span>
+    <img :src="logoUrl" alt="WFRC" />
+    <span>Wasatch Front Housing Site Evaluator</span>
   </nav>
 
   <div id="app-layout">
@@ -31,6 +31,7 @@
       />
       <div id="map"></div>
       <Tooltip v-if="mapReady" :map="mapInstance" :pinned="pinnedTooltip" />
+      <Legend :hasData="hasData" />
       <LayerControl :layerVisible="layerVisible" @toggle-layer="onToggleLayer" />
       <div id="loading-overlay" v-if="isLoading">
         <div class="loading-spinner"></div>
@@ -45,12 +46,14 @@
 
 <script setup>
 import { ref, reactive, provide, watch, onMounted } from 'vue'
+const logoUrl = `${import.meta.env.BASE_URL}logo.png`
 import Sidebar from './components/Sidebar.vue'
 import MapControls from './components/MapControls.vue'
 import LayerControl from './components/LayerControl.vue'
 import Tooltip from './components/Tooltip.vue'
 import SplashModal from './components/SplashModal.vue'
 import DownloadModal from './components/DownloadModal.vue'
+import Legend from './components/Legend.vue'
 import { initMap } from './composables/useMap.js'
 import { loadCities, loadMunicipalBoundaries } from './composables/useData.js'
 import { computeScores, buildColorExpression, buildExtrusionExpr } from './composables/useScoring.js'
@@ -109,55 +112,83 @@ onMounted(async () => {
 
 function setupMapLayers() {
   const map = mapInstance
+  const style = map.getStyle()
 
-  // All municipality boundaries — clickable background layer for city selection
-  map.addSource('src-all-municipalities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-  map.addLayer({
-    id: 'all-mun-fill',
-    type: 'fill',
-    source: 'src-all-municipalities',
-    paint: { 'fill-color': '#88aacc', 'fill-opacity': 0.06 },
-  })
-  map.addLayer({
-    id: 'all-mun-line',
-    type: 'line',
-    source: 'src-all-municipalities',
-    paint: { 'line-color': '#557799', 'line-width': 0.8, 'line-opacity': 0.45 },
-  })
+  // Find the first label (symbol) layer in the Carto style so we can insert all
+  // our data layers BEFORE it — labels always render on top of hexagons/roads.
+  const firstLabelId = style.layers.find(
+    l => l.type === 'symbol' && l.layout?.['text-field']
+  )?.id
 
-  // Cursor + click for municipality selection
-  map.on('mouseenter', 'all-mun-fill', () => { map.getCanvas().style.cursor = 'pointer' })
-  map.on('mouseleave', 'all-mun-fill', () => { map.getCanvas().style.cursor = '' })
-  map.on('click', (e) => {
-    const h3Hits = map.queryRenderedFeatures(e.point, {
-      layers: ['h3_layer_2d', 'h3_layer_3d'].filter(l => map.getLayer(l)),
-    })
-    if (h3Hits.length) return
-    const munHits = map.queryRenderedFeatures(e.point, { layers: ['all-mun-fill'] })
-    if (munHits.length) {
-      sidebarRef.value?.toggleCity(String(munHits[0].properties.UGRCODE))
+  // Hide Carto road and building layers. Roads are replaced by our single
+  // toggleable roads-major layer; buildings would otherwise render above H3.
+  style.layers.forEach(l => {
+    if (
+      l['source-layer'] === 'transportation' ||
+      l['source-layer'] === 'transportation_name' ||
+      l['source-layer'] === 'building'
+    ) {
+      try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
     }
   })
 
-  // City boundary fill + line (empty initially)
+  // Find the Carto vector tile source (name varies by style version)
+  const cartoSrc = Object.keys(style.sources).find(k =>
+    style.sources[k].type === 'vector' && (k === 'carto' || k === 'openmaptiles' || k.includes('carto'))
+  ) || 'carto'
+
+  // ── Municipality background (clickable for city selection) ──────────────
+  map.addSource('src-all-municipalities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+  map.addLayer({
+    id: 'all-mun-fill', type: 'fill', source: 'src-all-municipalities',
+    paint: { 'fill-color': '#88aacc', 'fill-opacity': 0.06 },
+  }, firstLabelId)
+  map.addLayer({
+    id: 'all-mun-line', type: 'line', source: 'src-all-municipalities',
+    paint: { 'line-color': '#557799', 'line-width': 0.8, 'line-opacity': 0.45 },
+  }, firstLabelId)
+
+  map.on('mouseenter', 'all-mun-fill', () => { map.getCanvas().style.cursor = 'pointer' })
+  map.on('mouseleave', 'all-mun-fill', () => { map.getCanvas().style.cursor = '' })
+  map.on('click', (e) => {
+    const munHits = map.queryRenderedFeatures(e.point, { layers: ['all-mun-fill'] })
+    if (munHits.length) sidebarRef.value?.toggleCity(String(munHits[0].properties.UGRCODE))
+  })
+
+  // ── Selected city boundaries ────────────────────────────────────────────
   map.addSource('src-cities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
   map.addLayer({
-    id: 'lay_cities_fill',
-    type: 'fill',
-    source: 'src-cities',
+    id: 'lay_cities_fill', type: 'fill', source: 'src-cities',
     paint: {
       'fill-color': '#CCCCCC',
       'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.3, 15, 0.0],
     },
-  })
+  }, firstLabelId)
 
-  // Carto major roads overlay
+  // ── H3 hexagons ─────────────────────────────────────────────────────────
+  map.addSource('h3-source', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    generateId: true,
+  })
+  map.addLayer({
+    id: 'h3_layer_2d', type: 'fill', source: 'h3-source',
+    paint: { 'fill-color': '#cccccc', 'fill-opacity': 0.8 },
+  }, firstLabelId)
+  map.addLayer({
+    id: 'h3_layer_3d', type: 'fill-extrusion', source: 'h3-source',
+    layout: { visibility: 'none' },
+    paint: { 'fill-extrusion-color': '#cccccc', 'fill-extrusion-height': 0, 'fill-extrusion-opacity': 0.8 },
+  }, firstLabelId)
+
+  // ── Selected city border line (above hexagons, below roads) ────────────
+  map.addLayer({
+    id: 'lay_cities_line', type: 'line', source: 'src-cities',
+    paint: { 'line-color': '#555555', 'line-width': 1.5, 'line-opacity': 0.6 },
+  }, firstLabelId)
+
+  // ── Roads — topmost data layer, above H3 & all boundaries, below labels ─
   try {
-    const sources = map.getStyle().sources
-    const cartoSrc = Object.keys(sources).find(k => {
-      const s = sources[k]
-      return s.type === 'vector' && (k === 'carto' || k === 'openmaptiles' || k.includes('carto'))
-    }) || 'carto'
     map.addLayer({
       id: 'roads-major',
       type: 'line',
@@ -167,44 +198,24 @@ function setupMapLayers() {
       paint: {
         'line-color': ['match', ['get', 'class'], 'motorway', '#e892a2', 'trunk', '#f9b29c', '#bbbbbb'],
         'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 12, 1.5, 16, 4],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.9, 14, 0.0],
+        'line-opacity': 0.9,
       },
-    })
+    }, firstLabelId)
+    map.addLayer({
+      id: 'roads-minor',
+      type: 'line',
+      source: cartoSrc,
+      'source-layer': 'transportation',
+      filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service', 'track']]],
+      paint: {
+        'line-color': '#cccccc',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 14, 1.5, 16, 3],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 11, 0.8],
+      },
+    }, firstLabelId)
   } catch (e) {
     console.warn('Carto roads layer unavailable:', e)
   }
-
-  // Empty H3 source
-  map.addSource('h3-source', {
-    type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] },
-    generateId: true,
-  })
-
-  // 2D fill
-  map.addLayer({
-    id: 'h3_layer_2d',
-    type: 'fill',
-    source: 'h3-source',
-    paint: { 'fill-color': '#cccccc', 'fill-opacity': 0.8 },
-  })
-
-  // 3D extrusion (hidden)
-  map.addLayer({
-    id: 'h3_layer_3d',
-    type: 'fill-extrusion',
-    source: 'h3-source',
-    layout: { visibility: 'none' },
-    paint: { 'fill-extrusion-color': '#cccccc', 'fill-extrusion-height': 0, 'fill-extrusion-opacity': 0.8 },
-  })
-
-  // City boundary line (on top)
-  map.addLayer({
-    id: 'lay_cities_line',
-    type: 'line',
-    source: 'src-cities',
-    paint: { 'line-color': '#555555', 'line-width': 1.5, 'line-opacity': 0.6 },
-  })
 }
 
 // ── City picker ────────────────────────────────────────
@@ -402,9 +413,9 @@ async function onToggleLayer(id) {
   if (!map) return
 
   if (id === 'roads-major') {
-    if (map.getLayer('roads-major')) {
-      map.setLayoutProperty('roads-major', 'visibility', newVis ? 'visible' : 'none')
-    }
+    const vis = newVis ? 'visible' : 'none'
+    if (map.getLayer('roads-major')) map.setLayoutProperty('roads-major', 'visibility', vis)
+    if (map.getLayer('roads-minor')) map.setLayoutProperty('roads-minor', 'visibility', vis)
   } else if (id === 'h3-heatmap') {
     const activeLayer = is3D.value ? 'h3_layer_3d' : 'h3_layer_2d'
     if (map.getLayer(activeLayer)) {
@@ -453,10 +464,15 @@ function onDownload() {
 // ── Screenshot ─────────────────────────────────────────
 function onScreenshot() {
   if (!mapInstance) return
-  const canvas = mapInstance.getCanvas()
-  const link = document.createElement('a')
-  link.href = canvas.toDataURL('image/png')
-  link.download = 'HousingSiteEvaluator_Map.png'
-  link.click()
+  // triggerRepaint forces WebGL to flush the current frame so toDataURL()
+  // reads real pixels instead of a cleared buffer.
+  mapInstance.once('render', () => {
+    const canvas = mapInstance.getCanvas()
+    const link = document.createElement('a')
+    link.href = canvas.toDataURL('image/png')
+    link.download = 'HousingSiteEvaluator_Map.png'
+    link.click()
+  })
+  mapInstance.triggerRepaint()
 }
 </script>

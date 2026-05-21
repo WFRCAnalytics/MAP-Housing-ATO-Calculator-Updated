@@ -36,7 +36,12 @@ export function buildColorExpression(weights, minS, maxS) {
     return acc
   }, [])
 
-  return ['interpolate', ['linear'], normScore, ...stops]
+  return [
+    'case',
+    ['boolean', ['feature-state', 'hover'], false],
+    'yellow',
+    ['interpolate', ['linear'], normScore, ...stops],
+  ]
 }
 
 export function buildExtrusionExpr(weights, zMult) {
@@ -68,7 +73,7 @@ export function buildTooltipHTML(props) {
   const bcName = BC_MAP[props.BC] ?? 'Unknown'
   const normScore = typeof props.norm_score === 'number' ? props.norm_score.toFixed(2) : '—'
 
-  return `<div style="font-family:sans-serif;padding:12px;background:white;border-radius:4px;min-width:160px;">` +
+  return `<div style="font-family:sans-serif;padding:12px;background:white;border-radius:4px;box-shadow:0 4px 15px rgba(0,0,0,0.2);min-width:160px;">` +
     `<div style="margin-bottom:10px;border-bottom:1px solid #eee;padding-bottom:6px;">` +
     `<div style="font-weight:bold;font-size:16px;color:#233A57;">Site Index: ${normScore}</div>` +
     `<div style="font-size:12px;color:#666;margin-top:2px;">Land Use: ${bcName}</div>` +
