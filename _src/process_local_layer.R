@@ -176,9 +176,10 @@ process_local_layer <- function(
       # }
 
       # 3. Final Fixes & Project
-      sf_obj <- sf_obj |>
-        sf::st_make_valid() |>
-        sf::st_transform(crs)
+      if (!all(sf::st_is_valid(sf_obj))) {
+        sf_obj <- sf::st_make_valid(sf_obj)
+      }
+      sf_obj <- sf::st_transform(sf_obj, crs)
 
       # 4. Standardize Geometry Name
       sf::st_geometry(sf_obj) <- "geometry"
