@@ -55,7 +55,7 @@ import SplashModal from './components/SplashModal.vue'
 import DownloadModal from './components/DownloadModal.vue'
 import Legend from './components/Legend.vue'
 import { initMap } from './composables/useMap.js'
-import { loadCities, loadMunicipalBoundaries } from './composables/useData.js'
+import { loadCities, loadMunicipalData } from './composables/useData.js'
 import { computeScores, buildColorExpression, buildExtrusionExpr } from './composables/useScoring.js'
 import { toggleLayer } from './composables/useLayers.js'
 import { SLIDER_DEFS, SCORE_COLS } from './config/sliders.js'
@@ -99,6 +99,7 @@ const sidebarRef = ref(null)
 let mapInstance = null
 let cachedRows = []
 let colorTimer = null
+let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's cities_sf
 
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
@@ -218,39 +219,20 @@ function setupMapLayers() {
   }
 }
 
-// ── City picker ────────────────────────────────────────
+// ── City picker + background boundary layer ────────────
+// Mirrors R Shiny: cities_sf loaded once from UtahMunicipalBoundaries.parquet,
+// used for both the community dropdown and the clickable boundary layer.
 async function fetchCities() {
   try {
     isLoading.value = true
     loadingText.value = 'Loading communities...'
-    const [munis] = await Promise.all([
-      loadMunicipalBoundaries(),
-      loadAllMunicipalBoundaries(),
-    ])
-    cities.value = munis
+    allMunicipalities = await loadMunicipalData()
+    cities.value = allMunicipalities.cities
+    mapInstance?.getSource('src-all-municipalities')?.setData(allMunicipalities.geojson)
   } catch (e) {
     console.error('Failed to load municipalities:', e)
   } finally {
     isLoading.value = false
-  }
-}
-
-async function loadAllMunicipalBoundaries() {
-  const params = new URLSearchParams({
-    where: '1=1',
-    outFields: 'UGRCODE,NAME',
-    f: 'geojson',
-    outSR: '4326',
-    resultRecordCount: '300',
-  })
-  try {
-    const resp = await fetch(
-      `https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0/query?${params}`
-    )
-    const geojson = await resp.json()
-    mapInstance?.getSource('src-all-municipalities')?.setData(geojson)
-  } catch (e) {
-    console.warn('Failed to load all municipal boundaries:', e)
   }
 }
 
@@ -292,25 +274,13 @@ function clearCityBounds() {
   mapInstance?.getSource('src-cities')?.setData({ type: 'FeatureCollection', features: [] })
 }
 
-async function fetchCityBoundaries(commCodes) {
-  const codes = commCodes.map(c => `'${c}'`).join(',')
-  const params = new URLSearchParams({
-    where: `UGRCODE IN (${codes})`,
-    outFields: 'UGRCODE,NAME',
-    f: 'geojson',
-    outSR: '4326',
-    resultRecordCount: '500',
-  })
-  const url = `https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0/query?${params}`
-  try {
-    const resp = await fetch(url)
-    const geojson = await resp.json()
-    if (geojson.features?.length) {
-      mapInstance?.getSource('src-cities')?.setData(geojson)
-    }
-  } catch (e) {
-    console.warn('City boundaries fetch failed:', e)
-  }
+function fetchCityBoundaries(commCodes) {
+  if (!allMunicipalities) return
+  const codeSet = new Set(commCodes.map(String))
+  const features = allMunicipalities.geojson.features.filter(
+    f => codeSet.has(String(f.properties.UGRCODE))
+  )
+  mapInstance?.getSource('src-cities')?.setData({ type: 'FeatureCollection', features })
 }
 
 function fitToH3(geojson) {

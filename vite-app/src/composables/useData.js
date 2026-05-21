@@ -104,13 +104,67 @@ export async function loadCities(commCodes, weights) {
   return { geojson, rows, minScore, maxScore }
 }
 
-// ── Municipality list for Tom Select ─────────────────
-export async function loadMunicipalBoundaries() {
+// ── WKB hex → GeoJSON geometry (Polygon / MultiPolygon) ──
+// R writes sf geometry as WKB binary; DuckDB hex() encodes it for JS parsing.
+function wkbToGeoJSON(hexStr) {
+  if (!hexStr) return null
+  const bytes = new Uint8Array(hexStr.length / 2)
+  for (let i = 0; i < bytes.length; i++)
+    bytes[i] = parseInt(hexStr.slice(i * 2, i * 2 + 2), 16)
+  const dv = new DataView(bytes.buffer)
+  let p = 0
+  let le = true
+
+  const u8  = () => dv.getUint8(p++)
+  const u32 = () => { const v = dv.getUint32(p, le); p += 4; return v }
+  const f64 = () => { const v = dv.getFloat64(p, le); p += 8; return v }
+
+  function readGeom() {
+    le = u8() === 1
+    let type = u32()
+    if (type & 0x20000000) { p += 4; type &= ~0x20000000 } // EWKB SRID
+    if (type === 3) { // Polygon
+      const rings = []
+      const nRings = u32()
+      for (let i = 0; i < nRings; i++) {
+        const n = u32(); const pts = []
+        for (let j = 0; j < n; j++) pts.push([f64(), f64()])
+        rings.push(pts)
+      }
+      return { type: 'Polygon', coordinates: rings }
+    }
+    if (type === 6) { // MultiPolygon
+      const n = u32(); const polys = []
+      for (let i = 0; i < n; i++) polys.push(readGeom().coordinates)
+      return { type: 'MultiPolygon', coordinates: polys }
+    }
+    return null
+  }
+  try { return readGeom() } catch { return null }
+}
+
+// ── Municipal boundaries — loaded once from parquet, like R Shiny's cities_sf ─
+let _munCache = null
+
+export async function loadMunicipalData() {
+  if (_munCache) return _munCache
   const conn = await getConn()
   const url = `${DATA_BASE_URL}/UtahMunicipalBoundaries.parquet`
-  const table = await conn.query(`SELECT "UGRCODE", "NAME" FROM read_parquet('${url}') ORDER BY "NAME"`)
-  return tableToRows(table).map(r => ({
-    value: String(r.UGRCODE),
-    label: String(r.NAME),
-  }))
+  const table = await conn.query(
+    `SELECT "UGRCODE", "NAME", hex("geometry") AS geom_hex FROM read_parquet('${url}') ORDER BY "NAME"`
+  )
+  const rows = tableToRows(table)
+  const features = rows
+    .map(r => {
+      const geom = wkbToGeoJSON(r.geom_hex)
+      return geom
+        ? { type: 'Feature', geometry: geom, properties: { UGRCODE: String(r.UGRCODE), NAME: String(r.NAME) } }
+        : null
+    })
+    .filter(Boolean)
+  _munCache = {
+    cities:  rows.map(r => ({ value: String(r.UGRCODE), label: String(r.NAME) })),
+    geojson: { type: 'FeatureCollection', features },
+  }
+  return _munCache
 }
