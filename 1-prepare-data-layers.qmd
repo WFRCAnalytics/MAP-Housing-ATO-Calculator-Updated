@@ -179,8 +179,6 @@ fp_remm_parcels <- process_local_layer(
   layer = "parcels",
   name = "REMM_BY_parcels",
   save_dir = sub_dirs$parcels,
-  # partitioning = "co_name",
-  compression = "zstd",
   crs = CRS_WGS
 )
 ```
@@ -202,8 +200,6 @@ fp_remm_buildings <- process_local_layer(
   layer = "buildings",
   name = "REMM_BY_buildings",
   save_dir = sub_dirs$parcels,
-  # partitioning = "building_type",
-  compression = "zstd",
   crs = CRS_WGS
 )
 ```
