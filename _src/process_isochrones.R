@@ -36,7 +36,7 @@
 #'   or NULL if dry_run is TRUE or generation fails.
 #'
 #' @section Dependencies:
-#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `arrow`, `geoarrow`, `janitor`, `duckdb`, `DBI`.
+#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `janitor`, `duckdb`, `DBI`, `glue`.
 #'
 #' @examples
 #' \dontrun{
@@ -82,8 +82,6 @@ process_isochrones <- function(
     "sf",
     "dplyr",
     "purrr",
-    "arrow",
-    "geoarrow",
     "janitor",
     "duckdb",
     "DBI",

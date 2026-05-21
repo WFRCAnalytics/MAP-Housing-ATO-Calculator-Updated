@@ -391,7 +391,8 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$walking,
-      dry_run = TRUE # Set to FALSE to generate files
+      dry_run = FALSE,
+      overwrite = TRUE
     )
   })
 ```
@@ -413,7 +414,8 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$biking,
-      dry_run = TRUE # Set to FALSE to generate files
+      dry_run = FALSE,
+      overwrite = TRUE
     )
   })
 ```
@@ -435,7 +437,8 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$driving,
-      dry_run = TRUE # Set to FALSE to generate files
+      dry_run = FALSE,
+      overwrite = TRUE
     )
   })
 ```
