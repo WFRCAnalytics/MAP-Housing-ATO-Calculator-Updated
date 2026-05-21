@@ -299,7 +299,7 @@ if (file.exists(fp_boundary_wftdm)) {
 
   # install and load spatial extension
   DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
-  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+  DBI::dbExecute(conn, "SET geometry_always_xy = true")
 
   # Process using DuckDB SQL
   query_prep <- glue::glue(
@@ -438,8 +438,8 @@ if (file.exists(fp_h3_grid)) {
   on.exit(DBI::dbDisconnect(conn, shutdown = TRUE))
 
   DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+  DBI::dbExecute(conn, "SET geometry_always_xy = true")
   DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
-  DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 
   # Fix: Removed curly braces from comments to prevent glue parsing errors
   query_h3 <- glue::glue(

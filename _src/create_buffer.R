@@ -49,7 +49,7 @@ create_buffer <- function(
       COPY (
         SELECT
           *,
-          ST_AsWKB(ST_Buffer(ST_GeomFromWKB(geometry), {dist_meters})) as geometry
+          ST_Buffer(geometry, {dist_meters}) as geometry
         FROM read_parquet('{input_parquet}')
       ) TO '{output_fp}' (FORMAT PARQUET)
     "

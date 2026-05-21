@@ -151,7 +151,7 @@ conn <- DBI::dbConnect(duckdb::duckdb())
 
 # Load Spatial Extensions
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
-DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+DBI::dbExecute(conn, "SET geometry_always_xy = true")
 DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
 ```
 
@@ -179,7 +179,7 @@ DBI::dbExecute(
   CREATE OR REPLACE TABLE targets_h3 AS
   SELECT
     CAST(h3_index AS UBIGINT) as h3_index, -- Strict type safety
-    ST_Transform(ST_GeomFromWKB(geometry), '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
   FROM read_parquet('{fp_h3_grid}')
 "
   )

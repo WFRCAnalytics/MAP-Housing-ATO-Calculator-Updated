@@ -123,7 +123,7 @@ process_isochrones <- function(
       # --- QUERY CONSTRUCTION ---
       if (!is.null(boundary_path)) {
         transform_logic <- if (boundary_crs != "EPSG:4326") {
-          glue::glue("ST_Transform(geom, '{boundary_crs}', 'EPSG:4326')")
+          glue::glue("ST_Transform(geom, '{boundary_crs}', 'EPSG:4326', always_xy := true)")
         } else {
           "geom"
         }

@@ -100,8 +100,8 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 conn <- DBI::dbConnect(duckdb::duckdb())
 
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+DBI::dbExecute(conn, "SET geometry_always_xy = true")
 DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
-DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 ```
 
 # Scoring & Weighting
