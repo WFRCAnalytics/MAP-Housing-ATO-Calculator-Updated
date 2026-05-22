@@ -444,6 +444,7 @@ if (file.exists(fp_parks_graded)) {
   conn <- DBI::dbConnect(duckdb::duckdb())
   on.exit(DBI::dbDisconnect(conn, shutdown = TRUE))
   DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+  DBI::dbExecute(conn, "SET geometry_always_xy = true")
 
   # SQL Logic:
   # 1. Read 5min (Val 300) and 10min (Val 600)
@@ -456,14 +457,14 @@ if (file.exists(fp_parks_graded)) {
       -- 1. Load 5-Min Layer (Inner Core)
       layer_5min AS (
         SELECT 300 as value,
-               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
         FROM read_parquet('{fp_park_5_in}')
       ),
 
       -- 2. Load 10-Min Layer (Base for Buffering)
       layer_10min AS (
         SELECT 600 as value,
-               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
         FROM read_parquet('{fp_park_10_in}')
       ),
 
@@ -499,7 +500,7 @@ if (file.exists(fp_parks_graded)) {
       -- 4. Final Transform back to WGS84
       SELECT
         value,
-        ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) as geometry
+        ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') as geometry
       FROM tiers
       WHERE NOT ST_IsEmpty(geom)
 

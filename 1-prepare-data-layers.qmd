@@ -26,7 +26,6 @@ renv::restore()
 #| label: setup-libraries
 #| message: false
 #| warning: false
-
 library(dplyr)
 library(sf)
 library(arcgislayers)
@@ -51,7 +50,6 @@ arrow::install_arrow()
 
 ```{r}
 #| label: setup-dirs
-
 # Setup Paths & Params
 dirs <- list(
   source = here::here("_src"), # Source custom functions
@@ -67,7 +65,6 @@ purrr::walk(dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-subdirs
-
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
   base = here::here(dirs$processed, "base_layers"),
@@ -85,7 +82,6 @@ purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-crs
-
 # Projection Constants
 CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
@@ -97,7 +93,6 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 
 ```{r}
 #| label: load-helpers
-
 source(here::here(dirs$source, "download_feature_layer.R")) # Download ArcGIS Feature Layers
 source(here::here(dirs$source, "process_local_layer.R")) # Load local SHP, GDB, GeoJSON Layers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
@@ -122,7 +117,6 @@ fp_municipal_bound <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Municipal Boundaries
 preview_layer(fp_municipal_bound)
 ```
@@ -142,7 +136,6 @@ fp_county_bound <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check County Boundaries
 preview_layer(fp_county_bound)
 ```
@@ -163,7 +156,6 @@ fp_regional_bound <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Regional Boundaries
 preview_layer(fp_regional_bound)
 ```
@@ -175,7 +167,7 @@ preview_layer(fp_regional_bound)
 ```{r}
 # REMM Parcels (from GDB)
 fp_remm_parcels <- process_local_layer(
-  path = "remm_base_year_20221003/remm_base_year.gdb.zip",
+  path = "remm_base_year.gdb",
   layer = "parcels",
   name = "REMM_BY_parcels",
   save_dir = sub_dirs$parcels,
@@ -186,7 +178,6 @@ fp_remm_parcels <- process_local_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check REMM Parcels (Limit to 1000 so browser doesn't crash)
 preview_layer(fp_remm_parcels, limit = 1000)
 ```
@@ -196,7 +187,7 @@ preview_layer(fp_remm_parcels, limit = 1000)
 ```{r}
 # REMM Buildings (from GDB)
 fp_remm_buildings <- process_local_layer(
-  path = "remm_base_year_20221003/remm_base_year.gdb.zip",
+  path = "remm_base_year.gdb",
   layer = "buildings",
   name = "REMM_BY_buildings",
   save_dir = sub_dirs$parcels,
@@ -207,7 +198,6 @@ fp_remm_buildings <- process_local_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check REMM Buildings (Limit to 1000 so browser doesn't crash)
 preview_layer(fp_remm_buildings, limit = 1000)
 ```
@@ -227,7 +217,6 @@ fp_wf_taz <- process_local_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check WF-TDM TAZs
 preview_layer(fp_wf_taz)
 ```
@@ -247,7 +236,6 @@ fp_ustm_taz <- process_local_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check WF-TDM TAZs
 preview_layer(fp_ustm_taz)
 ```
@@ -269,7 +257,6 @@ fp_wcv_centers <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Wasatch Choice Vision Centers
 preview_layer(fp_wcv_centers, column = "center_type")
 ```
@@ -289,7 +276,6 @@ fp_utah_qoz <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Utah Qualified Opportunity Zones
 preview_layer(fp_utah_qoz)
 ```
@@ -302,7 +288,6 @@ preview_layer(fp_utah_qoz)
 
 ```{r}
 #| label: transit-routes
-
 fp_transit_routes <- download_feature_layer(
   url = "https://maps.rideuta.com/server/rest/services/Hosted/UTA_Routes_and_Most_Recent_Ridership/FeatureServer/0",
   name = "UTA_Routes_and_Most_Recent_Ridership",
@@ -314,7 +299,6 @@ fp_transit_routes <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Transit Routes
 preview_layer(fp_transit_routes, column = "routetype")
 ```
@@ -334,7 +318,6 @@ fp_transit_stops <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Transit Stops
 preview_layer(fp_transit_stops)
 ```
@@ -343,7 +326,6 @@ preview_layer(fp_transit_stops)
 
 ```{r}
 #| label: bikeways
-
 fp_bikeways <- download_feature_layer(
   url = "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0",
   name = "Bikeways",
@@ -355,7 +337,6 @@ fp_bikeways <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Utah Bikeways
 preview_layer(fp_bikeways, column = "facility1", limit = 1000)
 ```
@@ -366,7 +347,6 @@ preview_layer(fp_bikeways, column = "facility1", limit = 1000)
 
 ```{r}
 #| label: freeway-exits
-
 fp_freeway_exits <- download_feature_layer(
   url = "https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0",
   name = "Freeway_Exit_Locations",
@@ -378,7 +358,6 @@ fp_freeway_exits <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Freeway Exits
 preview_layer(fp_freeway_exits)
 ```
@@ -389,7 +368,6 @@ preview_layer(fp_freeway_exits)
 #| label: taz_ato
 #| eval: false
 #| code-fold: true
-
 fp_taz_ato <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToOpportunities_gdb/FeatureServer/0",
   name = "TAZ_AccessToOpportunities_OY2023",
@@ -400,7 +378,6 @@ fp_taz_ato <- download_feature_layer(
 
 ```{r}
 #| label: taz_ato
-
 # ATO Source: "\\ModelAce\ModelAce-E\1 - TDM\1 - Official Release (full run)\v9x\v9.2\v9.2.0\Scenarios\OY_2023\5_AssignHwy\4_Summaries\WFv920_OY_2023_Access_to_Opportunity.csv"
 
 # 1. Define Paths
@@ -414,29 +391,26 @@ fp_ato_csv <- here::here(dirs$raw, "WFv920_OY_2023_Access_to_Opportunity.csv")
 if (file.exists(fp_taz_ato)) {
   message("✅ TAZ ATO layer already exists: ", fp_taz_ato)
 } else {
-  # Read TAZ + join CSV
-  sf_joined <- arrow::read_parquet(fp_wf_taz) |>
-    sf::st_as_sf(crs = CRS_WGS) |>
-    janitor::clean_names() |>
-    dplyr::left_join(
-      arrow::read_csv_arrow(fp_ato_csv) |>
-        janitor::clean_names() |>
-        dplyr::collect(),
-      by = "co_tazid"
-    )
-
-  # Write via DuckDB (null CRS, DuckDB 1.5 compatible)
   con_ato <- DBI::dbConnect(duckdb::duckdb())
   on.exit(DBI::dbDisconnect(con_ato, shutdown = TRUE))
   DBI::dbExecute(con_ato, "INSTALL spatial; LOAD spatial;")
   DBI::dbExecute(con_ato, "SET geometry_always_xy = true")
-  df_out <- sf::st_drop_geometry(sf_joined)
-  df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(sf_joined))
-  duckdb::duckdb_register(con_ato, "_write_tmp", df_out)
-  DBI::dbExecute(con_ato, glue::glue(
-    "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{fp_taz_ato}' (FORMAT PARQUET)"
-  ))
-  duckdb::duckdb_unregister(con_ato, "_write_tmp")
+
+  # Join TAZ geometry with ATO CSV inside DuckDB.
+  # EXCLUDE drops CSV columns that duplicate TAZ fields (TAZID, CO_TAZID, DevAcres).
+  # CSV column names are preserved as-is (Job_byAuto, Job_byTran, etc.) —
+  # downstream SQL in 3-spatial-operations.qmd references these exact names.
+  DBI::dbExecute(
+    con_ato,
+    glue::glue(
+      "COPY (
+      SELECT taz.*, ato.* EXCLUDE (TAZID, CO_TAZID, DevAcres)
+      FROM read_parquet('{fp_wf_taz}') taz
+      LEFT JOIN read_csv('{fp_ato_csv}', header = true) ato
+        ON taz.co_tazid = ato.CO_TAZID
+    ) TO '{fp_taz_ato}' (FORMAT PARQUET)"
+    )
+  )
 
   message("✅ Joined and saved to: ", fp_taz_ato)
 }
@@ -445,7 +419,6 @@ if (file.exists(fp_taz_ato)) {
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Access to Opportunities
 preview_layer(fp_taz_ato, column = "job_by_auto")
 ```
@@ -469,7 +442,6 @@ fp_edu_k12 <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check K-12 Schools
 preview_layer(fp_edu_k12)
 ```
@@ -489,7 +461,6 @@ fp_edu_higher <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Higher Education
 preview_layer(fp_edu_higher)
 ```
@@ -511,7 +482,6 @@ fp_health_fac <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Healthcare Facilities
 preview_layer(fp_health_fac)
 ```
@@ -533,7 +503,6 @@ fp_child_care <- process_local_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Childcare Facilities
 preview_layer(fp_child_care)
 ```
@@ -555,7 +524,6 @@ fp_grocery_store <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Grocery Stores
 preview_layer(fp_grocery_store)
 ```
@@ -575,7 +543,6 @@ fp_community_center <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Community Centers
 preview_layer(fp_community_center)
 ```
@@ -584,7 +551,6 @@ preview_layer(fp_community_center)
 
 ```{r}
 #| label: park-access
-
 # Download 5-Minute Service Area (300 seconds)
 fp_park_5min <- download_feature_layer(
   url = "https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/0",
@@ -605,7 +571,6 @@ fp_park_10min <- download_feature_layer(
 ```{r}
 #| label: verify
 #| eval: false
-
 # Check Walk Access to Parks and Open Spaces
 preview_layer(fp_park_access)
 ```
@@ -620,7 +585,6 @@ preview_layer(fp_park_access)
 ```{r}
 #| label: verify
 #| eval: false
-
 # List processed files to ensure structure is correct
 list.files(dirs$processed, recursive = TRUE)
 ```

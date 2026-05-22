@@ -121,20 +121,17 @@ process_isochrones <- function(
 
       # --- QUERY CONSTRUCTION ---
       if (!is.null(boundary_path)) {
-        transform_logic <- if (boundary_crs != "EPSG:4326") {
-          glue::glue("ST_Transform(geom, '{boundary_crs}', 'EPSG:4326', always_xy := true)")
-        } else {
-          "geom"
-        }
-        # 1. Read ANY boundary file -> 2. Dissolve All Features -> 3. Spatial Join
+        # Project boundary into analysis CRS; transform points at ST_Intersects time.
+        # ST_X/ST_Y are extracted from the original EPSG:4326 geometry for the ORS API.
         query_view <- glue::glue(
           "
           CREATE OR REPLACE VIEW input_points AS
           WITH region_source AS (
-            SELECT geometry as geom FROM read_parquet('{boundary_path}')
+            SELECT ST_Transform(geometry, '{boundary_crs}', '{crs}') as geom
+            FROM read_parquet('{boundary_path}')
           ),
           region_unified AS (
-            SELECT ST_Union_Agg({transform_logic}) as geom
+            SELECT ST_Union_Agg(geom) as geom
             FROM region_source
           )
           SELECT
@@ -143,7 +140,10 @@ process_isochrones <- function(
           FROM read_parquet('{path}') pts, region_unified
           WHERE
             {input_filter}
-            AND ST_Intersects(pts.geometry, region_unified.geom)
+            AND ST_Intersects(
+              ST_Transform(pts.geometry, 'EPSG:4326', '{crs}'),
+              region_unified.geom
+            )
         "
         )
         message(
@@ -151,6 +151,8 @@ process_isochrones <- function(
           input_filter,
           "] | Boundary: [",
           basename(boundary_path),
+          "] | Analysis CRS: [",
+          crs,
           "]"
         )
       } else {

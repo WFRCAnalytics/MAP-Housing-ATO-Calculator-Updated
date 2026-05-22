@@ -148,7 +148,7 @@ DBI::dbExecute(
   CREATE OR REPLACE TABLE targets_h3 AS
   SELECT
     CAST(h3_index AS UBIGINT) as h3_index, -- Strict type safety
-    ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
   FROM read_parquet('{fp_h3_grid}')
 "
   )
@@ -210,7 +210,7 @@ DBI::dbExecute(
     ) AS UBIGINT) as h3_index,
 
     -- 2. Transform to UTM for storage/buffer ops
-    ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom
+    ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}')) as geom
   FROM read_parquet('{fp_remm_parcels}')
   WHERE ST_IsValid(geometry)
 "
@@ -262,7 +262,7 @@ attach_admin_data <- function(conn, target_table, point_table) {
     CREATE OR REPLACE TEMP TABLE layer_muni AS
     SELECT
       ugrcode as CommCode,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
     FROM read_parquet('{fp_municipal_bound}')
   "
     )
@@ -275,7 +275,7 @@ attach_admin_data <- function(conn, target_table, point_table) {
     CREATE OR REPLACE TEMP TABLE layer_county AS
     SELECT
       countynbr as COUNTYNBR,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
     FROM read_parquet('{fp_county_bound}')
   "
     )
@@ -373,7 +373,7 @@ DBI::dbExecute(
     ) AS UBIGINT) as h3_index,
 
     -- 2. UTM Geometry (Spatial Match)
-    ST_Transform(ST_Centroid(geometry), '{CRS_WGS}', '{CRS_UTM}', always_xy := true) as geom
+    ST_Transform(ST_Centroid(geometry), '{CRS_WGS}', '{CRS_UTM}') as geom
 
   FROM read_parquet('{fp_remm_buildings}')
   WHERE ST_IsValid(geometry)
@@ -616,9 +616,9 @@ attach_job_access <- function(conn, target_table, point_table) {
       "
     CREATE OR REPLACE TEMP TABLE taz_access AS
     SELECT
-      ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)) as geom,
-      job_by_auto,
-      job_by_tran
+      ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}')) as geom,
+      Job_byAuto,
+      Job_byTran
     FROM read_parquet('{fp_taz_access}')
     WHERE ST_IsValid(geometry)
   "
@@ -655,9 +655,9 @@ attach_job_access <- function(conn, target_table, point_table) {
     glue::glue(
       "
     UPDATE {target_table}
-    SET \"AA\" = match.job_by_auto, \"AT\" = match.job_by_tran
+    SET \"AA\" = match.Job_byAuto, \"AT\" = match.Job_byTran
     FROM (
-      SELECT tp.rowid, t.job_by_auto, t.job_by_tran
+      SELECT tp.rowid, t.Job_byAuto, t.Job_byTran
       FROM {point_table} tp, taz_access t
       WHERE ST_Intersects(tp.geom, t.geom)
     ) match
@@ -768,7 +768,7 @@ process_layers <- function(conn, point_table, config) {
     SELECT
       ST_Simplify(
         ST_MakeValid(
-          ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}', always_xy := true)
+          ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}')
         ),
         {SIMPLIFICATION_TOLERANCE}
       ) as geom
@@ -970,7 +970,7 @@ DBI::dbExecute(
   glue::glue(
     "
   COPY (
-    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
+    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
     FROM targets_parcels
   ) TO '{fp_out_parcels}' (FORMAT PARQUET)
 "
@@ -986,7 +986,7 @@ DBI::dbExecute(
   glue::glue(
     "
   COPY (
-    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}', always_xy := true) AS geom
+    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
     FROM targets_h3
   ) TO '{fp_out_h3}' (FORMAT PARQUET)
 "

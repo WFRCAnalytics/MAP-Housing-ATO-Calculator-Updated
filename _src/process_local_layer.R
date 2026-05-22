@@ -154,7 +154,7 @@ process_local_layer <- function(
 
       # Build SELECT list:
       # - Non-geometry cols: original name → cleaned snake_case alias
-      # - Geometry col: force 2D + make valid + reproject → "geometry"
+      # - Geometry col: transform → make valid → force 2D
       col_sql <- paste(
         c(
           glue::glue('"{non_geom_orig}" AS "{non_geom_clean}"'),
