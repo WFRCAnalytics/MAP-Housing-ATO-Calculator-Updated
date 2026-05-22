@@ -26,7 +26,6 @@ renv::restore()
 #| label: setup-libraries
 #| message: false
 #| warning: false
-
 library(dplyr)
 library(tidyr)
 library(sf)
@@ -46,7 +45,6 @@ library(here)
 
 ```{r}
 #| label: setup-ors
-
 # --- Configuration ---
 # TRUE  = Use local Docker instance (Free, Unlimited, Fast)
 # FALSE = Use Public Cloud API (Limited tokens, Requires Key)
@@ -104,7 +102,6 @@ options(
 
 ```{r}
 #| label: setup-dirs
-
 # Setup Paths & Params
 dirs <- list(
   source = here::here("_src"), # Source custom functions
@@ -120,7 +117,6 @@ purrr::walk(dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-subdirs
-
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
   base = here::here(dirs$processed, "base_layers"),
@@ -136,7 +132,6 @@ purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-iso-subdirs
-
 # Define Sub-directories for Isochrones
 iso_dirs <- list(
   walking = here::here(dirs$isochrones, "foot-walking"),
@@ -151,7 +146,6 @@ purrr::walk(iso_dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-crs
-
 # Projection Constants
 CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
@@ -162,7 +156,6 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 
 ```{r}
 #| label: load-helpers
-
 source(here::here(dirs$source, "process_isochrones.R")) # Generate isochrones using OpenRouteService API
 source(here::here(dirs$source, "create_buffer.R")) # Generate equidistant buffers
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
@@ -175,7 +168,6 @@ source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files 
 
 ```{r}
 #| label: prep-boundary
-
 # Define inputs/outputs
 fp_regional_bound <- here::here(
   sub_dirs$base,
@@ -234,9 +226,8 @@ if (file.exists(fp_boundary_wftdm)) {
         FROM filled_polys
       )
 
-      -- 5. FINAL SELECT: Explicit Transform
-      SELECT
-        ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326', always_xy := true) as geometry
+      -- 5. Final output (session SET geometry_always_xy = true handles axis order)
+      SELECT ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326') as geometry
       FROM final_union
 
     ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
@@ -251,7 +242,6 @@ if (file.exists(fp_boundary_wftdm)) {
 
 ```{r}
 #| eval: false
-
 arrow::open_dataset(fp_boundary_wftdm) |>
   sf::st_as_sf(crs = CRS_WGS) |>
   mapgl::maplibre_view()
@@ -262,7 +252,6 @@ arrow::open_dataset(fp_boundary_wftdm) |>
 
 ```{r}
 #| label: gen-h3-grid
-
 # 1. Define Inputs/Outputs
 fp_boundary_wftdm <- here::here(
   sub_dirs$base,
@@ -320,7 +309,6 @@ if (file.exists(fp_h3_grid)) {
 
 ```{r}
 #| eval: false
-
 arrow::read_parquet(fp_h3_grid) |>
   sf::st_as_sf(crs = CRS_WGS) |>
   mapgl::maplibre_view()
@@ -330,7 +318,6 @@ arrow::read_parquet(fp_h3_grid) |>
 
 ```{r}
 #| label: config-layers
-
 # Master Input Configuration
 # - name: Output filename prefix
 # - filter: SQL filtering logic (default "1=1")
@@ -360,7 +347,6 @@ layer_config <- tibble::tribble(
 
 ```{r}
 #| label: iso-walking
-
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
@@ -375,7 +361,6 @@ layer_config |>
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$walking,
       dry_run = FALSE,
-      overwrite = TRUE
     )
   })
 ```
@@ -384,7 +369,6 @@ layer_config |>
 
 ```{r}
 #| label: iso-biking
-
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
@@ -397,8 +381,7 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$biking,
-      dry_run = FALSE,
-      overwrite = TRUE
+      dry_run = FALSE
     )
   })
 ```
@@ -407,7 +390,6 @@ layer_config |>
 
 ```{r}
 #| label: iso-driving
-
 layer_config |>
   # Optional: You can filter the config first if you only want specific layers for driving
   # dplyr::filter(name %in% c("Grocery", "Healthcare")) |>
@@ -420,8 +402,7 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$driving,
-      dry_run = FALSE,
-      overwrite = TRUE
+      dry_run = FALSE
     )
   })
 ```
@@ -430,7 +411,6 @@ layer_config |>
 
 ```{r}
 #| label: process-parks-graded
-
 # 1. Define Inputs/Outputs
 fp_park_5_in <- here::here(sub_dirs$amenities, "Parks_5min_ServiceArea.parquet")
 fp_park_10_in <- here::here(
@@ -537,7 +517,6 @@ if (file.exists(fp_parks_graded)) {
 ```{r}
 #| label: verify-isochrones
 #| eval: false
-
 # 1. Verify Folder Structure
 fs::dir_tree(dirs$isochrones)
 ```
@@ -545,7 +524,6 @@ fs::dir_tree(dirs$isochrones)
 
 ```{r}
 #| eval: false
-
 # 2. Visual Check: Compare Walking vs Biking vs Driving
 preview_layer(
   here::here(iso_dirs$walking, "Schools_HigherEd.parquet"),
@@ -555,7 +533,6 @@ preview_layer(
 
 ```{r}
 #| eval: false
-
 # Biking - Should be larger
 preview_layer(
   here::here(iso_dirs$biking, "Schools_HigherEd.parquet"),
@@ -565,7 +542,6 @@ preview_layer(
 
 ```{r}
 #| eval: false
-
 # Driving Should be much larger
 preview_layer(
   here::here(iso_dirs$driving, "Schools_HigherEd.parquet"),
