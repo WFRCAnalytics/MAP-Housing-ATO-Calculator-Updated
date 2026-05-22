@@ -235,11 +235,8 @@ if (file.exists(fp_boundary_wftdm)) {
       )
 
       -- 5. FINAL SELECT: Explicit Transform
-      --    ST_Transform(geometry, source_crs, target_crs, always_xy := true)
       SELECT
-        ST_AsWKB(
-          ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326', always_xy := true)
-        ) as geometry
+        ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326', always_xy := true) as geometry
       FROM final_union
 
     ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
@@ -274,10 +271,6 @@ fp_boundary_wftdm <- here::here(
 fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
 H3_RES <- 10 # Reference: https://gist.github.com/colbyn/001064f00385d253b42693c3889f9beb
 
-# The input boundary should now be EPSG:4326 from the previous step.
-# We define it explicitly here for the 3-argument ST_Transform.
-BOUNDARY_CRS <- CRS_WGS
-
 if (file.exists(fp_h3_grid)) {
   message("✅ H3 Grid already exists: ", fp_h3_grid)
 } else {
@@ -288,34 +281,24 @@ if (file.exists(fp_h3_grid)) {
   DBI::dbExecute(conn, "SET geometry_always_xy = true")
   DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
 
-  # Fix: Removed curly braces from comments to prevent glue parsing errors
   query_h3 <- glue::glue(
     "
     COPY (
       WITH boundary_parts AS (
-        -- 1. Read Boundary & FORCE Transform to 4326
-        --    ST_Transform(geom, source_crs, target_crs, always_xy := true)
-        SELECT
-          unnest(
-            ST_Dump(
-              ST_Transform(geometry, '{BOUNDARY_CRS}', 'EPSG:4326', always_xy := true)
-            )
-          ) as d
+        -- 1. Read boundary (already EPSG:4326 from prep-boundary)
+        SELECT unnest(ST_Dump(geometry)) as d
         FROM read_parquet('{fp_boundary_wftdm}')
       ),
 
       h3_indices AS (
-        SELECT
-          -- 2. Generate H3 Indices (Polyfill)
-          --    ST_AsText creates the WKT needed by H3
-          unnest(h3_polygon_wkt_to_cells(ST_AsText(d.geom), {H3_RES})) as h3_index
+        -- 2. Polyfill: convert each polygon part to H3 cell indices
+        SELECT unnest(h3_polygon_wkt_to_cells(ST_AsText(d.geom), {H3_RES})) as h3_index
         FROM boundary_parts
       )
 
       SELECT DISTINCT
         h3_index,
-        -- 3. Convert Index back to Geometry
-        --    H3 boundaries are naturally 4326
+        -- 3. Convert index back to geometry (H3 boundaries are natively 4326)
         h3_cell_to_boundary_wkb(h3_index) as geometry
       FROM h3_indices
 
