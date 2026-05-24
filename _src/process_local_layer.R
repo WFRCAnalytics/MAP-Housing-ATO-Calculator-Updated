@@ -45,7 +45,19 @@ process_local_layer <- function(
     stop("Missing packages: ", paste(missing_pkgs, collapse = ", "))
   }
 
-  # 2. Path Setup
+  # 2. GDAL Config — scoped to this call, restored on exit even if it errors.
+  # ONLY_CCW bypasses organizePolygons() DEFAULT, which is not thread-safe under
+  # DuckDB's parallel scan and crashes on ESRI FileGDB features with 100+ rings.
+  # ONLY_CCW is geometrically correct for ESRI data (inner rings are CCW by convention).
+  .old_ogp <- Sys.getenv("OGR_ORGANIZE_POLYGONS", unset = NA)
+  Sys.setenv(OGR_ORGANIZE_POLYGONS = "ONLY_CCW")
+  on.exit(
+    if (is.na(.old_ogp)) Sys.unsetenv("OGR_ORGANIZE_POLYGONS")
+    else Sys.setenv(OGR_ORGANIZE_POLYGONS = .old_ogp),
+    add = TRUE
+  )
+
+  # 3. Path Setup
   if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
   out_fp <- if (!is.null(partitioning)) {
     file.path(save_dir, name)
@@ -193,8 +205,36 @@ process_local_layer <- function(
       return(out_fp)
     },
     error = function(e) {
-      warning(paste("❌ Error processing", name, ":", e$message))
-      return(NULL)
+      # DuckDB ST_Read failed (ESRI CurvePolygon/CompoundCurve/MultiSurface in WKB).
+      # Fall back: sf reads and calls st_cast("MULTIPOLYGON") to linearize all
+      # curved types via GDAL's forceTo() before st_make_valid(), which would
+      # otherwise pass WKB type 12 to S2 and fail. DuckDB reads the data frame
+      # from memory via standard WKB binary and writes parquet.
+      message("⚠️ ST_Read failed (", conditionMessage(e), "), trying sf fallback...")
+      sf_data <- sf::st_read(dsn_path, layer = layer, quiet = TRUE)
+      sf_data <- sf::st_cast(sf_data, "MULTIPOLYGON")
+      sf_data <- sf::st_transform(sf_data, crs)
+      sf_data <- sf::st_zm(sf_data, drop = TRUE, what = "ZM")
+      sf_data <- janitor::clean_names(sf_data)
+      geom_col <- attr(sf_data, "sf_column")
+      wkb <- sf::st_as_binary(sf::st_geometry(sf_data))
+      class(wkb) <- "blob"
+      df_data <- sf::st_drop_geometry(sf_data)
+      df_data[[geom_col]] <- wkb
+      con_fb <- DBI::dbConnect(duckdb::duckdb())
+      on.exit(DBI::dbDisconnect(con_fb, shutdown = TRUE), add = TRUE)
+      DBI::dbExecute(con_fb, "INSTALL spatial; LOAD spatial;")
+      duckdb::duckdb_register(con_fb, "_sf_data", df_data)
+      DBI::dbExecute(con_fb, glue::glue(
+        "COPY (
+          SELECT
+            * EXCLUDE ({geom_col}),
+            ST_MakeValid(ST_GeomFromWKB({geom_col})) AS geometry
+          FROM _sf_data
+        ) TO '{out_fp}' (FORMAT PARQUET)"
+      ))
+      message(paste("💾 Saved Parquet File:", out_fp))
+      out_fp
     }
   )
 }

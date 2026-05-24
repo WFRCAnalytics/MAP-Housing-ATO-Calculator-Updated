@@ -165,9 +165,8 @@ preview_layer(fp_regional_bound)
 ### REMM Parcels
 
 ```{r}
-# REMM Parcels (from GDB)
 fp_remm_parcels <- process_local_layer(
-  path = "remm_base_year.gdb",
+  path = "remm_base_year_20221003/remm_base_year.gdb",
   layer = "parcels",
   name = "REMM_BY_parcels",
   save_dir = sub_dirs$parcels,
@@ -185,9 +184,8 @@ preview_layer(fp_remm_parcels, limit = 1000)
 ### REMM Buildings
 
 ```{r}
-# REMM Buildings (from GDB)
 fp_remm_buildings <- process_local_layer(
-  path = "remm_base_year.gdb",
+  path = "remm_base_year_20221003/remm_base_year.gdb",
   layer = "buildings",
   name = "REMM_BY_buildings",
   save_dir = sub_dirs$parcels,
