@@ -50,6 +50,9 @@ rsconnect/
 
 # Large files > 100MB
 **/remm_base_year.gdb.zip
+**/remm_base_year.gdb/
+**/remm_base_year.gpkg
+**/remm_base_year_20221003/
 **/REMM_BY_parcels.parquet
 **/REMM_BY_buildings.parquet
 
