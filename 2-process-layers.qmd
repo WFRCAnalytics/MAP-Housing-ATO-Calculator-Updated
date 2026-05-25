@@ -288,7 +288,7 @@ if (file.exists(fp_h3_grid)) {
       SELECT DISTINCT
         h3_index,
         -- 3. Convert index back to geometry (H3 boundaries are natively 4326)
-        h3_cell_to_boundary_wkb(h3_index) as geometry
+        ST_GeomFromWKB(h3_cell_to_boundary_wkb(h3_index)) as geometry
       FROM h3_indices
 
     ) TO '{fp_h3_grid}' (FORMAT PARQUET)

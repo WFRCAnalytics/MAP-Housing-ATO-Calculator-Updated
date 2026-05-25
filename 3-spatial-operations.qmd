@@ -26,7 +26,6 @@ renv::restore()
 #| label: setup-libraries
 #| message: false
 #| warning: false
-
 library(dplyr)
 library(tidyr)
 library(sf)
@@ -46,7 +45,6 @@ library(here)
 
 ```{r}
 #| label: setup-dirs
-
 # Setup Paths & Params
 dirs <- list(
   source = here::here("_src"), # Source custom functions
@@ -62,7 +60,6 @@ purrr::walk(dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-subdirs
-
 # Define Sub-directories (To match your existing structure)
 sub_dirs <- list(
   base = here::here(dirs$processed, "base_layers"),
@@ -78,7 +75,6 @@ purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-iso-subdirs
-
 # Define Sub-directories for Isochrones
 iso_dirs <- list(
   walking = here::here(dirs$isochrones, "foot-walking"),
@@ -93,7 +89,6 @@ purrr::walk(iso_dirs, ~ fs::dir_create(., recurse = TRUE))
 
 ```{r}
 #| label: setup-crs
-
 # Projection Constants
 CRS_STP <- "EPSG:3566" # NAD83 / Utah Central (Projected - ftUS)
 CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
@@ -104,7 +99,6 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 
 ```{r}
 #| label: load-helpers
-
 source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
 ```
 
@@ -114,9 +108,10 @@ We use DuckDB for all spatial operations to avoid loading millions of geometries
 
 ```{r}
 #| label: init-db
-
-# Create persistent connection for this session
-conn <- DBI::dbConnect(duckdb::duckdb())
+# File-based connection: table data and RTREE indexes persist across reconnections.
+# This allows periodic conn reset to clear MVCC undo buffers without losing setup work.
+fp_duckdb <- here::here("_data", "pipeline.duckdb")
+conn <- DBI::dbConnect(duckdb::duckdb(dbdir = fp_duckdb))
 
 # Load Spatial Extensions
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
@@ -136,7 +131,6 @@ We load H3 first to get the resolution, then use that resolution to load Parcels
 
 ```{r}
 #| label: load-h3
-
 fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
 
 # 1. Load Polygons (UTM)
@@ -190,7 +184,6 @@ message(glue::glue("ℹ️ Detected Grid Resolution: {res}"))
 
 ```{r}
 #| label: load-parcels
-
 fp_remm_parcels <- here::here(sub_dirs$parcels, "REMM_BY_parcels.parquet")
 
 # 1. Load Polygons (UTM)
@@ -245,7 +238,6 @@ A helper function to join City/County codes to any target table (Parcel or H3).
 
 ```{r}
 #| label: func-admin-join
-
 attach_admin_data <- function(conn, target_table, point_table) {
   message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
   fp_municipal_bound <- here::here(
@@ -333,7 +325,6 @@ attach_admin_data <- function(conn, target_table, point_table) {
 
 ```{r}
 #| label: run-admin-join
-
 # Pass the pre-calculated point tables we created in Part 1
 attach_admin_data(conn, "targets_parcels", "points_parcels")
 attach_admin_data(conn, "targets_h3", "points_h3")
@@ -345,7 +336,6 @@ We join the REMM buildings table. Since `building_type` contains full strings (e
 
 ```{r}
 #| label: building-codes
-
 # -----------------------------------------------------------------------------
 # 1. Load Buildings & Store as UTM (Projected)
 # -----------------------------------------------------------------------------
@@ -565,7 +555,6 @@ DBI::dbExecute(conn, "DROP TABLE points_buildings; DROP TABLE bc_map;")
 ```{r}
 #| label: check-missing-b3
 #| eval: false
-
 # Check H3 for missing BC values
 DBI::dbGetQuery(
   conn,
@@ -599,7 +588,6 @@ We attach the raw job access numbers from the TAZ layer. The normalization (divi
 
 ```{r}
 #| label: func-job-join
-
 fp_taz_access <- here::here(
   dirs$processed,
   "access",
@@ -672,7 +660,6 @@ attach_job_access <- function(conn, target_table, point_table) {
 
 ```{r}
 #| label: run-job-join
-
 # Run with pre-calculated points
 attach_job_access(conn, "targets_parcels", "points_parcels")
 attach_job_access(conn, "targets_h3", "points_h3")
@@ -686,7 +673,6 @@ We define all external layers here. This structure handles Binary (In/Out), Isoc
 
 ```{r}
 #| label: config-amenities
-
 # Helpers
 iso_walk <- function(f) here::here(dirs$isochrones, "foot-walking", f)
 iso_bike <- function(f) here::here(dirs$isochrones, "cycling-regular", f)
@@ -789,14 +775,20 @@ process_layers <- function(conn, point_table, config) {
     conn,
     glue::glue("ALTER TABLE {point_table} DROP COLUMN IF EXISTS {col}")
   )
+  # Binary uses DEFAULT 0 — eliminates the full-table null-fill UPDATE that was
+  # the primary source of DuckDB MVCC undo buffer accumulation.
+  default_val <- if (type == "binary") "0" else "NULL"
   DBI::dbExecute(
     conn,
-    glue::glue("ALTER TABLE {point_table} ADD COLUMN {col} DOUBLE DEFAULT NULL")
+    glue::glue(
+      "ALTER TABLE {point_table} ADD COLUMN {col} DOUBLE DEFAULT {default_val}"
+    )
   )
 
   # C. Execute Spatial Logic
   if (type == "binary") {
     # BINARY: Simple Intersection (Uses Index)
+    # DEFAULT 0 handles unmatched rows — no null-fill UPDATE needed.
     DBI::dbExecute(
       conn,
       glue::glue(
@@ -807,10 +799,6 @@ process_layers <- function(conn, point_table, config) {
       WHERE ST_Intersects({point_table}.geom, r.geom)
     "
       )
-    )
-    DBI::dbExecute(
-      conn,
-      glue::glue("UPDATE {point_table} SET {col} = 0 WHERE {col} IS NULL")
     )
   } else if (type == "isochrone") {
     # ISOCHRONE: Union & Iterate (Optimized)
@@ -888,19 +876,34 @@ We iterate through the config and apply logic to both tables.
 
 ```{r}
 #| label: run-engine
-
 message("🚀 Starting Staged Processing on Points...")
 
-# 1. Start Total Timer
 t_total_start <- Sys.time()
 
-amenity_config |>
-  purrr::pwalk(function(...) {
-    process_layers(conn, "points_parcels", list(...))
-    process_layers(conn, "points_h3", list(...))
-  })
+config_list <- purrr::transpose(amenity_config)
+RECONNECT_EVERY <- 2L # Close/reopen conn every N layers to destroy MVCC undo buffers
 
-# 4. End Total Timer & Log
+for (i in seq_along(config_list)) {
+  cfg <- config_list[[i]]
+
+  process_layers(conn, "points_parcels", cfg)
+  process_layers(conn, "points_h3", cfg)
+
+  # Periodic reconnect: closing the connection destroys accumulated transaction
+  # objects and undo buffers. Table data and RTREE indexes persist in pipeline.duckdb.
+  if (i %% RECONNECT_EVERY == 0L && i < length(config_list)) {
+    message(glue::glue(
+      "🔄 Reconnecting after layer {i}/{length(config_list)} (MVCC reset)..."
+    ))
+    DBI::dbDisconnect(conn, shutdown = TRUE)
+    conn <- DBI::dbConnect(duckdb::duckdb(dbdir = fp_duckdb))
+    DBI::dbExecute(conn, "LOAD spatial;")
+    DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
+    DBI::dbExecute(conn, "SET geometry_always_xy = true")
+    message("✅ Reconnected. Tables and indexes intact.")
+  }
+}
+
 t_total_end <- Sys.time()
 total_duration <- round(difftime(t_total_end, t_total_start, units = "mins"), 2)
 
@@ -911,7 +914,6 @@ message(glue::glue(
 
 ```{r}
 #| label: transfer-attributes
-
 message("📦 Transferring attributes from Points to Polygons...")
 
 transfer_columns <- function(conn, target_poly, source_point, config) {
@@ -960,7 +962,6 @@ We export the "Wide" tables (ID + all amenity times). We exclude the geometry to
 
 ```{r}
 #| label: export
-
 # 1. Parcels
 fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
 
@@ -1001,4 +1002,7 @@ message("🚀 Processing Complete!")
 ```{r}
 #| label: cleanup
 DBI::dbDisconnect(conn, shutdown = TRUE)
+# pipeline.duckdb is retained for inspection via the DuckDB CLI or R.
+# To start completely fresh on the next run, delete it:
+# fs::file_delete(fp_duckdb)
 ```

@@ -64,6 +64,10 @@ _data/isochrones/*
 # Environment Variiables
 _environment
 
+# DuckDB scratch files (regenerated each run)
+_data/pipeline.duckdb
+_data/pipeline.duckdb.wal
+
 # vdoc files
 .vdoc.*.r
 .tmp/*
