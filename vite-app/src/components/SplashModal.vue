@@ -31,11 +31,13 @@
           3. Adjust the sliders to <strong>prioritize the accessibility factors</strong> that matter most to you.
           <p style="margin-top:8px;margin-bottom:0;">The tool will generate a heat map highlighting locations ranging from <strong>most accessible</strong> to <strong>least accessible</strong> based on your inputs.</p>
         </div>
-        <button class="btn-get-started" @click="$emit('close')">GET STARTED</button>
       </div>
       <div class="splash-footer">
-        <strong>Questions or Comments?</strong><br/>
-        <a href="mailto:christy.dahlberg@wfrc.utah.gov"><i class="fa-solid fa-envelope"></i> Christy Dahlberg</a>
+        <button class="btn-get-started" @click="$emit('close')">GET STARTED</button>
+        <div class="splash-footer-note">
+          <strong>Questions or Comments?</strong><br/>
+          <a href="mailto:christy.dahlberg@wfrc.utah.gov"><i class="fa-solid fa-envelope"></i> Christy Dahlberg</a>
+        </div>
       </div>
     </div>
   </div>
