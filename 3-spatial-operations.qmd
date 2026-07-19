@@ -801,39 +801,33 @@ process_layers <- function(conn, point_table, config) {
       )
     )
   } else if (type == "isochrone") {
-    # ISOCHRONE: Union & Iterate (Optimized)
+    # ISOCHRONE: Single-UPDATE approach via MIN(val) join.
+    # Collapses N band UPDATEs into 1, reducing MVCC undo pressure by ~10x.
+    # MIN(val) picks the innermost (smallest) band, matching the old ascending IS NULL logic.
 
-    DBI::dbExecute(
-      conn,
-      "
+    DBI::dbExecute(conn, "
       CREATE OR REPLACE TEMP TABLE grouped_iso AS
-      SELECT val, ST_MakeValid(ST_Union_Agg(geom)) as geom
+      SELECT val, ST_MakeValid(ST_Union_Agg(geom)) AS geom
       FROM raw_layer
       GROUP BY val
-    "
-    )
+    ")
 
-    vals <- DBI::dbGetQuery(
-      conn,
-      "SELECT DISTINCT val FROM grouped_iso ORDER BY val ASC"
-    )$val
+    DBI::dbExecute(conn, glue::glue("
+      CREATE OR REPLACE TEMP TABLE iso_result AS
+      SELECT pt.rowid, MIN(g.val) AS matched_val
+      FROM {point_table} pt
+      JOIN grouped_iso g ON ST_Intersects(pt.geom, g.geom)
+      GROUP BY pt.rowid
+    "))
 
-    for (v in vals) {
-      DBI::dbExecute(
-        conn,
-        glue::glue(
-          "
-        UPDATE {point_table}
-        SET {col} = {v}
-        FROM grouped_iso g
-        WHERE {point_table}.{col} IS NULL
-          AND g.val = {v}
-          AND ST_Intersects({point_table}.geom, g.geom)
-      "
-        )
-      )
-    }
-    DBI::dbExecute(conn, "DROP TABLE grouped_iso")
+    DBI::dbExecute(conn, glue::glue("
+      UPDATE {point_table}
+      SET {col} = r.matched_val
+      FROM iso_result r
+      WHERE {point_table}.rowid = r.rowid
+    "))
+
+    DBI::dbExecute(conn, "DROP TABLE grouped_iso; DROP TABLE iso_result;")
   } else if (type == "buffer") {
     # BUFFER: The Ultra-Fast Method (ST_DWithin)
     # Sorted Distance Loop (Fastest for Nearest Bin)
@@ -880,8 +874,16 @@ message("🚀 Starting Staged Processing on Points...")
 
 t_total_start <- Sys.time()
 
+reconnect_conn <- function(fp_duckdb) {
+  conn <- DBI::dbConnect(duckdb::duckdb(dbdir = fp_duckdb))
+  DBI::dbExecute(conn, "LOAD spatial;")
+  DBI::dbExecute(conn, "LOAD h3;")
+  DBI::dbExecute(conn, "SET geometry_always_xy = true")
+  conn
+}
+
 config_list <- purrr::transpose(amenity_config)
-RECONNECT_EVERY <- 2L # Close/reopen conn every N layers to destroy MVCC undo buffers
+RECONNECT_EVERY <- 1L # Reconnect after every layer — one isochrone alone fills the buffer
 
 for (i in seq_along(config_list)) {
   cfg <- config_list[[i]]
@@ -889,17 +891,14 @@ for (i in seq_along(config_list)) {
   process_layers(conn, "points_parcels", cfg)
   process_layers(conn, "points_h3", cfg)
 
-  # Periodic reconnect: closing the connection destroys accumulated transaction
-  # objects and undo buffers. Table data and RTREE indexes persist in pipeline.duckdb.
+  # CHECKPOINT flushes the WAL before disconnect so committed versions don't
+  # linger in memory. Closing the connection then destroys all MVCC undo buffers.
+  # Table data and RTREE indexes persist in pipeline.duckdb across reconnections.
   if (i %% RECONNECT_EVERY == 0L && i < length(config_list)) {
-    message(glue::glue(
-      "🔄 Reconnecting after layer {i}/{length(config_list)} (MVCC reset)..."
-    ))
+    message(glue::glue("🔄 Checkpoint + reconnect after layer {i}/{length(config_list)}..."))
+    DBI::dbExecute(conn, "CHECKPOINT")
     DBI::dbDisconnect(conn, shutdown = TRUE)
-    conn <- DBI::dbConnect(duckdb::duckdb(dbdir = fp_duckdb))
-    DBI::dbExecute(conn, "LOAD spatial;")
-    DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
-    DBI::dbExecute(conn, "SET geometry_always_xy = true")
+    conn <- reconnect_conn(fp_duckdb)
     message("✅ Reconnected. Tables and indexes intact.")
   }
 }
@@ -917,36 +916,25 @@ message(glue::glue(
 message("📦 Transferring attributes from Points to Polygons...")
 
 transfer_columns <- function(conn, target_poly, source_point, config) {
-  config |>
-    purrr::pwalk(function(...) {
-      row <- list(...)
-      col <- row$col_name
+  # Single CTAS swap: zero MVCC undo entries vs. N full-table UPDATEs.
+  cols <- config$col_name
+  col_select  <- paste(glue::glue('src."{cols}"'), collapse = ",\n    ")
+  col_exclude <- paste(paste0('"', cols, '"'), collapse = ", ")
 
-      message(glue::glue("  ↳ Transferring {col}..."))
+  message(glue::glue("📦 Rebuilding {target_poly} with {length(cols)} amenity columns..."))
 
-      # 1. RESET COLUMN on Target (Drop if exists)
-      DBI::dbExecute(
-        conn,
-        glue::glue("ALTER TABLE {target_poly} DROP COLUMN IF EXISTS {col}")
-      )
-      DBI::dbExecute(
-        conn,
-        glue::glue("ALTER TABLE {target_poly} ADD COLUMN {col} DOUBLE")
-      )
+  DBI::dbExecute(conn, glue::glue("
+    CREATE OR REPLACE TABLE {target_poly}_new AS
+    SELECT poly.* EXCLUDE ({col_exclude}),
+           {col_select}
+    FROM {target_poly} poly
+    LEFT JOIN {source_point} src ON poly.rowid = src.rowid
+  "))
 
-      # 2. Update Target from Source using RowID
-      DBI::dbExecute(
-        conn,
-        glue::glue(
-          "
-        UPDATE {target_poly}
-        SET {col} = source.{col}
-        FROM {source_point} source
-        WHERE {target_poly}.rowid = source.rowid
-      "
-        )
-      )
-    })
+  DBI::dbExecute(conn, glue::glue("DROP TABLE {target_poly};"))
+  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly}_new RENAME TO {target_poly};"))
+
+  message(glue::glue("  ✅ {target_poly} rebuilt."))
 }
 
 # Run Transfer
