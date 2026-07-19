@@ -296,10 +296,23 @@ code.hljs { border-radius: 6px; font-family: 'Fira Code', Consolas, monospace; f
 .url-box { background: #e9ecef; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; word-break: break-all; margin-bottom: 15px; color: #333; }
 
 /* ── Splash ── */
-.splash-header { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); padding: 28px 24px; text-align: center; }
+.splash-header { background: linear-gradient(135deg, #233A57 0%, #3a5c85 100%); padding: 28px 24px; text-align: center; flex-shrink: 0; }
 .splash-header img { height: 58px; margin-bottom: 10px; }
 .splash-header h2 { font-family: 'Oswald', sans-serif; color: white; font-size: 1.8rem; letter-spacing: 1px; }
-.splash-body { padding: 25px 35px; color: #444; font-family: 'Open Sans', sans-serif; }
+.splash-body {
+  padding: 25px 35px; color: #444; font-family: 'Open Sans', sans-serif;
+  flex: 1; min-height: 0; overflow-y: auto;
+  /* Scroll shadows: fade at top/bottom only when there's more content to reveal */
+  background:
+    linear-gradient(white 30%, transparent) 0 0,
+    linear-gradient(transparent, white 70%) 0 100%,
+    radial-gradient(farthest-side at 50% 0, rgba(0,0,0,0.15), transparent) 0 0,
+    radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,0.15), transparent) 0 100%;
+  background-repeat: no-repeat;
+  background-color: white;
+  background-size: 100% 24px, 100% 24px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
+}
 .splash-body > p { font-size: 1.1rem; text-align: center; margin-bottom: 16px; }
 .feature-grid { display: flex; gap: 14px; margin: 14px 0; }
 .feature-item { flex: 1; padding: 14px 10px; background: #f8f9fa; border-radius: 8px; transition: transform 0.2s; text-align: center; }
@@ -308,9 +321,10 @@ code.hljs { border-radius: 6px; font-family: 'Fira Code', Consolas, monospace; f
 .feature-title { font-weight: 700; font-size: 0.9rem; text-transform: uppercase; color: #233A57; margin-bottom: 5px; }
 .feature-text { font-size: 0.8rem; }
 .instruction-box { background: #eef6fc; border-left: 4px solid #377EB8; padding: 15px; margin: 20px 0; font-size: 0.95rem; line-height: 1.5; color: #444; }
-.splash-footer { background: #f1f1f1; padding: 15px 35px; font-size: 0.85rem; border-top: 1px solid #ddd; text-align: center; }
+.splash-footer { background: #f1f1f1; padding: 15px 25px; font-size: 0.85rem; border-top: 1px solid #ddd; text-align: center; flex-shrink: 0; }
+.splash-footer-note { margin-top: 10px; }
 .splash-footer a { color: #233A57; text-decoration: none; }
-.btn-get-started { background: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.1rem; padding: 10px 36px; border-radius: 30px; border: none; cursor: pointer; transition: all 0.3s; display: block; width: 100%; margin-top: 14px; }
+.btn-get-started { background: #233A57; color: white; font-family: 'Oswald', sans-serif; font-size: 1.1rem; padding: 10px 36px; border-radius: 30px; border: none; cursor: pointer; transition: all 0.3s; display: block; width: 100%; }
 .btn-get-started:hover { background: #e8572d; }
 
 /* ── Layer Control Panel ── */
