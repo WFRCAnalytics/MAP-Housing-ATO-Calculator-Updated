@@ -110,7 +110,7 @@ Most layers are ArcGIS Feature Services, fetched and cached as GeoParquet in `_d
 | [Licensed Health Care Facilities](https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0) | `AH` isochrone |
 | HIFLD Open Child Care Centers (local file, filtered to `STATE = 'UT'`) | `AC` isochrone |
 | [Utah Grocery and Food Stores](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0) | `AG` isochrone |
-| [Community Centers](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412) ⚠️ placeholder, flagged in code to be replaced with a UGRC source | `AM` isochrone |
+| [Community Centers](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412) | `AM` isochrone |
 | [Access to Parks](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/0) | `AP` graded park-access layer |
 
 ## Interactive apps
