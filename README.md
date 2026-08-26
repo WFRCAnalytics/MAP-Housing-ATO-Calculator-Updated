@@ -91,7 +91,7 @@ is_cost <- "^(TT_|AC|AH|AG|AM|AE_|TA_|TF|AP)"  # Column-prefix regex → cost (i
 
 ## Data sources
 
-All remote layers are ArcGIS Feature Services, fetched and cached as GeoParquet in `_data/processed/`.
+Most layers are ArcGIS Feature Services, fetched and cached as GeoParquet in `_data/processed/`; a couple are local files dropped into `_data/raw/` (noted below).
 
 | Source | Used for |
 |---|---|
@@ -108,9 +108,9 @@ All remote layers are ArcGIS Feature Services, fetched and cached as GeoParquet 
 | [Freeway Exit Locations](https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0) | `TF` isochrone |
 | [Schools PreK-12](https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0) / [Higher Education](https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0) | `AE_K12` / `AE_High` isochrones |
 | [Licensed Health Care Facilities](https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0) | `AH` isochrone |
-| Childcare Centers | `AC` isochrone |
+| HIFLD Open Child Care Centers (local file, filtered to `STATE = 'UT'`) | `AC` isochrone |
 | [Utah Grocery and Food Stores](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0) | `AG` isochrone |
-| Community Centers | `AM` isochrone |
+| [Community Centers](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412) ⚠️ placeholder, flagged in code to be replaced with a UGRC source | `AM` isochrone |
 | [Access to Parks](https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/0) | `AP` graded park-access layer |
 
 ## Interactive apps
