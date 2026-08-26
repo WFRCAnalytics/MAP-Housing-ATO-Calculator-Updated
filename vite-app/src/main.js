@@ -34,3 +34,18 @@ app.directive('tooltip', {
 })
 
 app.mount('#app')
+
+// Favicon: colored mark in light mode, white mark in dark mode.
+// Done in JS (not a <link media="..."> pair) because browser support for
+// theme-conditional favicon <link> tags is inconsistent — matchMedia is not.
+;(function () {
+  const link = document.getElementById('app-favicon')
+  if (!link) return
+  const base = import.meta.env.BASE_URL
+  const mql = window.matchMedia('(prefers-color-scheme: dark)')
+  const applyTheme = (isDark) => {
+    link.href = `${base}${isDark ? 'favicon-dark.png' : 'favicon.png'}`
+  }
+  applyTheme(mql.matches)
+  mql.addEventListener('change', (e) => applyTheme(e.matches))
+})()

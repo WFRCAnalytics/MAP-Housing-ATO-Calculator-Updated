@@ -2,6 +2,26 @@
   <nav id="navbar">
     <img :src="logoUrl" alt="WFRC" />
     <span>Wasatch Front Housing Site Evaluator</span>
+    <div id="navbar-links">
+      <a
+        href="https://github.com/WFRCAnalytics/MAP-Housing-ATO-Calculator-Updated/blob/main/README.md"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Documentation"
+      >
+        <i class="fa-regular fa-file-lines"></i> Documentation
+      </a>
+      <a
+        class="icon-only"
+        href="https://github.com/WFRCAnalytics/MAP-Housing-ATO-Calculator-Updated"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="GitHub Repository"
+        aria-label="GitHub Repository"
+      >
+        <i class="fa-brands fa-github"></i>
+      </a>
+    </div>
   </nav>
 
   <div id="app-layout">
