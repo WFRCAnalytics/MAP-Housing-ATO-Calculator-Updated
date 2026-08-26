@@ -37,6 +37,40 @@ h1, h2, h3, h4, h5 {
   font-size: 1.5rem;
   text-transform: uppercase;
 }
+#navbar-links {
+  margin-left: auto;
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+#navbar-links a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  font-family: 'Oswald', sans-serif;
+  font-weight: 500;
+  font-size: 0.72rem;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+#navbar-links a:first-child { border-left: none; }
+#navbar-links a i { font-size: 0.82rem; line-height: 1; }
+#navbar-links a.icon-only { padding: 0 13px; }
+#navbar-links a:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+#navbar-links a:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: -2px; }
 
 /* ── Layout ── */
 #app-layout {
