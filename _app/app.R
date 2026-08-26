@@ -401,6 +401,25 @@ ui <- bslib::page_navbar(
   header = tags$head(
     useShinyjs(),
     waiter::use_waiter(),
+    # Favicon: WFRC's abbreviated mark, square-cropped. Colored version by
+    # default, swapped for the white version in dark browser/OS theme via
+    # matchMedia() below. Done in JS rather than a <link media="..."> pair
+    # because browser support for theme-conditional favicon <link> tags is
+    # inconsistent — matchMedia is not.
+    tags$link(id = "app-favicon", rel = "icon", type = "image/png", href = "favicon.png"),
+    tags$script(HTML(
+      "
+      (function () {
+        var link = document.getElementById('app-favicon');
+        var mql = window.matchMedia('(prefers-color-scheme: dark)');
+        function applyTheme(isDark) {
+          link.href = isDark ? 'favicon-dark.png' : 'favicon.png';
+        }
+        applyTheme(mql.matches);
+        mql.addEventListener('change', function (e) { applyTheme(e.matches); });
+      })();
+    "
+    )),
     tags$link(
       rel = "stylesheet",
       href = "https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;700&display=swap"
@@ -461,7 +480,18 @@ ui <- bslib::page_navbar(
       .navbar { background-color: #233A57 !important; padding: 0px 15px !important; min-height: 40px !important; height: auto !important; }
       .navbar > .container-fluid { padding: 7.5px 0 !important; min-height: 45px !important; display: flex; align-items: center; }
       .navbar-brand { font-family: 'Oswald', sans-serif; font-weight: 700; color: white !important; font-size: 1.5rem; text-transform: uppercase; padding: 0 !important; margin: 0 !important; display: flex; align-items: center; height: 40px; }
-      .navbar-nav { display: none !important; }
+      /* The single unnamed nav_panel (the map tab) renders as an empty-looking tab —
+         hide just that first <li>, not the whole .navbar-nav, so the nav_spacer() +
+         nav_item() doc links added after it can still render right-aligned. */
+      .navbar-nav > li:first-child { display: none !important; }
+      .navbar-nav { align-items: center; }
+      .navbar-doc-links { margin-left: auto; display: flex; align-items: stretch; height: 32px; border-radius: 7px; overflow: hidden; background: rgba(255, 255, 255, 0.07); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+      .navbar-doc-links a { display: flex; align-items: center; gap: 7px; padding: 0 14px; border-left: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.75); text-decoration: none; font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 0.72rem; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; transition: background 0.15s ease, color 0.15s ease; }
+      .navbar-doc-links a:first-child { border-left: none; }
+      .navbar-doc-links a i { font-size: 0.82rem; line-height: 1; }
+      .navbar-doc-links a.icon-only { padding: 0 13px; }
+      .navbar-doc-links a:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+      .navbar-doc-links a:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: -2px; }
       .control-label, .shiny-input-container label, .step-header { font-family: 'Oswald', sans-serif; font-weight: 500; color: #233A57; text-transform: uppercase; font-size: 1rem; }
       .accordion-button { font-family: 'Oswald', sans-serif; font-weight: 500; color: #5a87c6; text-transform: uppercase; font-size: 0.9rem !important; }
       .accordion-body .control-label { font-size: 0.85rem !important; color: #444; }
@@ -871,6 +901,29 @@ ui <- bslib::page_navbar(
             )
           )
         )
+      )
+    )
+  ),
+  bslib::nav_spacer(),
+  bslib::nav_item(
+    shiny::div(
+      class = "navbar-doc-links",
+      tags$a(
+        href = "https://github.com/WFRCAnalytics/MAP-Housing-ATO-Calculator-Updated/blob/main/README.md",
+        target = "_blank",
+        rel = "noopener noreferrer",
+        title = "Documentation",
+        shiny::icon("file-lines"),
+        "Documentation"
+      ),
+      tags$a(
+        class = "icon-only",
+        href = "https://github.com/WFRCAnalytics/MAP-Housing-ATO-Calculator-Updated",
+        target = "_blank",
+        rel = "noopener noreferrer",
+        title = "GitHub Repository",
+        `aria-label` = "GitHub Repository",
+        shiny::icon("github")
       )
     )
   )
