@@ -123,7 +123,6 @@ let cachedRows = []
 let colorTimer = null
 let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's cities_sf
 let roadsMajorLayerIds = []
-let roadsMinorLayerIds = []
 
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
@@ -223,59 +222,60 @@ function setupMapLayers() {
 // permanently hiding + duplicating every road (which fought LiteBase's own
 // label ordering — see git history for the mess that caused), the
 // duplicate now only exists while toggled on: cloned from UGRC's OWN
-// road-casing layers (real colors/widths/zoom bands), added above the
-// hexagons, with the originals hidden underneath to avoid double-drawing.
-// Toggling off removes the clones and restores the originals — "normal"
-// layering, untouched.
+// road-casing layers (real colors/widths/zoom bands) for MAJOR roads only
+// — everything else (ramps/collectors, local roads) is left untouched, in
+// its normal position. Toggling off removes the clones and restores the
+// originals.
 function setRoadsOnTop(visible) {
   const map = mapInstance
   if (!map) return
   const roadSourceLayers = ['Roads - white version', 'Roads - Interstates and Ramps - white version']
+  // Every road class is distinguished by a numeric `_symbol` code
+  // (confirmed against the real LiteBase style.json): 0 Interstates,
+  // 1 Ramps/Collectors, 2 US Highways, 3 State Highways, 4 Major Local
+  // Roads Paved (UGRC's nearest equivalent to "arterial"), 5 Major Local
+  // Roads Not Paved, 6 Other Federal Aid Roads, 7 Local Roads. Interstate/
+  // US/state highway/arterial count as "major," plus ramps/collectors —
+  // excluding those would leave a visible gap in the highlight at every
+  // interchange, since a ramp is a separate `_symbol` from the mainline
+  // it connects to.
+  const MAJOR_ROAD_SYMBOLS = [0, 1, 2, 3, 4]
 
   if (visible) {
-    if (roadsMajorLayerIds.length || roadsMinorLayerIds.length) return // already shown
-    // Captured once, before any "redraw__" clones exist — reused for both
-    // hiding and cloning below.
+    if (roadsMajorLayerIds.length) return // already shown
     const style = map.getStyle()
     const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
-    const originals = style.layers.filter(l => roadSourceLayers.includes(l['source-layer']))
-    originals.forEach(l => {
+    // Both source-layers are included — "Roads - Interstates and Ramps -
+    // white version" is an extra-wide highlight UGRC draws underneath the
+    // standard casing/fill from "Roads - white version" specifically for
+    // Interstates; cloning only the latter (a prior bug) left interstates
+    // visibly thinner than UGRC's own combined styling.
+    const majors = style.layers.filter(
+      l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2])
+    )
+    majors.forEach(l => {
       try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
     })
-    // Every road class is distinguished by a numeric `_symbol` code
-    // (confirmed against the real LiteBase style.json): 0 Interstates,
-    // 1 Ramps/Collectors, 2 US Highways, 3 State Highways, 4 Major Local
-    // Roads Paved, 5 Major Local Roads Not Paved, 6 Other Federal Aid
-    // Roads, 7 Local Roads. "Major" here is Interstates/US/State
-    // highways; everything else is "minor." Both source-layers are
-    // cloned — "Roads - Interstates and Ramps - white version" is an
-    // extra-wide highlight UGRC draws underneath the standard casing/fill
-    // from "Roads - white version" specifically for Interstates/Ramps;
-    // cloning only the latter (a prior bug) left interstates visibly
-    // thinner than UGRC's own combined styling.
-    const MAJOR_ROAD_SYMBOLS = [0, 2, 3]
     try {
-      originals.forEach(l => {
-        const symbol = l.filter?.[2]
+      majors.forEach(l => {
         const id = `redraw__${l.id}`
         map.addLayer({ ...l, id }, firstLabelId)
-        ;(MAJOR_ROAD_SYMBOLS.includes(symbol) ? roadsMajorLayerIds : roadsMinorLayerIds).push(id)
+        roadsMajorLayerIds.push(id)
       })
     } catch (e) {
       console.warn('UGRC road redraw layers unavailable:', e)
     }
   } else {
-    ;[...roadsMajorLayerIds, ...roadsMinorLayerIds].forEach(id => {
+    roadsMajorLayerIds.forEach(id => {
       if (map.getLayer(id)) map.removeLayer(id)
     })
     roadsMajorLayerIds = []
-    roadsMinorLayerIds = []
     // Re-fetch now that the clones are gone — filtering the pre-removal
     // snapshot here would also match the (now-removed) clones, since they
     // carry the same original `source-layer` value, and MapLibre errors
     // trying to restyle a layer id that no longer exists.
     map.getStyle().layers
-      .filter(l => roadSourceLayers.includes(l['source-layer']))
+      .filter(l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2]))
       .forEach(l => {
         try { map.setLayoutProperty(l.id, 'visibility', 'visible') } catch {}
       })
