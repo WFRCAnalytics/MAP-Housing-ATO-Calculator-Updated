@@ -5,7 +5,7 @@
       <Multiselect
         v-model="selectedCities"
         :options="props.cities"
-        mode="multiple"
+        mode="tags"
         :searchable="true"
         label="label"
         value-prop="value"

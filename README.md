@@ -150,6 +150,8 @@ Create `_environment` with your API key if you aren't running a local ORS instan
 ORS_API_KEY=your_key_here
 ```
 
+`vite-app`'s address geocoder calls UGRC data through AGRC's [masquerade](https://github.com/agrc/masquerade) proxy (`masquerade.ugrc.utah.gov`) — a public, unauthenticated, CORS-enabled Esri-compatible locator, so no API key or config is needed. It falls back to Nominatim for anything UGRC doesn't index (e.g. business/POI names).
+
 ## Running the pipeline
 
 Run the four Quarto steps in order — each writes standardized GeoParquet that the next step reads:

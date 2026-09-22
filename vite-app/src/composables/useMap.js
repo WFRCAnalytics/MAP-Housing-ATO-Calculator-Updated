@@ -2,6 +2,7 @@ import maplibregl from 'maplibre-gl'
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
 import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css'
 import { MAP_CENTER, MAP_ZOOM } from '../config/constants.js'
+import { buildUgrcLiteStyle } from './ugrcBasemap.js'
 
 let mapInstance = null
 let _extentBounds = null
@@ -10,7 +11,7 @@ export function setExtentBounds(bounds) {
   _extentBounds = bounds
 }
 
-// ── Nominatim geocoder API ────────────────────────────
+// ── Nominatim geocoder API — place/POI search, used as a fallback ────
 const nominatimApi = {
   forwardGeocode: async (config) => {
     try {
@@ -35,6 +36,61 @@ const nominatimApi = {
         }),
       }
     } catch { return { features: [] } }
+  },
+}
+
+// ── UGRC geocoder API — via AGRC's "masquerade" proxy, which impersonates
+// an Esri locator (findAddressCandidates/suggest) in front of UGRC data.
+// Public, unauthenticated, CORS-enabled — no API key needed.
+// https://github.com/agrc/masquerade
+const MASQUERADE_URL = 'https://masquerade.ugrc.utah.gov/arcgis/rest/services/UtahLocator/GeocodeServer'
+
+function candidatesToFeatures(candidates) {
+  return candidates.map(c => {
+    const center = [c.location.x, c.location.y]
+    return {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: center },
+      place_name: c.address,
+      text: c.address,
+      place_type: ['address'],
+      center,
+    }
+  })
+}
+
+async function findAddressCandidates(text, magicKey) {
+  const params = new URLSearchParams({ SingleLine: text, outSR: '4326', f: 'json' })
+  if (magicKey) params.set('magicKey', magicKey)
+  const res = await fetch(`${MASQUERADE_URL}/findAddressCandidates?${params}`)
+  const body = await res.json()
+  return body.candidates ?? []
+}
+
+const ugrcApi = {
+  forwardGeocode: async (config) => {
+    try {
+      // A complete "street, city/zip" query resolves directly.
+      let candidates = await findAddressCandidates(config.query)
+
+      // Partial text (as the user is still typing) or a bare place name
+      // (e.g. "Sugar House") needs the suggest endpoint, then a follow-up
+      // lookup per suggestion (via its magicKey) to get coordinates.
+      if (!candidates.length) {
+        const res = await fetch(`${MASQUERADE_URL}/suggest?${new URLSearchParams({ text: config.query, f: 'json' })}`)
+        const { suggestions = [] } = await res.json()
+        const resolved = await Promise.all(
+          suggestions.slice(0, 5).map(s => findAddressCandidates(s.text, s.magicKey))
+        )
+        candidates = resolved.flat()
+      }
+
+      if (candidates.length) return { features: candidatesToFeatures(candidates) }
+    } catch { /* fall through to Nominatim */ }
+
+    // No UGRC match (e.g. a business/POI name UGRC doesn't index) — fall
+    // back to Nominatim.
+    return nominatimApi.forwardGeocode(config)
   },
 }
 
@@ -76,10 +132,12 @@ class TiltResetControl {
 }
 
 
-export function initMap(containerId) {
+export async function initMap(containerId) {
+  const style = await buildUgrcLiteStyle()
+
   mapInstance = new maplibregl.Map({
     container: containerId,
-    style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+    style,
     center: MAP_CENTER,
     zoom: MAP_ZOOM,
     preserveDrawingBuffer: true,
@@ -88,11 +146,13 @@ export function initMap(containerId) {
   // top-left — order determines top-to-bottom stacking (first = topmost)
   // 1. Address search
   mapInstance.addControl(
-    new MaplibreGeocoder(nominatimApi, {
+    new MaplibreGeocoder(ugrcApi, {
       maplibregl,
       placeholder: 'Search address…',
       proximity: { longitude: MAP_CENTER[0], latitude: MAP_CENTER[1] },
       flyTo: { duration: 1500 },
+      showResultsWhileTyping: true,
+      minLength: 3,
     }),
     'top-left'
   )
