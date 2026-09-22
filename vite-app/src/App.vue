@@ -87,7 +87,7 @@ const weights = reactive(
   Object.fromEntries(SLIDER_DEFS.map(d => [d.col, 0.5]))
 )
 const layerVisible = reactive({
-  'roads-major': true,
+  'roads-major': false,
   'h3-heatmap': true,
   'city-bounds': true,
   w_CM: false, w_CU: false, w_CC: false, w_CN: false,
@@ -122,10 +122,11 @@ let mapInstance = null
 let cachedRows = []
 let colorTimer = null
 let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's cities_sf
+let roadsMajorLayerIds = []
 
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
-  mapInstance = initMap('map')
+  mapInstance = await initMap('map')
   mapInstance.on('style.load', async () => {
     setupMapLayers()
     mapReady.value = true
@@ -137,26 +138,13 @@ function setupMapLayers() {
   const map = mapInstance
   const style = map.getStyle()
 
-  // Find the first label (symbol) layer in the Carto style so we can insert all
-  // our data layers BEFORE it — labels always render on top of hexagons/roads.
-  const firstLabelId = style.layers.find(
-    l => l.type === 'symbol' && l.layout?.['text-field']
-  )?.id
-
-  // Hide Carto road layers — replaced by our toggleable roads-major layer.
-  style.layers.forEach(l => {
-    if (
-      l['source-layer'] === 'transportation' ||
-      l['source-layer'] === 'transportation_name'
-    ) {
-      try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
-    }
-  })
-
-  // Find the Carto vector tile source (name varies by style version)
-  const cartoSrc = Object.keys(style.sources).find(k =>
-    style.sources[k].type === 'vector' && (k === 'carto' || k === 'openmaptiles' || k.includes('carto'))
-  ) || 'carto'
+  // UGRC's "Lite Labels" layer is composed on top of "Lite Base" (see
+  // ugrcBasemap.js) — insert all our data layers before its first layer so
+  // labels always render on top of hexagons/roads. LiteBase's own roads
+  // stay exactly as UGRC authored them (labels already on top natively) —
+  // see setRoadsOnTop() below for the toggleable "redraw above the
+  // hexagons" duplicate.
+  const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
 
   // ── Municipality background (clickable for city selection) ──────────────
   map.addSource('src-all-municipalities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -166,7 +154,7 @@ function setupMapLayers() {
   }, firstLabelId)
   map.addLayer({
     id: 'all-mun-line', type: 'line', source: 'src-all-municipalities',
-    paint: { 'line-color': '#557799', 'line-width': 0.8, 'line-opacity': 0.45 },
+    paint: { 'line-color': '#233A57', 'line-width': 1, 'line-opacity': 0.6 },
   }, firstLabelId)
 
   map.on('mouseenter', 'all-mun-fill', () => { map.getCanvas().style.cursor = 'pointer' })
@@ -203,48 +191,95 @@ function setupMapLayers() {
   }, firstLabelId)
 
   // ── Selected city border line (above hexagons, below roads) ────────────
+  // A white halo underneath keeps the outline crisp against both the
+  // colorful heatmap and UGRC's lighter basemap — the plain line alone
+  // read as washed-out ("dimmed") against it.
+  map.addLayer({
+    id: 'lay_cities_line_halo', type: 'line', source: 'src-cities',
+    paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.85 },
+  }, firstLabelId)
   map.addLayer({
     id: 'lay_cities_line', type: 'line', source: 'src-cities',
-    paint: { 'line-color': '#233A57', 'line-width': 3, 'line-opacity': 0.9 },
+    paint: { 'line-color': '#233A57', 'line-width': 3, 'line-opacity': 1 },
   }, firstLabelId)
 
-  // ── Roads — topmost data layer, above H3 & all boundaries, below labels ─
-  try {
-    map.addLayer({
-      id: 'roads-major',
-      type: 'line',
-      source: cartoSrc,
-      'source-layer': 'transportation',
-      filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
-      paint: {
-        'line-color': ['match', ['get', 'class'], 'motorway', '#e892a2', 'trunk', '#f9b29c', '#bbbbbb'],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 12, 1.5, 16, 4],
-        'line-opacity': 0.9,
-      },
-    }, firstLabelId)
-    map.addLayer({
-      id: 'roads-minor',
-      type: 'line',
-      source: cartoSrc,
-      'source-layer': 'transportation',
-      filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service', 'track']]],
-      paint: {
-        'line-color': '#cccccc',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 14, 1.5, 16, 3],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 11, 0.8],
-      },
-    }, firstLabelId)
-  } catch (e) {
-    console.warn('Carto roads layer unavailable:', e)
-  }
-
-  // Move Carto building layers below our bottommost custom layer so they
+  // Move UGRC building layers below our bottommost custom layer so they
   // render under municipal boundaries and H3 hexagons.
   style.layers
-    .filter(l => l['source-layer'] === 'building')
+    .filter(l => l['source-layer'] === 'Buildings')
     .forEach(l => {
       try { map.moveLayer(l.id, 'all-mun-fill') } catch {}
     })
+
+  // Match the "Major Roads" toggle's default (see layerVisible) — roads
+  // stay in their normal authored position otherwise.
+  setRoadsOnTop(layerVisible['roads-major'])
+}
+
+// ── Roads — toggleable duplicate above the H3 hexagons, below labels ────
+// LiteBase's roads render in their normal, correctly-authored position
+// (under labels, under our hexagon overlay) unless this is on. Rather than
+// permanently hiding + duplicating every road (which fought LiteBase's own
+// label ordering — see git history for the mess that caused), the
+// duplicate now only exists while toggled on: cloned from UGRC's OWN
+// road-casing layers (real colors/widths/zoom bands) for MAJOR roads only
+// — everything else (ramps/collectors, local roads) is left untouched, in
+// its normal position. Toggling off removes the clones and restores the
+// originals.
+function setRoadsOnTop(visible) {
+  const map = mapInstance
+  if (!map) return
+  const roadSourceLayers = ['Roads - white version', 'Roads - Interstates and Ramps - white version']
+  // Every road class is distinguished by a numeric `_symbol` code
+  // (confirmed against the real LiteBase style.json): 0 Interstates,
+  // 1 Ramps/Collectors, 2 US Highways, 3 State Highways, 4 Major Local
+  // Roads Paved (UGRC's nearest equivalent to "arterial"), 5 Major Local
+  // Roads Not Paved, 6 Other Federal Aid Roads, 7 Local Roads. Interstate/
+  // US/state highway/arterial count as "major," plus ramps/collectors —
+  // excluding those would leave a visible gap in the highlight at every
+  // interchange, since a ramp is a separate `_symbol` from the mainline
+  // it connects to.
+  const MAJOR_ROAD_SYMBOLS = [0, 1, 2, 3, 4]
+
+  if (visible) {
+    if (roadsMajorLayerIds.length) return // already shown
+    const style = map.getStyle()
+    const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
+    // Both source-layers are included — "Roads - Interstates and Ramps -
+    // white version" is an extra-wide highlight UGRC draws underneath the
+    // standard casing/fill from "Roads - white version" specifically for
+    // Interstates; cloning only the latter (a prior bug) left interstates
+    // visibly thinner than UGRC's own combined styling.
+    const majors = style.layers.filter(
+      l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2])
+    )
+    majors.forEach(l => {
+      try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
+    })
+    try {
+      majors.forEach(l => {
+        const id = `redraw__${l.id}`
+        map.addLayer({ ...l, id }, firstLabelId)
+        roadsMajorLayerIds.push(id)
+      })
+    } catch (e) {
+      console.warn('UGRC road redraw layers unavailable:', e)
+    }
+  } else {
+    roadsMajorLayerIds.forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id)
+    })
+    roadsMajorLayerIds = []
+    // Re-fetch now that the clones are gone — filtering the pre-removal
+    // snapshot here would also match the (now-removed) clones, since they
+    // carry the same original `source-layer` value, and MapLibre errors
+    // trying to restyle a layer id that no longer exists.
+    map.getStyle().layers
+      .filter(l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2]))
+      .forEach(l => {
+        try { map.setLayoutProperty(l.id, 'visibility', 'visible') } catch {}
+      })
+  }
 }
 
 // ── City picker + background boundary layer ────────────
@@ -414,20 +449,7 @@ async function onToggleLayer(id) {
   if (!map) return
 
   if (id === 'roads-major') {
-    if (map.getLayer('roads-major')) {
-      if (newVis) {
-        // Move above H3 and city polygons, just before label layers
-        const firstLabel = map.getStyle().layers.find(
-          l => l.type === 'symbol' && l.layout?.['text-field']
-        )?.id
-        map.moveLayer('roads-major', firstLabel)
-        if (map.getLayer('roads-minor')) map.moveLayer('roads-minor', firstLabel)
-      } else {
-        // Move below H3 hexagons (still visible, under data layers)
-        map.moveLayer('roads-major', 'h3_layer_2d')
-        if (map.getLayer('roads-minor')) map.moveLayer('roads-minor', 'h3_layer_2d')
-      }
-    }
+    setRoadsOnTop(newVis)
   } else if (id === 'h3-heatmap') {
     const activeLayer = is3D.value ? 'h3_layer_3d' : 'h3_layer_2d'
     if (map.getLayer(activeLayer)) {
@@ -438,6 +460,7 @@ async function onToggleLayer(id) {
     if (map.getLayer('all-mun-fill')) map.setLayoutProperty('all-mun-fill', 'visibility', vis)
     if (map.getLayer('all-mun-line')) map.setLayoutProperty('all-mun-line', 'visibility', vis)
     if (map.getLayer('lay_cities_fill')) map.setLayoutProperty('lay_cities_fill', 'visibility', vis)
+    if (map.getLayer('lay_cities_line_halo')) map.setLayoutProperty('lay_cities_line_halo', 'visibility', vis)
     if (map.getLayer('lay_cities_line')) map.setLayoutProperty('lay_cities_line', 'visibility', vis)
   } else {
     // Reference layers from LAYER_DEFS (centers + metrics)
