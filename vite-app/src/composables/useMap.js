@@ -2,6 +2,7 @@ import maplibregl from 'maplibre-gl'
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
 import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css'
 import { MAP_CENTER, MAP_ZOOM } from '../config/constants.js'
+import { buildUgrcLiteStyle } from './ugrcBasemap.js'
 
 let mapInstance = null
 let _extentBounds = null
@@ -131,10 +132,12 @@ class TiltResetControl {
 }
 
 
-export function initMap(containerId) {
+export async function initMap(containerId) {
+  const style = await buildUgrcLiteStyle()
+
   mapInstance = new maplibregl.Map({
     container: containerId,
-    style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+    style,
     center: MAP_CENTER,
     zoom: MAP_ZOOM,
     preserveDrawingBuffer: true,

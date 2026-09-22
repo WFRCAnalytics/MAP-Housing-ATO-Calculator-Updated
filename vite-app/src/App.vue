@@ -122,10 +122,12 @@ let mapInstance = null
 let cachedRows = []
 let colorTimer = null
 let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's cities_sf
+let roadsMajorLayerIds = []
+let roadsMinorLayerIds = []
 
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
-  mapInstance = initMap('map')
+  mapInstance = await initMap('map')
   mapInstance.on('style.load', async () => {
     setupMapLayers()
     mapReady.value = true
@@ -137,26 +139,21 @@ function setupMapLayers() {
   const map = mapInstance
   const style = map.getStyle()
 
-  // Find the first label (symbol) layer in the Carto style so we can insert all
-  // our data layers BEFORE it — labels always render on top of hexagons/roads.
-  const firstLabelId = style.layers.find(
-    l => l.type === 'symbol' && l.layout?.['text-field']
-  )?.id
+  // UGRC's "Lite Labels" layer is composed on top of "Lite Base" (see
+  // ugrcBasemap.js) — insert all our data layers before its first layer so
+  // labels always render on top of hexagons/roads.
+  const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
 
-  // Hide Carto road layers — replaced by our toggleable roads-major layer.
+  // Hide UGRC's own road rendering — replaced by our toggleable roads-major
+  // layer (built from the same source, re-styled + re-orderable below).
   style.layers.forEach(l => {
     if (
-      l['source-layer'] === 'transportation' ||
-      l['source-layer'] === 'transportation_name'
+      l['source-layer'] === 'Roads - white version' ||
+      l['source-layer'] === 'Roads - Interstates and Ramps - white version'
     ) {
       try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
     }
   })
-
-  // Find the Carto vector tile source (name varies by style version)
-  const cartoSrc = Object.keys(style.sources).find(k =>
-    style.sources[k].type === 'vector' && (k === 'carto' || k === 'openmaptiles' || k.includes('carto'))
-  ) || 'carto'
 
   // ── Municipality background (clickable for city selection) ──────────────
   map.addSource('src-all-municipalities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -209,39 +206,36 @@ function setupMapLayers() {
   }, firstLabelId)
 
   // ── Roads — topmost data layer, above H3 & all boundaries, below labels ─
+  // Rather than inventing a lookalike palette, clone UGRC's OWN road-casing
+  // layers (real colors/widths/zoom bands, straight from LiteBase) and
+  // redraw them above the hexagons — their originals stay hidden below
+  // (the visibility:none loop above) so this is the only copy that renders.
+  // "Roads - white version" carries every road class in one source-layer,
+  // distinguished by a numeric `_symbol` code (confirmed against the real
+  // LiteBase style.json): 0 Interstates, 1 Ramps/Collectors, 2 US Highways,
+  // 3 State Highways, 4 Major Local Roads Paved, 5 Major Local Roads Not
+  // Paved, 6 Other Federal Aid Roads, 7 Local Roads. "Major" here is
+  // Interstates/US/State highways; everything else is "minor."
+  const MAJOR_ROAD_SYMBOLS = [0, 2, 3]
+  roadsMajorLayerIds = []
+  roadsMinorLayerIds = []
   try {
-    map.addLayer({
-      id: 'roads-major',
-      type: 'line',
-      source: cartoSrc,
-      'source-layer': 'transportation',
-      filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
-      paint: {
-        'line-color': ['match', ['get', 'class'], 'motorway', '#e892a2', 'trunk', '#f9b29c', '#bbbbbb'],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 12, 1.5, 16, 4],
-        'line-opacity': 0.9,
-      },
-    }, firstLabelId)
-    map.addLayer({
-      id: 'roads-minor',
-      type: 'line',
-      source: cartoSrc,
-      'source-layer': 'transportation',
-      filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service', 'track']]],
-      paint: {
-        'line-color': '#cccccc',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 14, 1.5, 16, 3],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0, 11, 0.8],
-      },
-    }, firstLabelId)
+    style.layers
+      .filter(l => l['source-layer'] === 'Roads - white version')
+      .forEach(l => {
+        const symbol = l.filter?.[2]
+        const id = `redraw__${l.id}`
+        map.addLayer({ ...l, id }, firstLabelId)
+        ;(MAJOR_ROAD_SYMBOLS.includes(symbol) ? roadsMajorLayerIds : roadsMinorLayerIds).push(id)
+      })
   } catch (e) {
-    console.warn('Carto roads layer unavailable:', e)
+    console.warn('UGRC road redraw layers unavailable:', e)
   }
 
-  // Move Carto building layers below our bottommost custom layer so they
+  // Move UGRC building layers below our bottommost custom layer so they
   // render under municipal boundaries and H3 hexagons.
   style.layers
-    .filter(l => l['source-layer'] === 'building')
+    .filter(l => l['source-layer'] === 'Buildings')
     .forEach(l => {
       try { map.moveLayer(l.id, 'all-mun-fill') } catch {}
     })
@@ -414,19 +408,14 @@ async function onToggleLayer(id) {
   if (!map) return
 
   if (id === 'roads-major') {
-    if (map.getLayer('roads-major')) {
-      if (newVis) {
+    const roadLayerIds = [...roadsMajorLayerIds, ...roadsMinorLayerIds]
+    if (roadLayerIds.length) {
+      const beforeId = newVis
         // Move above H3 and city polygons, just before label layers
-        const firstLabel = map.getStyle().layers.find(
-          l => l.type === 'symbol' && l.layout?.['text-field']
-        )?.id
-        map.moveLayer('roads-major', firstLabel)
-        if (map.getLayer('roads-minor')) map.moveLayer('roads-minor', firstLabel)
-      } else {
+        ? map.getStyle().layers.find(l => l.id.startsWith('labels__'))?.id
         // Move below H3 hexagons (still visible, under data layers)
-        map.moveLayer('roads-major', 'h3_layer_2d')
-        if (map.getLayer('roads-minor')) map.moveLayer('roads-minor', 'h3_layer_2d')
-      }
+        : 'h3_layer_2d'
+      roadLayerIds.forEach(layId => { if (map.getLayer(layId)) map.moveLayer(layId, beforeId) })
     }
   } else if (id === 'h3-heatmap') {
     const activeLayer = is3D.value ? 'h3_layer_3d' : 'h3_layer_2d'
