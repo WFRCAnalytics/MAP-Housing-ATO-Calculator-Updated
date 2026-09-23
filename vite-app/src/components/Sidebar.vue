@@ -170,6 +170,15 @@ const nec = reactive({ open: false })
 function resetWeights() { SLIDER_DEFS.forEach(d => { weights[d.col] = 0 }) }
 function maxWeights()   { SLIDER_DEFS.forEach(d => { weights[d.col] = 1 }) }
 
+// Mutating selectedCities (the Multiselect's own v-model) already makes it
+// re-emit @change on its own — an explicit emit here too used to fire a
+// second, redundant 'update:selectedCities' for every map click, doubling
+// every DuckDB query and H3-worker computation behind it. Harmless when
+// both carry the same value, but if enough of these pile up (e.g. a few
+// impatient extra clicks while the first click still hasn't visibly
+// responded) they all serialize behind each other — the query queue and
+// the shared H3 worker only run one job at a time — turning what should be
+// one ~1s load into several queued redundant ones.
 function toggleCity(code) {
   const str = String(code)
   const idx = selectedCities.value.indexOf(str)
@@ -178,7 +187,6 @@ function toggleCity(code) {
   } else {
     selectedCities.value = [...selectedCities.value, str]
   }
-  emit('update:selectedCities', selectedCities.value)
 }
 
 defineExpose({ toggleCity })

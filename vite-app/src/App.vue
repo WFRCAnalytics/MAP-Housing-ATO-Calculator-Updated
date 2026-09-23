@@ -169,6 +169,26 @@ function firstOverlayCeilingId(style) {
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
   mapInstance = await initMap('map')
+
+  // Bound once, ever — NOT inside setupMapLayers(), which reruns on every
+  // 'style.load' (including every basemap switch). These don't depend on
+  // which style/layers are currently loaded (queryRenderedFeatures is
+  // evaluated at click time, against whatever's active then), so
+  // re-registering them there just piles up duplicate listeners: one extra
+  // 'click' handler per basemap switch, each firing sidebarRef.toggleCity()
+  // again for the same physical click. Since toggleCity is a toggle, two
+  // duplicate handlers turn one click into add-then-remove (or vice versa)
+  // — the city selection changes twice in the same tick, and the second,
+  // empty-selection call never touches isLoading (see onCitiesChange's
+  // early-return branch), so if that one lands last the loading spinner is
+  // left stuck forever with nothing left to reset it.
+  mapInstance.on('mouseenter', 'all-mun-fill', () => { mapInstance.getCanvas().style.cursor = 'pointer' })
+  mapInstance.on('mouseleave', 'all-mun-fill', () => { mapInstance.getCanvas().style.cursor = '' })
+  mapInstance.on('click', (e) => {
+    const munHits = mapInstance.queryRenderedFeatures(e.point, { layers: ['all-mun-fill'] })
+    if (munHits.length) sidebarRef.value?.toggleCity(String(munHits[0].properties.UGRCODE))
+  })
+
   mapInstance.on('style.load', async () => {
     setupMapLayers()
     mapReady.value = true
@@ -307,13 +327,6 @@ function setupMapLayers() {
     id: 'all-mun-line', type: 'line', source: 'src-all-municipalities',
     paint: { 'line-color': '#233A57', 'line-width': 1, 'line-opacity': 0.8 },
   }, firstLabelId)
-
-  map.on('mouseenter', 'all-mun-fill', () => { map.getCanvas().style.cursor = 'pointer' })
-  map.on('mouseleave', 'all-mun-fill', () => { map.getCanvas().style.cursor = '' })
-  map.on('click', (e) => {
-    const munHits = map.queryRenderedFeatures(e.point, { layers: ['all-mun-fill'] })
-    if (munHits.length) sidebarRef.value?.toggleCity(String(munHits[0].properties.UGRCODE))
-  })
 
   // ── Selected city boundaries ────────────────────────────────────────────
   map.addSource('src-cities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
