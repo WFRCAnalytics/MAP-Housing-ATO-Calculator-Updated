@@ -79,8 +79,11 @@ import { initMap, setExtentBounds } from './composables/useMap.js'
 import { loadCities, loadMunicipalData } from './composables/useData.js'
 import { computeScores, buildColorExpression, buildExtrusionExpr } from './composables/useScoring.js'
 import { toggleLayer } from './composables/useLayers.js'
+import { buildUgrcLiteStyle, buildUgrcHybridStyle } from './composables/ugrcBasemap.js'
 import { SLIDER_DEFS, SCORE_COLS } from './config/sliders.js'
 import { LU_MAPPINGS } from './config/landUse.js'
+import { StyleSwitcherControl } from 'map-gl-style-switcher'
+import 'map-gl-style-switcher/dist/map-gl-style-switcher.css'
 
 // ── State ──────────────────────────────────────────────
 const weights = reactive(
@@ -120,31 +123,190 @@ provide('maxScore', maxScore)
 const sidebarRef = ref(null)
 let mapInstance = null
 let cachedRows = []
+let cachedH3Geojson = null // last geojson set on h3-source — reapplied after a basemap switch
 let colorTimer = null
 let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's cities_sf
 let roadsMajorLayerIds = []
+let currentBasemapId = 'lite'
+
+const BASEMAP_BUILDERS = { lite: buildUgrcLiteStyle, hybrid: buildUgrcHybridStyle }
+
+const CITY_BOUNDS_LAYER_IDS = ['all-mun-fill', 'all-mun-line-halo', 'all-mun-line', 'lay_cities_fill', 'lay_cities_line_halo', 'lay_cities_line']
+
+// Both basemaps' roads share these source-layer names — LiteBase's own
+// naming for the Lite basemap, and Vector_Overlay's (differently named, no
+// "Buildings" layer) for the Hybrid basemap — so Major Roads and the
+// overlay ceiling below work on either. Road *labels* use a "…/label"
+// suffixed variant instead, so they never match here — see setRoadsOnTop.
+const ROAD_SOURCE_LAYERS = [
+  'Roads - white version', 'Roads - Interstates and Ramps - white version', // Lite (LiteBase)
+  'Roads - All', 'Roads - Interstates', // Hybrid (Vector_Overlay)
+]
+
+// Where our custom overlays (hexagons, boundaries, the Major Roads redraw)
+// must stop, layer-order-wise: above UGRC's actual map geometry (roads,
+// buildings, water, parks, …) but below every label/sprite — not just
+// LiteLabels' text, but LiteBase's own POI/transit icons too, which render
+// (within LiteBase's own style) AFTER its roads/buildings but BEFORE
+// LiteLabels starts. A plain "first labels__ layer" boundary (LiteLabels
+// only) misses that LiteBase icon band entirely, letting our overlays cover
+// things like TRAX station markers — see git history/PR discussion for the
+// screenshot that caught it.
+function firstOverlayCeilingId(style) {
+  const layers = style.layers
+  const lastRoadOrBuildingIdx = layers.reduce((max, l, i) => {
+    const matches = ROAD_SOURCE_LAYERS.includes(l['source-layer']) || l['source-layer'] === 'Buildings'
+    return matches ? i : max
+  }, -1)
+  // Every label/sprite layer (LiteBase's or LiteLabels') is styled as
+  // MapLibre type "symbol" — real map features (fill/line/circle) aren't —
+  // so the first symbol layer after the roads/buildings band is the top of
+  // that band, regardless of which service authored it or how UGRC reorders
+  // its own style in the future.
+  return layers.find((l, i) => i > lastRoadOrBuildingIdx && l.type === 'symbol')?.id
+}
 
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
   mapInstance = await initMap('map')
+
+  // Bound once, ever — NOT inside setupMapLayers(), which reruns on every
+  // 'style.load' (including every basemap switch). These don't depend on
+  // which style/layers are currently loaded (queryRenderedFeatures is
+  // evaluated at click time, against whatever's active then), so
+  // re-registering them there just piles up duplicate listeners: one extra
+  // 'click' handler per basemap switch, each firing sidebarRef.toggleCity()
+  // again for the same physical click. Since toggleCity is a toggle, two
+  // duplicate handlers turn one click into add-then-remove (or vice versa)
+  // — the city selection changes twice in the same tick, and the second,
+  // empty-selection call never touches isLoading (see onCitiesChange's
+  // early-return branch), so if that one lands last the loading spinner is
+  // left stuck forever with nothing left to reset it.
+  mapInstance.on('mouseenter', 'all-mun-fill', () => { mapInstance.getCanvas().style.cursor = 'pointer' })
+  mapInstance.on('mouseleave', 'all-mun-fill', () => { mapInstance.getCanvas().style.cursor = '' })
+  mapInstance.on('click', (e) => {
+    const munHits = mapInstance.queryRenderedFeatures(e.point, { layers: ['all-mun-fill'] })
+    if (munHits.length) sidebarRef.value?.toggleCity(String(munHits[0].properties.UGRCODE))
+  })
+
   mapInstance.on('style.load', async () => {
     setupMapLayers()
     mapReady.value = true
-    await fetchCities()
+    isLoading.value = true
+    loadingText.value = 'Loading communities...'
+    try {
+      await fetchCities()
+      await restoreMapState()
+    } finally {
+      isLoading.value = false
+    }
   })
+
+  mapInstance.addControl(new StyleSwitcherControl({
+    styles: [
+      {
+        id: 'lite', name: 'Lite', styleUrl: 'ugrc:lite',
+        image: `${import.meta.env.BASE_URL}basemap-lite.png`,
+        description: "UGRC's vector reference basemap",
+      },
+      {
+        id: 'hybrid', name: 'Hybrid', styleUrl: 'ugrc:hybrid',
+        image: `${import.meta.env.BASE_URL}basemap-hybrid.png`,
+        description: 'Aerial imagery with UGRC roads & labels',
+      },
+    ],
+    activeStyleId: currentBasemapId,
+    showLabels: true,
+    showImages: true,
+    design: 'outlined',
+    theme: 'light',
+    // The control never calls setStyle itself (see map-gl-style-switcher's
+    // docs) — both "styles" here are composed in-memory from several UGRC
+    // vector tile services (see ugrcBasemap.js), not fetchable style.json
+    // URLs, so `styleUrl` above is just a required-but-unused placeholder
+    // and the actual swap happens here.
+    onAfterStyleChange: (_from, to) => switchBasemap(to.id),
+  }), 'bottom-left')
 })
+
+// ── Basemap switching ───────────────────────────────────
+// Swapping styles wholesale (map.setStyle) drops every source/layer we add
+// imperatively (h3 hexagons, city boundaries, the Major Roads redraw, any
+// reference layer toggled on) since none of it is declared in either style
+// document — restoreMapState() (called from the 'style.load' handler above,
+// which fires again after setStyle just like it does on first load) puts it
+// all back once the new style has finished loading. buildUgrcLiteStyle/
+// buildUgrcHybridStyle cache their result, so switching back to a basemap
+// already built in this session resolves immediately instead of re-fetching
+// it — see ugrcBasemap.js.
+let basemapSwitchToken = 0
+async function switchBasemap(id) {
+  if (!mapInstance || id === currentBasemapId) return
+  const build = BASEMAP_BUILDERS[id]
+  if (!build) return
+  const token = ++basemapSwitchToken
+  currentBasemapId = id
+  isLoading.value = true
+  loadingText.value = 'Switching basemap...'
+  try {
+    const style = await build()
+    // A newer switch started (and already owns currentBasemapId/isLoading)
+    // while this one was still fetching — e.g. the user clicked Hybrid then
+    // Lite before the first request landed. Applying a stale style here
+    // would silently revert whichever one "wins" the race, so bail out.
+    if (token !== basemapSwitchToken) return
+    mapInstance.setStyle(style)
+  } catch (e) {
+    console.error(`Failed to switch to ${id} basemap:`, e)
+    if (token === basemapSwitchToken) isLoading.value = false
+  }
+}
+
+// Re-applies everything that isn't part of either basemap's own style
+// document — called after every 'style.load', including the very first one
+// (each piece is a no-op then, since state is still at its initial default).
+async function restoreMapState() {
+  const map = mapInstance
+  if (!map) return
+
+  if (cachedH3Geojson) {
+    map.getSource('h3-source')?.setData(cachedH3Geojson)
+    applyColors()
+  }
+  applyFilter()
+  on3DChange(is3D.value)
+
+  const cityBoundsVis = layerVisible['city-bounds'] ? 'visible' : 'none'
+  CITY_BOUNDS_LAYER_IDS.forEach(id => {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', cityBoundsVis)
+  })
+  if (selectedCommCodes.value.length) fetchCityBoundaries(selectedCommCodes.value)
+
+  for (const [id, visible] of Object.entries(layerVisible)) {
+    if (!visible || ['roads-major', 'h3-heatmap', 'city-bounds'].includes(id)) continue
+    try {
+      await toggleLayer(map, id, true)
+    } catch (e) {
+      console.error(`Failed to restore layer ${id}:`, e)
+    }
+  }
+}
 
 function setupMapLayers() {
   const map = mapInstance
   const style = map.getStyle()
+  // A basemap switch wipes every layer the previous style.load added,
+  // including any Major Roads redraw clones — their ids no longer exist,
+  // so forget them rather than let setRoadsOnTop() below think they're
+  // still shown.
+  roadsMajorLayerIds = []
 
-  // UGRC's "Lite Labels" layer is composed on top of "Lite Base" (see
-  // ugrcBasemap.js) — insert all our data layers before its first layer so
-  // labels always render on top of hexagons/roads. LiteBase's own roads
-  // stay exactly as UGRC authored them (labels already on top natively) —
-  // see setRoadsOnTop() below for the toggleable "redraw above the
-  // hexagons" duplicate.
-  const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
+  // Insert all our data layers below every label/sprite (see
+  // firstOverlayCeilingId) so they always render on top of hexagons/roads.
+  // LiteBase's own roads stay exactly as UGRC authored them (labels already
+  // on top natively) — see setRoadsOnTop() below for the toggleable "redraw
+  // above the hexagons" duplicate.
+  const firstLabelId = firstOverlayCeilingId(style)
 
   // ── Municipality background (clickable for city selection) ──────────────
   map.addSource('src-all-municipalities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -152,17 +314,19 @@ function setupMapLayers() {
     id: 'all-mun-fill', type: 'fill', source: 'src-all-municipalities',
     paint: { 'fill-color': '#88aacc', 'fill-opacity': 0.06 },
   }, firstLabelId)
+  // A plain navy line read fine on Lite's light background but nearly
+  // vanished over Hybrid's aerial imagery (dark tree cover, shadows, etc.)
+  // — the same white-halo-under-a-dark-line trick used for the *selected*
+  // city boundary below makes it basemap-agnostic, just thinner/fainter so
+  // an unselected city still reads as clearly subordinate to a selected one.
+  map.addLayer({
+    id: 'all-mun-line-halo', type: 'line', source: 'src-all-municipalities',
+    paint: { 'line-color': '#ffffff', 'line-width': 2.5, 'line-opacity': 0.6 },
+  }, firstLabelId)
   map.addLayer({
     id: 'all-mun-line', type: 'line', source: 'src-all-municipalities',
-    paint: { 'line-color': '#233A57', 'line-width': 1, 'line-opacity': 0.6 },
+    paint: { 'line-color': '#233A57', 'line-width': 1, 'line-opacity': 0.8 },
   }, firstLabelId)
-
-  map.on('mouseenter', 'all-mun-fill', () => { map.getCanvas().style.cursor = 'pointer' })
-  map.on('mouseleave', 'all-mun-fill', () => { map.getCanvas().style.cursor = '' })
-  map.on('click', (e) => {
-    const munHits = map.queryRenderedFeatures(e.point, { layers: ['all-mun-fill'] })
-    if (munHits.length) sidebarRef.value?.toggleCity(String(munHits[0].properties.UGRCODE))
-  })
 
   // ── Selected city boundaries ────────────────────────────────────────────
   map.addSource('src-cities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -229,7 +393,6 @@ function setupMapLayers() {
 function setRoadsOnTop(visible) {
   const map = mapInstance
   if (!map) return
-  const roadSourceLayers = ['Roads - white version', 'Roads - Interstates and Ramps - white version']
   // Every road class is distinguished by a numeric `_symbol` code
   // (confirmed against the real LiteBase style.json): 0 Interstates,
   // 1 Ramps/Collectors, 2 US Highways, 3 State Highways, 4 Major Local
@@ -244,14 +407,14 @@ function setRoadsOnTop(visible) {
   if (visible) {
     if (roadsMajorLayerIds.length) return // already shown
     const style = map.getStyle()
-    const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
+    const firstLabelId = firstOverlayCeilingId(style)
     // Both source-layers are included — "Roads - Interstates and Ramps -
     // white version" is an extra-wide highlight UGRC draws underneath the
     // standard casing/fill from "Roads - white version" specifically for
     // Interstates; cloning only the latter (a prior bug) left interstates
     // visibly thinner than UGRC's own combined styling.
     const majors = style.layers.filter(
-      l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2])
+      l => ROAD_SOURCE_LAYERS.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2])
     )
     majors.forEach(l => {
       try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
@@ -275,7 +438,7 @@ function setRoadsOnTop(visible) {
     // carry the same original `source-layer` value, and MapLibre errors
     // trying to restyle a layer id that no longer exists.
     map.getStyle().layers
-      .filter(l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2]))
+      .filter(l => ROAD_SOURCE_LAYERS.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2]))
       .forEach(l => {
         try { map.setLayoutProperty(l.id, 'visibility', 'visible') } catch {}
       })
@@ -287,20 +450,30 @@ function setRoadsOnTop(visible) {
 // used for both the community dropdown and the clickable boundary layer.
 async function fetchCities() {
   try {
-    isLoading.value = true
-    loadingText.value = 'Loading communities...'
-    allMunicipalities = await loadMunicipalData()
-    cities.value = allMunicipalities.cities
+    // Only fetch once — a basemap switch re-fires 'style.load' and calls
+    // this again, but the parquet data itself never changes underneath it.
+    if (!allMunicipalities) {
+      allMunicipalities = await loadMunicipalData()
+      cities.value = allMunicipalities.cities
+    }
     mapInstance?.getSource('src-all-municipalities')?.setData(allMunicipalities.geojson)
   } catch (e) {
     console.error('Failed to load municipalities:', e)
-  } finally {
-    isLoading.value = false
   }
 }
 
 // ── City selection ─────────────────────────────────────
+// Picking a second/third city before the previous selection's DuckDB query
+// resolves used to leave the map in whatever order the (unrelated-length)
+// queries happened to finish — an earlier, smaller selection could resolve
+// after a later, larger one and overwrite it, which read as "the hexagons
+// vanish" even though the city boundary (a synchronous filter, not a query)
+// updated correctly and immediately. Same token-guard pattern as
+// switchBasemap: only the most recently started call is allowed to apply
+// its results.
+let citiesChangeToken = 0
 async function onCitiesChange(commCodes) {
+  const token = ++citiesChangeToken
   selectedCommCodes.value = commCodes ?? []
   if (!commCodes?.length) {
     cachedRows = []
@@ -315,7 +488,9 @@ async function onCitiesChange(commCodes) {
     isLoading.value = true
     loadingText.value = 'Loading data...'
     const { geojson, rows, minScore: min, maxScore: max } = await loadCities(commCodes, weights)
+    if (token !== citiesChangeToken) return // superseded by a newer selection — discard
     cachedRows = rows
+    cachedH3Geojson = geojson
     hasData.value = rows.length > 0
     minScore.value = min
     maxScore.value = max
@@ -326,11 +501,12 @@ async function onCitiesChange(commCodes) {
   } catch (e) {
     console.error('Failed to load city data:', e)
   } finally {
-    isLoading.value = false
+    if (token === citiesChangeToken) isLoading.value = false
   }
 }
 
 function clearH3() {
+  cachedH3Geojson = null
   mapInstance?.getSource('h3-source')?.setData({ type: 'FeatureCollection', features: [] })
 }
 
@@ -432,13 +608,21 @@ function on3DChange(val) {
   }
 }
 
+let zMultRaf = null
 function onZMultChange(val) {
   zMult.value = val
   if (!is3D.value) return
   const map = mapInstance
-  if (map?.getLayer('h3_layer_3d')) {
-    map.setPaintProperty('h3_layer_3d', 'fill-extrusion-height', buildExtrusionExpr(weights, val))
-  }
+  if (!map?.getLayer('h3_layer_3d')) return
+  // The Z-Scale control fires continuously while dragging — coalesce to at
+  // most one paint update (and MapLibre repaint) per animation frame rather
+  // than one per native `input` event, which on a fast drag fires far more
+  // often than the display can actually show.
+  if (zMultRaf) return
+  zMultRaf = requestAnimationFrame(() => {
+    zMultRaf = null
+    map.setPaintProperty('h3_layer_3d', 'fill-extrusion-height', buildExtrusionExpr(weights, zMult.value))
+  })
 }
 
 // ── Layer toggling ─────────────────────────────────────
@@ -457,11 +641,9 @@ async function onToggleLayer(id) {
     }
   } else if (id === 'city-bounds') {
     const vis = newVis ? 'visible' : 'none'
-    if (map.getLayer('all-mun-fill')) map.setLayoutProperty('all-mun-fill', 'visibility', vis)
-    if (map.getLayer('all-mun-line')) map.setLayoutProperty('all-mun-line', 'visibility', vis)
-    if (map.getLayer('lay_cities_fill')) map.setLayoutProperty('lay_cities_fill', 'visibility', vis)
-    if (map.getLayer('lay_cities_line_halo')) map.setLayoutProperty('lay_cities_line_halo', 'visibility', vis)
-    if (map.getLayer('lay_cities_line')) map.setLayoutProperty('lay_cities_line', 'visibility', vis)
+    CITY_BOUNDS_LAYER_IDS.forEach(layerId => {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', vis)
+    })
   } else {
     // Reference layers from LAYER_DEFS (centers + metrics)
     try {

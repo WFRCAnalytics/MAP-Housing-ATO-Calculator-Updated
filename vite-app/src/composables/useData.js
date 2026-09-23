@@ -34,6 +34,25 @@ async function getConn() {
   return _conn
 }
 
+// A single AsyncDuckDBConnection isn't safe for overlapping queries — e.g.
+// selecting a second city before the first one's query resolves (two
+// separate loadCities() calls, each awaiting its own conn.query() in turn)
+// let their queries interleave on the connection and come back truncated:
+// a 3-city selection silently returned only the first city's rows. Routing
+// every query through this FIFO queue serializes them app-wide, regardless
+// of how many callers overlap.
+let queryQueue = Promise.resolve()
+function runQuery(sql) {
+  const result = queryQueue.then(async () => {
+    const conn = await getConn()
+    return conn.query(sql)
+  })
+  // Keep the chain alive even if this query fails, so one bad/cancelled
+  // query doesn't wedge every query queued after it.
+  queryQueue = result.then(() => {}, () => {})
+  return result
+}
+
 // ── Arrow table → plain JS row array ──────────────────
 // Only passes through primitives — drops geometry/binary/complex Arrow types
 // that would fail postMessage's structured clone algorithm.
@@ -66,9 +85,8 @@ const CITY_COLS = '"h3_index","CommCode","BC","OZ","AA","AT","TT","TF","TA","AC"
 
 export async function fetchCityData(commCode) {
   if (cityCache.has(commCode)) return cityCache.get(commCode)
-  const conn = await getConn()
   const url = `${DATA_BASE_URL}/h3_scored/CommCode=${commCode}/part-0.parquet`
-  const table = await conn.query(`SELECT ${CITY_COLS} FROM read_parquet('${url}')`)
+  const table = await runQuery(`SELECT ${CITY_COLS} FROM read_parquet('${url}')`)
   const rows = tableToRows(table)
   cityCache.set(commCode, rows)
   return rows
@@ -76,6 +94,7 @@ export async function fetchCityData(commCode) {
 
 // ── H3 Web Worker singleton ───────────────────────────
 let h3Worker = null
+let h3RequestId = 0
 
 function getH3Worker() {
   if (!h3Worker) {
@@ -102,7 +121,15 @@ export async function loadCities(commCodes, weights) {
 
   const geojson = await new Promise((resolve, reject) => {
     const worker = getH3Worker()
+    const id = ++h3RequestId
+    // The worker is a shared singleton — without matching `id`, selecting a
+    // second city before the first one's response arrives would resolve
+    // BOTH pending requests off of whichever response lands first (every
+    // listener registered on the worker fires on every message, with no
+    // way to tell which request it answers), silently handing the larger
+    // selection back the smaller one's hexagons.
     const onMsg = ({ data }) => {
+      if (data.id !== id) return
       worker.removeEventListener('message', onMsg)
       worker.removeEventListener('error', onErr)
       resolve({ type: 'FeatureCollection', features: data.features })
@@ -114,7 +141,7 @@ export async function loadCities(commCodes, weights) {
     }
     worker.addEventListener('message', onMsg)
     worker.addEventListener('error', onErr)
-    worker.postMessage({ rows })
+    worker.postMessage({ rows, id })
   })
 
   return { geojson, rows, minScore, maxScore }
@@ -142,9 +169,8 @@ let _munCache = null
 
 export async function loadMunicipalData() {
   if (_munCache) return _munCache
-  const conn = await getConn()
   const url = `${DATA_BASE_URL}/UtahMunicipalBoundaries.parquet`
-  const table = await conn.query(
+  const table = await runQuery(
     `SELECT "UGRCODE", "NAME", CAST(to_json("geometry") AS VARCHAR) AS geom_json FROM read_parquet('${url}') ORDER BY "NAME"`
   )
   const rows = tableToRows(table)

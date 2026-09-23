@@ -1,8 +1,21 @@
-import maplibregl from 'maplibre-gl'
+// v6 dropped the default export (ESM-only build) — namespace import instead.
+import * as maplibregl from 'maplibre-gl'
+// v6's worker is loaded from a URL it derives from import.meta.url at
+// runtime, which "doesn't reliably resolve to the worker file inside the
+// bundler's module graph" (MapLibre's own v5→v6 migration guide) — under
+// Vite specifically it resolves to our bundled chunk's own URL and 404s.
+// The guide's documented Vite fix: import the worker through `?worker&url`
+// (NOT plain `?url` — the worker imports a sibling maplibre-gl-shared.mjs,
+// which `?worker&url` bundles alongside it into one self-contained chunk;
+// plain `?url` emits the worker file alone and it fails on that import) and
+// point the library at it explicitly before creating any Map.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
 import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css'
 import { MAP_CENTER, MAP_ZOOM } from '../config/constants.js'
 import { buildUgrcLiteStyle } from './ugrcBasemap.js'
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl)
 
 let mapInstance = null
 let _extentBounds = null
