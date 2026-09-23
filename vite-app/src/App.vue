@@ -124,6 +124,34 @@ let colorTimer = null
 let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's cities_sf
 let roadsMajorLayerIds = []
 
+// Both LiteBase's roads/buildings AND LiteLabels' roads/buildings vector tiles
+// share these source-layer names (LiteLabels' road *labels* use a "…/label"
+// suffixed variant instead, so they never match here — see setRoadsOnTop).
+const ROAD_SOURCE_LAYERS = ['Roads - white version', 'Roads - Interstates and Ramps - white version']
+
+// Where our custom overlays (hexagons, boundaries, the Major Roads redraw)
+// must stop, layer-order-wise: above UGRC's actual map geometry (roads,
+// buildings, water, parks, …) but below every label/sprite — not just
+// LiteLabels' text, but LiteBase's own POI/transit icons too, which render
+// (within LiteBase's own style) AFTER its roads/buildings but BEFORE
+// LiteLabels starts. A plain "first labels__ layer" boundary (LiteLabels
+// only) misses that LiteBase icon band entirely, letting our overlays cover
+// things like TRAX station markers — see git history/PR discussion for the
+// screenshot that caught it.
+function firstOverlayCeilingId(style) {
+  const layers = style.layers
+  const lastRoadOrBuildingIdx = layers.reduce((max, l, i) => {
+    const matches = ROAD_SOURCE_LAYERS.includes(l['source-layer']) || l['source-layer'] === 'Buildings'
+    return matches ? i : max
+  }, -1)
+  // Every label/sprite layer (LiteBase's or LiteLabels') is styled as
+  // MapLibre type "symbol" — real map features (fill/line/circle) aren't —
+  // so the first symbol layer after the roads/buildings band is the top of
+  // that band, regardless of which service authored it or how UGRC reorders
+  // its own style in the future.
+  return layers.find((l, i) => i > lastRoadOrBuildingIdx && l.type === 'symbol')?.id
+}
+
 // ── Map init ───────────────────────────────────────────
 onMounted(async () => {
   mapInstance = await initMap('map')
@@ -138,13 +166,12 @@ function setupMapLayers() {
   const map = mapInstance
   const style = map.getStyle()
 
-  // UGRC's "Lite Labels" layer is composed on top of "Lite Base" (see
-  // ugrcBasemap.js) — insert all our data layers before its first layer so
-  // labels always render on top of hexagons/roads. LiteBase's own roads
-  // stay exactly as UGRC authored them (labels already on top natively) —
-  // see setRoadsOnTop() below for the toggleable "redraw above the
-  // hexagons" duplicate.
-  const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
+  // Insert all our data layers below every label/sprite (see
+  // firstOverlayCeilingId) so they always render on top of hexagons/roads.
+  // LiteBase's own roads stay exactly as UGRC authored them (labels already
+  // on top natively) — see setRoadsOnTop() below for the toggleable "redraw
+  // above the hexagons" duplicate.
+  const firstLabelId = firstOverlayCeilingId(style)
 
   // ── Municipality background (clickable for city selection) ──────────────
   map.addSource('src-all-municipalities', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -229,7 +256,6 @@ function setupMapLayers() {
 function setRoadsOnTop(visible) {
   const map = mapInstance
   if (!map) return
-  const roadSourceLayers = ['Roads - white version', 'Roads - Interstates and Ramps - white version']
   // Every road class is distinguished by a numeric `_symbol` code
   // (confirmed against the real LiteBase style.json): 0 Interstates,
   // 1 Ramps/Collectors, 2 US Highways, 3 State Highways, 4 Major Local
@@ -244,14 +270,14 @@ function setRoadsOnTop(visible) {
   if (visible) {
     if (roadsMajorLayerIds.length) return // already shown
     const style = map.getStyle()
-    const firstLabelId = style.layers.find(l => l.id.startsWith('labels__'))?.id
+    const firstLabelId = firstOverlayCeilingId(style)
     // Both source-layers are included — "Roads - Interstates and Ramps -
     // white version" is an extra-wide highlight UGRC draws underneath the
     // standard casing/fill from "Roads - white version" specifically for
     // Interstates; cloning only the latter (a prior bug) left interstates
     // visibly thinner than UGRC's own combined styling.
     const majors = style.layers.filter(
-      l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2])
+      l => ROAD_SOURCE_LAYERS.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2])
     )
     majors.forEach(l => {
       try { map.setLayoutProperty(l.id, 'visibility', 'none') } catch {}
@@ -275,7 +301,7 @@ function setRoadsOnTop(visible) {
     // carry the same original `source-layer` value, and MapLibre errors
     // trying to restyle a layer id that no longer exists.
     map.getStyle().layers
-      .filter(l => roadSourceLayers.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2]))
+      .filter(l => ROAD_SOURCE_LAYERS.includes(l['source-layer']) && MAJOR_ROAD_SYMBOLS.includes(l.filter?.[2]))
       .forEach(l => {
         try { map.setLayoutProperty(l.id, 'visibility', 'visible') } catch {}
       })
