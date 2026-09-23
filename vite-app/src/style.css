@@ -282,8 +282,10 @@ input[type="range"] { width: 100%; accent-color: #2c3e50; height: 4px; cursor: p
 #map { flex: 1; min-height: 0; }
 
 /* ── Pinned tooltip ── */
+/* bottom clears the basemap switcher pill (48px tall + 10px map-edge
+   margin) sitting bottom-left, with a visible gap above it. */
 #pinned-tooltip-container {
-  position: absolute; bottom: 40px; left: 10px; z-index: 5; min-width: 160px;
+  position: absolute; bottom: 68px; left: 10px; z-index: 5; min-width: 160px;
   background: rgba(255,255,255,0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(0,0,0,0.1); border-radius: 8px;
   box-shadow: 0 4px 15px rgba(0,0,0,0.12); overflow: hidden; pointer-events: none;
@@ -388,4 +390,32 @@ code.hljs { border-radius: 6px; font-family: 'Fira Code', Consolas, monospace; f
 
 /* MapLibre overrides */
 .maplibregl-ctrl-group { border-radius: 8px !important; }
+
+/* Bottom-left normally stacks controls in a vertical column (scale bar,
+   then the basemap switcher above it) — tall enough that the pinned
+   tooltip's fixed `bottom` offset overlapped the switcher. Laying them out
+   as a single row instead — switcher first, scale bar to its right — keeps
+   that row at one control's height regardless of which basemap name is
+   active; flexbox reflows the scale bar automatically as the switcher's
+   pill width changes ("Lite" vs "Hybrid"), so nothing needs to track that
+   width in JS. `order` (rather than DOM position or flex-direction, which
+   only flips which edge controls pack against, not their relative order)
+   is what actually puts the switcher first — it's added to the map after
+   the scale bar, so it'd otherwise render second/rightmost. */
+/* z-index overrides MapLibre's default 2 — the switcher's hover-expanded
+   list grows upward from here into the pinned tooltip's screen area, and a
+   z-index set on a descendant (the switcher control) can't out-rank a
+   sibling (the tooltip) from outside this container's own stacking
+   context; only raising the context-establishing ancestor itself works. It
+   needs to beat the tooltip's z-index:5 (see #pinned-tooltip-container) so
+   the switcher stays visible/interactable over the (non-interactive,
+   pointer-events:none) tooltip instead of being hidden under it. */
+.maplibregl-ctrl-bottom-left {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 6;
+}
+.maplibregl-ctrl-bottom-left .style-switcher { order: 1; }
+.maplibregl-ctrl-bottom-left .maplibregl-ctrl-scale { order: 2; }
 .maplibregl-popup-content { padding: 0 !important; border-radius: 4px; overflow: hidden; }
