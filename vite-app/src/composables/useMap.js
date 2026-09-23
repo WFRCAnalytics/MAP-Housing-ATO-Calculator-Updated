@@ -80,18 +80,95 @@ async function findAddressCandidates(text, magicKey) {
   return body.candidates ?? []
 }
 
+async function suggest(text, signal) {
+  const params = new URLSearchParams({ text, f: 'json' })
+  const res = await fetch(`${MASQUERADE_URL}/suggest?${params}`, { signal })
+  const { suggestions = [] } = await res.json()
+  return suggestions
+}
+
+// suggest() only returns {text, magicKey} pairs, not coordinates — the text
+// is needed again alongside the magicKey to resolve a candidate, but
+// maplibre-gl-geocoder's searchByPlaceId only hands back the magicKey (see
+// getSuggestions/searchByPlaceId below). Stash the pairing here so selection
+// can look it up instead of re-querying.
+const magicKeyToText = new Map()
+
+// Cancel a still-in-flight suggest() when the user keeps typing, instead of
+// letting it resolve later and stomp newer results — also keeps typing
+// bursts from piling up parallel requests against masquerade's connection
+// limit.
+let suggestAbortController = null
+
+// A call that's already past the (abortable) suggest() fetch can still be
+// sitting in the slower, non-abortable Nominatim fallback below when a
+// newer keystroke supersedes it. Track a sequence number so any call can
+// tell, right before it would render, whether it's still the latest —
+// otherwise it never resolves rather than overwriting newer results.
+let requestSeq = 0
+
 const ugrcApi = {
+  // Runs on every keystroke (maplibre-gl-geocoder debounces ~200ms). Only
+  // hits the cheap /suggest endpoint — no coordinate resolution — so typing
+  // stays fast. Coordinates are resolved lazily, once, only for the single
+  // suggestion the user actually picks (searchByPlaceId, below).
+  getSuggestions: async (config) => {
+    const seq = ++requestSeq
+    suggestAbortController?.abort()
+    const controller = new AbortController()
+    suggestAbortController = controller
+
+    let suggestions = []
+    try {
+      suggestions = await suggest(config.query, controller.signal)
+    } catch { /* aborted or network error — fall through to empty */ }
+
+    // Superseded by a newer keystroke while we were waiting — never
+    // resolve, so this stale response can't stomp whatever the newer call
+    // has already rendered (or is about to).
+    if (seq !== requestSeq) return new Promise(() => {})
+
+    if (suggestions.length) {
+      suggestions.forEach(s => magicKeyToText.set(s.magicKey, s.text))
+      return { suggestions: suggestions.slice(0, 5).map(s => ({ text: s.text, placeId: s.magicKey })) }
+    }
+
+    // No UGRC suggestions (e.g. a business/POI name UGRC doesn't index) —
+    // fall back to Nominatim, whose results already carry full geometry, so
+    // picking one needs no further round trip.
+    const { features } = await nominatimApi.forwardGeocode(config)
+    if (seq !== requestSeq) return new Promise(() => {})
+
+    // Nominatim does full-text search, not prefix completion, so it's
+    // often blank for a still-incomplete word (e.g. "...Jack" before
+    // "Jackson" is finished) even though the address is real. Leave
+    // whatever suggestions are already showing rather than flashing "No
+    // results found" mid-word — Enter still runs the fuller forwardGeocode
+    // lookup for a definitive answer.
+    if (!features.length) return new Promise(() => {})
+    return { suggestions: features }
+  },
+
+  // Called once, only when the user picks a UGRC suggestion from the list.
+  searchByPlaceId: async (config) => {
+    const magicKey = config.query
+    const text = magicKeyToText.get(magicKey) ?? ''
+    const candidates = await findAddressCandidates(text, magicKey)
+    return { features: candidatesToFeatures(candidates) }
+  },
+
+  // Only reached when the user types a complete address and hits Enter
+  // without picking a suggestion first.
   forwardGeocode: async (config) => {
     try {
       // A complete "street, city/zip" query resolves directly.
       let candidates = await findAddressCandidates(config.query)
 
-      // Partial text (as the user is still typing) or a bare place name
-      // (e.g. "Sugar House") needs the suggest endpoint, then a follow-up
-      // lookup per suggestion (via its magicKey) to get coordinates.
+      // Partial text or a bare place name (e.g. "Sugar House") needs the
+      // suggest endpoint, then a follow-up lookup per suggestion (via its
+      // magicKey) to get coordinates.
       if (!candidates.length) {
-        const res = await fetch(`${MASQUERADE_URL}/suggest?${new URLSearchParams({ text: config.query, f: 'json' })}`)
-        const { suggestions = [] } = await res.json()
+        const suggestions = await suggest(config.query)
         const resolved = await Promise.all(
           suggestions.slice(0, 5).map(s => findAddressCandidates(s.text, s.magicKey))
         )
@@ -101,8 +178,7 @@ const ugrcApi = {
       if (candidates.length) return { features: candidatesToFeatures(candidates) }
     } catch { /* fall through to Nominatim */ }
 
-    // No UGRC match (e.g. a business/POI name UGRC doesn't index) — fall
-    // back to Nominatim.
+    // No UGRC match — fall back to Nominatim.
     return nominatimApi.forwardGeocode(config)
   },
 }
@@ -163,7 +239,8 @@ export async function initMap(containerId) {
       maplibregl,
       placeholder: 'Search address…',
       proximity: { longitude: MAP_CENTER[0], latitude: MAP_CENTER[1] },
-      flyTo: { duration: 1500 },
+      zoom: 16,
+      flyTo: { duration: 1500, maxZoom: 16 },
       showResultsWhileTyping: true,
       minLength: 3,
     }),
