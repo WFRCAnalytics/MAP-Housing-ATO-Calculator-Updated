@@ -11,7 +11,8 @@
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, inject } from 'vue'
-import maplibregl from 'maplibre-gl'
+// v6 dropped the default export (ESM-only build) — namespace import instead.
+import * as maplibregl from 'maplibre-gl'
 import { buildTooltipHTML, computeNormScore } from '../composables/useScoring.js'
 
 const props = defineProps({
