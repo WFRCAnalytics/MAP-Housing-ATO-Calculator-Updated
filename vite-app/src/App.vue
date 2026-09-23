@@ -131,7 +131,7 @@ let currentBasemapId = 'lite'
 
 const BASEMAP_BUILDERS = { lite: buildUgrcLiteStyle, hybrid: buildUgrcHybridStyle }
 
-const CITY_BOUNDS_LAYER_IDS = ['all-mun-fill', 'all-mun-line', 'lay_cities_fill', 'lay_cities_line_halo', 'lay_cities_line']
+const CITY_BOUNDS_LAYER_IDS = ['all-mun-fill', 'all-mun-line-halo', 'all-mun-line', 'lay_cities_fill', 'lay_cities_line_halo', 'lay_cities_line']
 
 // Both basemaps' roads share these source-layer names — LiteBase's own
 // naming for the Lite basemap, and Vector_Overlay's (differently named, no
@@ -294,9 +294,18 @@ function setupMapLayers() {
     id: 'all-mun-fill', type: 'fill', source: 'src-all-municipalities',
     paint: { 'fill-color': '#88aacc', 'fill-opacity': 0.06 },
   }, firstLabelId)
+  // A plain navy line read fine on Lite's light background but nearly
+  // vanished over Hybrid's aerial imagery (dark tree cover, shadows, etc.)
+  // — the same white-halo-under-a-dark-line trick used for the *selected*
+  // city boundary below makes it basemap-agnostic, just thinner/fainter so
+  // an unselected city still reads as clearly subordinate to a selected one.
+  map.addLayer({
+    id: 'all-mun-line-halo', type: 'line', source: 'src-all-municipalities',
+    paint: { 'line-color': '#ffffff', 'line-width': 2.5, 'line-opacity': 0.6 },
+  }, firstLabelId)
   map.addLayer({
     id: 'all-mun-line', type: 'line', source: 'src-all-municipalities',
-    paint: { 'line-color': '#233A57', 'line-width': 1, 'line-opacity': 0.6 },
+    paint: { 'line-color': '#233A57', 'line-width': 1, 'line-opacity': 0.8 },
   }, firstLabelId)
 
   map.on('mouseenter', 'all-mun-fill', () => { map.getCanvas().style.cursor = 'pointer' })
@@ -441,7 +450,17 @@ async function fetchCities() {
 }
 
 // ── City selection ─────────────────────────────────────
+// Picking a second/third city before the previous selection's DuckDB query
+// resolves used to leave the map in whatever order the (unrelated-length)
+// queries happened to finish — an earlier, smaller selection could resolve
+// after a later, larger one and overwrite it, which read as "the hexagons
+// vanish" even though the city boundary (a synchronous filter, not a query)
+// updated correctly and immediately. Same token-guard pattern as
+// switchBasemap: only the most recently started call is allowed to apply
+// its results.
+let citiesChangeToken = 0
 async function onCitiesChange(commCodes) {
+  const token = ++citiesChangeToken
   selectedCommCodes.value = commCodes ?? []
   if (!commCodes?.length) {
     cachedRows = []
@@ -456,6 +475,7 @@ async function onCitiesChange(commCodes) {
     isLoading.value = true
     loadingText.value = 'Loading data...'
     const { geojson, rows, minScore: min, maxScore: max } = await loadCities(commCodes, weights)
+    if (token !== citiesChangeToken) return // superseded by a newer selection — discard
     cachedRows = rows
     cachedH3Geojson = geojson
     hasData.value = rows.length > 0
@@ -468,7 +488,7 @@ async function onCitiesChange(commCodes) {
   } catch (e) {
     console.error('Failed to load city data:', e)
   } finally {
-    isLoading.value = false
+    if (token === citiesChangeToken) isLoading.value = false
   }
 }
 

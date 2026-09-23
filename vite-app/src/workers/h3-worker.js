@@ -1,6 +1,11 @@
 import { cellToBoundary } from 'h3-js'
 
-self.addEventListener('message', ({ data: { rows } }) => {
+// Echoes `id` back so the main thread can tell which request a response
+// belongs to — this worker is a shared singleton (see getH3Worker in
+// useData.js), and overlapping requests (e.g. selecting a second city
+// before the first one's response arrives) would otherwise all resolve off
+// of whichever response happens to arrive first.
+self.addEventListener('message', ({ data: { rows, id } }) => {
   const features = rows.map(row => ({
     type: 'Feature',
     geometry: {
@@ -25,5 +30,5 @@ self.addEventListener('message', ({ data: { rows } }) => {
       AP: row.AP,
     },
   }))
-  self.postMessage({ features })
+  self.postMessage({ id, features })
 })
