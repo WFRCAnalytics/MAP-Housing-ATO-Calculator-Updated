@@ -14,6 +14,7 @@
     "@vueform/multiselect": "^2.6.11",
     "apache-arrow": "^21.1.0",
     "h3-js": "^4.4.0",
+    "map-gl-style-switcher": "^0.10.1",
     "maplibre-gl": "^5.24.0",
     "vue": "^3.5.34"
   },
