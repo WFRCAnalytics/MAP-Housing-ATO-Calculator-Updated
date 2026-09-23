@@ -215,20 +215,30 @@ onMounted(async () => {
 // reference layer toggled on) since none of it is declared in either style
 // document — restoreMapState() (called from the 'style.load' handler above,
 // which fires again after setStyle just like it does on first load) puts it
-// all back once the new style has finished loading.
+// all back once the new style has finished loading. buildUgrcLiteStyle/
+// buildUgrcHybridStyle cache their result, so switching back to a basemap
+// already built in this session resolves immediately instead of re-fetching
+// it — see ugrcBasemap.js.
+let basemapSwitchToken = 0
 async function switchBasemap(id) {
   if (!mapInstance || id === currentBasemapId) return
   const build = BASEMAP_BUILDERS[id]
   if (!build) return
+  const token = ++basemapSwitchToken
   currentBasemapId = id
   isLoading.value = true
   loadingText.value = 'Switching basemap...'
   try {
     const style = await build()
+    // A newer switch started (and already owns currentBasemapId/isLoading)
+    // while this one was still fetching — e.g. the user clicked Hybrid then
+    // Lite before the first request landed. Applying a stale style here
+    // would silently revert whichever one "wins" the race, so bail out.
+    if (token !== basemapSwitchToken) return
     mapInstance.setStyle(style)
   } catch (e) {
     console.error(`Failed to switch to ${id} basemap:`, e)
-    isLoading.value = false
+    if (token === basemapSwitchToken) isLoading.value = false
   }
 }
 
@@ -565,13 +575,21 @@ function on3DChange(val) {
   }
 }
 
+let zMultRaf = null
 function onZMultChange(val) {
   zMult.value = val
   if (!is3D.value) return
   const map = mapInstance
-  if (map?.getLayer('h3_layer_3d')) {
-    map.setPaintProperty('h3_layer_3d', 'fill-extrusion-height', buildExtrusionExpr(weights, val))
-  }
+  if (!map?.getLayer('h3_layer_3d')) return
+  // The Z-Scale control fires continuously while dragging — coalesce to at
+  // most one paint update (and MapLibre repaint) per animation frame rather
+  // than one per native `input` event, which on a fast drag fires far more
+  // often than the display can actually show.
+  if (zMultRaf) return
+  zMultRaf = requestAnimationFrame(() => {
+    zMultRaf = null
+    map.setPaintProperty('h3_layer_3d', 'fill-extrusion-height', buildExtrusionExpr(weights, zMult.value))
+  })
 }
 
 // ── Layer toggling ─────────────────────────────────────

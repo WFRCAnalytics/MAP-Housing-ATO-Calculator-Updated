@@ -50,25 +50,29 @@ async function inlineTileJsonSource(source, sourceUrl) {
   }
 }
 
-// Fetches one UGRC vector tile service's style and merges its sources/layers
-// into `style` in place, namespaced `${prefix}__...` (e.g. "base__esri",
-// "base__Base/Roads - white version/...") so callers can target UGRC's own
-// road/building layers by source-layer name — see useMap.js's
-// setupMapLayers. Returns the service's own (still-relative-resolved)
-// glyphs URL, if any, so the caller can decide which service's glyphs to
-// use when merging more than one.
-async function mergeVectorService(style, spriteEntries, prefix, styleUrl, { skipFillLayers = false } = {}) {
+// Fetches one UGRC vector tile service's style and returns its
+// sources/layers/sprite/glyphs, namespaced `${prefix}__...` (e.g.
+// "base__esri", "base__Base/Roads - white version/...") so callers can
+// target UGRC's own road/building layers by source-layer name — see
+// App.vue's setupMapLayers. Returns a plain object rather than mutating a
+// shared style in place, so sibling services can be fetched concurrently
+// (via Promise.all) without their network responses racing each other into
+// the merged layer array in the wrong order.
+async function fetchVectorService(prefix, styleUrl, { skipFillLayers = false } = {}) {
   const raw = await (await fetch(styleUrl)).json()
 
-  for (const [sourceId, source] of Object.entries(raw.sources ?? {})) {
-    const key = `${prefix}__${sourceId}`
-    const absoluteUrl = resolveUrl(source.url, styleUrl)
-    style.sources[key] = await inlineTileJsonSource(source, absoluteUrl)
-    // Neither service's TileJSON declares its own attribution.
-    style.sources[key].attribution = 'Basemap © <a href="https://gis.utah.gov" target="_blank">UGRC</a>'
-  }
+  const sourceEntries = await Promise.all(
+    Object.entries(raw.sources ?? {}).map(async ([sourceId, source]) => {
+      const key = `${prefix}__${sourceId}`
+      const absoluteUrl = resolveUrl(source.url, styleUrl)
+      const inlined = await inlineTileJsonSource(source, absoluteUrl)
+      // Neither service's TileJSON declares its own attribution.
+      inlined.attribution = 'Basemap © <a href="https://gis.utah.gov" target="_blank">UGRC</a>'
+      return [key, inlined]
+    })
+  )
 
-  const spriteId = prefix
+  const layers = []
   for (const layer of raw.layers ?? []) {
     // The Hybrid overlay's only two fill layers exist to paint solid white
     // over everything outside Utah when the overlay is used standalone —
@@ -86,16 +90,29 @@ async function mergeVectorService(style, spriteEntries, prefix, styleUrl, { skip
     // icons silently fail to render because LiteBase's sprite "wins".
     const iconImage = rewritten.layout?.['icon-image']
     if (typeof iconImage === 'string') {
-      rewritten.layout = { ...rewritten.layout, 'icon-image': `${spriteId}:${iconImage}` }
+      rewritten.layout = { ...rewritten.layout, 'icon-image': `${prefix}:${iconImage}` }
     }
-    style.layers.push(rewritten)
+    layers.push(rewritten)
   }
 
-  if (raw.sprite) spriteEntries.push({ id: spriteId, url: resolveUrl(raw.sprite, styleUrl) })
-  return raw.glyphs ? resolveUrl(raw.glyphs, styleUrl) : undefined
+  return {
+    prefix,
+    sources: Object.fromEntries(sourceEntries),
+    layers,
+    sprite: raw.sprite ? { id: prefix, url: resolveUrl(raw.sprite, styleUrl) } : null,
+    glyphs: raw.glyphs ? resolveUrl(raw.glyphs, styleUrl) : undefined,
+  }
 }
 
-export async function buildUgrcLiteStyle() {
+async function buildUgrcLiteStyleUncached() {
+  // Fetched in parallel — each service is an independent network round trip
+  // (its root.json plus its source's TileJSON), so awaiting them one at a
+  // time in sequence (as a for-of loop would) needlessly serializes three
+  // requests that don't depend on each other. Promise.all still resolves
+  // `results` in LITE_LAYERS' order regardless of which finishes first, so
+  // the merge below stays deterministic (layer z-order intact).
+  const results = await Promise.all(LITE_LAYERS.map(({ prefix, styleUrl }) => fetchVectorService(prefix, styleUrl)))
+
   const style = {
     version: 8,
     sources: {},
@@ -105,8 +122,10 @@ export async function buildUgrcLiteStyle() {
   }
   const spriteEntries = []
 
-  for (const { prefix, styleUrl } of LITE_LAYERS) {
-    const glyphs = await mergeVectorService(style, spriteEntries, prefix, styleUrl)
+  for (const { prefix, sources, layers, sprite, glyphs } of results) {
+    Object.assign(style.sources, sources)
+    style.layers.push(...layers)
+    if (sprite) spriteEntries.push(sprite)
     // Each service hosts its own copy of the font glyph PBFs — VectorHillshade's
     // copy triggers a real maplibre-gl pbf-parser bug ("Unimplemented type: 3")
     // even though LiteBase's/LiteLabels' copies parse fine, so always use
@@ -119,7 +138,7 @@ export async function buildUgrcLiteStyle() {
   return style
 }
 
-export async function buildUgrcHybridStyle() {
+async function buildUgrcHybridStyleUncached() {
   const style = {
     version: 8,
     sources: {
@@ -136,11 +155,38 @@ export async function buildUgrcHybridStyle() {
       { id: 'esri-world-imagery', type: 'raster', source: 'esri-world-imagery' },
     ],
   }
-  const spriteEntries = []
 
-  const glyphs = await mergeVectorService(style, spriteEntries, 'overlay', HYBRID_OVERLAY_STYLE_URL, { skipFillLayers: true })
+  const { sources, layers, sprite, glyphs } = await fetchVectorService('overlay', HYBRID_OVERLAY_STYLE_URL, { skipFillLayers: true })
+  Object.assign(style.sources, sources)
+  style.layers.push(...layers)
   if (glyphs) style.glyphs = glyphs
-  if (spriteEntries.length) style.sprite = spriteEntries
+  if (sprite) style.sprite = [sprite]
 
   return style
+}
+
+// Each basemap only needs to be fetched and assembled once — the UGRC/Esri
+// documents behind it don't change within a session, so switching back to
+// an already-built basemap should be instant rather than re-issuing the
+// same handful of network requests. Caching the in-flight PROMISE (not just
+// the resolved style) also means two near-simultaneous callers share one
+// fetch instead of duplicating it. The cached style object is also handed
+// to `map.setStyle()` unchanged on every switch, which lets MapLibre's own
+// style diffing recognize a source as unchanged (same id, same definition)
+// and keep reusing its already-downloaded tiles instead of re-requesting
+// them — see App.vue's switchBasemap.
+const styleCache = new Map()
+function cached(id, build) {
+  if (!styleCache.has(id)) {
+    styleCache.set(id, build().catch(e => { styleCache.delete(id); throw e }))
+  }
+  return styleCache.get(id)
+}
+
+export function buildUgrcLiteStyle() {
+  return cached('lite', buildUgrcLiteStyleUncached)
+}
+
+export function buildUgrcHybridStyle() {
+  return cached('hybrid', buildUgrcHybridStyleUncached)
 }
