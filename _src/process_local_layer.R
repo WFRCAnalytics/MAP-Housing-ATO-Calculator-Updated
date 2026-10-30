@@ -71,6 +71,11 @@ process_local_layer <- function(
     return(out_fp)
   }
 
+  # Write to a temp path and publish only on success (see publish_output()),
+  # so an interrupted write is never mistaken for a cached layer.
+  tmp_fp <- paste0(out_fp, ".tmp")
+  unlink(tmp_fp, recursive = TRUE)
+
   # 4. Resolve DSN path (GDAL virtual filesystem prefixes)
   is_url_str <- grepl("^(http|ftp)s?://", path)
   is_zip_str <- grepl("\\.zip$", path, ignore.case = TRUE)
@@ -178,8 +183,7 @@ process_local_layer <- function(
       )
 
       if (!is.null(partitioning)) {
-        if (dir.exists(out_fp)) unlink(out_fp, recursive = TRUE)
-        dir.create(out_fp, recursive = TRUE)
+        dir.create(tmp_fp, recursive = TRUE)
         partition_cols <- paste(partitioning, collapse = ", ")
         DBI::dbExecute(con, glue::glue(
           "COPY (
@@ -187,8 +191,9 @@ process_local_layer <- function(
               {col_sql}
             FROM ST_Read('{dsn_path}'{layer_sql})
             {where_sql}
-          ) TO '{out_fp}' (FORMAT PARQUET, PARTITION_BY ({partition_cols}))"
+          ) TO '{tmp_fp}' (FORMAT PARQUET, PARTITION_BY ({partition_cols}))"
         ))
+        publish_output(tmp_fp, out_fp)
         message(paste("💾 Saved Partitioned Dataset:", out_fp))
       } else {
         DBI::dbExecute(con, glue::glue(
@@ -197,8 +202,9 @@ process_local_layer <- function(
               {col_sql}
             FROM ST_Read('{dsn_path}'{layer_sql})
             {where_sql}
-          ) TO '{out_fp}' (FORMAT PARQUET)"
+          ) TO '{tmp_fp}' (FORMAT PARQUET)"
         ))
+        publish_output(tmp_fp, out_fp)
         message(paste("💾 Saved Parquet File:", out_fp))
       }
 
@@ -231,8 +237,9 @@ process_local_layer <- function(
             * EXCLUDE ({geom_col}),
             ST_MakeValid(ST_GeomFromWKB({geom_col})) AS geometry
           FROM _sf_data
-        ) TO '{out_fp}' (FORMAT PARQUET)"
+        ) TO '{tmp_fp}' (FORMAT PARQUET)"
       ))
+      publish_output(tmp_fp, out_fp)
       message(paste("💾 Saved Parquet File:", out_fp))
       out_fp
     }

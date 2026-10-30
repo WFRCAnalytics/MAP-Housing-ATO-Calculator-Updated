@@ -49,6 +49,11 @@ download_feature_layer <- function(
     return(out_fp)
   }
 
+  # Write to a temp path and publish only on success (see publish_output()),
+  # so an interrupted write is never mistaken for a cached layer.
+  tmp_fp <- paste0(out_fp, ".tmp")
+  unlink(tmp_fp, recursive = TRUE)
+
   message(paste("⬇️ Downloading:", name))
 
   # 4. Execution
@@ -77,23 +82,24 @@ download_feature_layer <- function(
       duckdb::duckdb_register(con_write, "_write_tmp", df_out)
 
       if (!is.null(partitioning)) {
-        if (dir.exists(out_fp)) unlink(out_fp, recursive = TRUE)
-        dir.create(out_fp, recursive = TRUE)
+        dir.create(tmp_fp, recursive = TRUE)
         partition_cols <- paste(partitioning, collapse = ", ")
         DBI::dbExecute(
           con_write,
           glue::glue(
-            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{out_fp}' (FORMAT PARQUET, PARTITION_BY ({partition_cols}))"
+            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{tmp_fp}' (FORMAT PARQUET, PARTITION_BY ({partition_cols}))"
           )
         )
+        publish_output(tmp_fp, out_fp)
         message(paste("💾 Saved Partitioned Dataset:", out_fp))
       } else {
         DBI::dbExecute(
           con_write,
           glue::glue(
-            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{out_fp}' (FORMAT PARQUET)"
+            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{tmp_fp}' (FORMAT PARQUET)"
           )
         )
+        publish_output(tmp_fp, out_fp)
         message(paste("💾 Saved Parquet File:", out_fp))
       }
 
