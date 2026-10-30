@@ -94,8 +94,8 @@ layers:
     type: arcgis
     name: Utah_Qualified_Opportunity_Zones
     save_dir: landuse
-    url: https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/Utah_Qualified_Opportunity_Zones/FeatureServer/0
-    description: Utah Qualified Opportunity Zones
+    url: https://services3.arcgis.com/GlpLTbxq481k9lgs/arcgis/rest/services/omidgley_OZ_Map_layers/FeatureServer/10
+    description: Utah OZ 2.0 eligible tracts (all 147; GOEO's recommended subset is filtered in 3-spatial-operations.qmd)
 
   # --- Transportation --------------------------------------------------------
   transit_routes:

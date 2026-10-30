@@ -222,23 +222,8 @@ process_local_layer <- function(
       sf_data <- sf::st_transform(sf_data, crs)
       sf_data <- sf::st_zm(sf_data, drop = TRUE, what = "ZM")
       sf_data <- janitor::clean_names(sf_data)
-      geom_col <- attr(sf_data, "sf_column")
-      wkb <- sf::st_as_binary(sf::st_geometry(sf_data))
-      class(wkb) <- "blob"
-      df_data <- sf::st_drop_geometry(sf_data)
-      df_data[[geom_col]] <- wkb
-      con_fb <- DBI::dbConnect(duckdb::duckdb())
-      on.exit(DBI::dbDisconnect(con_fb, shutdown = TRUE), add = TRUE)
-      DBI::dbExecute(con_fb, "INSTALL spatial; LOAD spatial;")
-      duckdb::duckdb_register(con_fb, "_sf_data", df_data)
-      DBI::dbExecute(con_fb, glue::glue(
-        "COPY (
-          SELECT
-            * EXCLUDE ({geom_col}),
-            ST_MakeValid(ST_GeomFromWKB({geom_col})) AS geometry
-          FROM _sf_data
-        ) TO '{tmp_fp}' (FORMAT PARQUET)"
-      ))
+      sf_data <- sf::st_make_valid(sf_data)
+      write_sf_parquet(sf_data, tmp_fp, crs, partitioning)
       publish_output(tmp_fp, out_fp)
       message(paste("💾 Saved Parquet File:", out_fp))
       out_fp

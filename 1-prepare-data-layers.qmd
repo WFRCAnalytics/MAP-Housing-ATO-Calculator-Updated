@@ -29,8 +29,6 @@ renv::restore()
 library(dplyr)
 library(sf)
 library(arcgislayers)
-library(arrow)
-library(geoarrow)
 library(janitor)
 library(mapgl)
 library(here)
@@ -38,13 +36,6 @@ library(fs)
 ```
 
 ## Project Configurations
-
-### Arrow Initialization
-
-```r
-# Only run if this is the first time using `arrow` package on this device
-arrow::install_arrow()
-```
 
 ### Path Configuration
 
@@ -118,7 +109,7 @@ never leaves a half-written parquet that looks cached.
 
 ```{r}
 #| label: prepare-layers
-status <- prepare_layers(sources, sub_dirs = sub_dirs, crs = CRS_WGS)
+status <- prepare_layers(sources, sub_dirs = sub_dirs, crs = CRS_UTM)
 status
 ```
 

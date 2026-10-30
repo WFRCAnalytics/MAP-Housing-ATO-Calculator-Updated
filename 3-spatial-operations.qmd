@@ -681,11 +681,23 @@ land_use <- function(f) here::here(sub_dirs$landuse, f)
 trans <- function(f) here::here(sub_dirs$transport, f)
 amen <- function(f) here::here(sub_dirs$amenities, f)
 
+# OZ 2.0: the layer holds all 147 eligible tracts; GOEO recommends these 37
+# (definitionExpression of the goeo.maps.arcgis.com "Utah Opportunity Zone Tract Recommendations" map)
+oz_recommended_sql <- "geoid_tract IN (
+  '49003960601', '49005000501', '49005000800', '49005001002', '49007000600', '49011125701',
+  '49011125702', '49013940501', '49019000200', '49021110502', '49021110601', '49031960100',
+  '49035102100', '49035102702', '49035102900', '49035111500', '49035111802', '49035112101',
+  '49035112404', '49035112700', '49035113312', '49035113514', '49035113906', '49039972401',
+  '49045130600', '49047968401', '49049000511', '49049001801', '49049001802', '49049001900',
+  '49049002209', '49049002902', '49049980500', '49053271501', '49057201100', '49057201900',
+  '49057210701'
+)"
+
 amenity_config <- tibble::tribble(
   ~col_name                                                                     , ~type                        , ~path                                                  , ~filter_sql                           , ~value_col , ~buffer_opts ,
 
   # --- BINARY ---
-  "OZ"                                                                          , "binary"                     , land_use("Utah_Qualified_Opportunity_Zones.parquet")   , "1=1"                                 , NA         , NA           ,
+  "OZ"                                                                          , "binary"                     , land_use("Utah_Qualified_Opportunity_Zones.parquet")   , oz_recommended_sql                    , NA         , NA           ,
   "CM"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'Metropolitan Center'" , NA         , NA           ,
   "CU"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'Urban Center'"        , NA         , NA           ,
   "CC"                                                                          , "binary"                     , land_use("WCV_Centers_and_Regional_Land_Uses.parquet") , "center_type = 'City Center'"         , NA         , NA           ,

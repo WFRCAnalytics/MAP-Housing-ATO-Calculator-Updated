@@ -1,12 +1,13 @@
 #' Preview a Parquet Spatial Layer
 #'
-#' Lazy-loads a Parquet file, extracts a subset (head), converts the WKB
-#' geometry to SF, and renders a map using mapgl::maplibre_view.
+#' Reads a (Geo)Parquet file or partitioned directory through DuckDB, converts
+#' the geometry to sf using the CRS stored in the file, and renders a map with
+#' mapgl::maplibre_view.
 #'
-#' @param file_path A string path to the parquet file.
+#' @param file_path A string path to the parquet file or partitioned directory.
 #' @param limit An integer for the max number of features to load.
 #'   Default is \code{NULL} (loads all data). If provided, loads the first N rows.
-#' @param crs The EPSG code to assume if metadata is missing (default 4326).
+#' @param crs The EPSG code to assume if the file has no CRS (default 4326).
 #' @param ... Additional arguments passed to \code{mapgl::maplibre_view}
 #'   (e.g., \code{tooltip}, \code{style}, \code{palette}, \code{n}).
 #'
@@ -20,7 +21,7 @@ preview_layer <- function(
   ...
 ) {
   # 1. Dependency Check
-  required_pkgs <- c("arrow", "dplyr", "sf", "mapgl", "jsonlite")
+  required_pkgs <- c("duckdb", "DBI", "glue", "dplyr", "sf", "mapgl")
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
   ]
@@ -39,87 +40,63 @@ preview_layer <- function(
 
   tryCatch(
     {
-      # 1. Load Data
-      ds <- arrow::open_dataset(file_path)
-
-      # 2. Initialize with the function argument
-      file_crs <- crs
-
-      # 2. Check metadata safely
-      if (!is.null(ds$metadata$geo)) {
-        try(
-          {
-            geo_meta <- jsonlite::fromJSON(ds$metadata$geo)
-
-            # Attempt extraction
-            extracted <- geo_meta$columns$geometry$crs
-            if (is.null(extracted)) {
-              extracted <- geo_meta$crs
-            }
-
-            # 3. OVERWRITE ONLY IF VALID (Not NULL, Not Empty)
-            if (!is.null(extracted) && extracted != "") {
-              file_crs <- extracted
-            }
-          },
-          silent = TRUE
-        )
-      }
-
-      # 2. Collect
-      if (!is.null(limit)) {
-        df_raw <- ds |> head(limit) |> dplyr::collect()
+      src <- gsub("\\\\", "/", file_path)
+      src_sql <- if (dir.exists(file_path)) {
+        glue::glue("read_parquet('{src}/**/*.parquet', hive_partitioning = true)")
       } else {
-        df_raw <- dplyr::collect(ds)
+        glue::glue("read_parquet('{src}')")
       }
+      limit_sql <- if (is.null(limit)) "" else paste("LIMIT", as.integer(limit))
 
-      if (nrow(df_raw) == 0) {
-        warning("⚠️ Layer is empty: ", basename(file_path))
-        return(NULL)
-      }
+      with_duckdb(function(conn) {
+        # 2. Geometry column: the writers in this project always name it "geometry"
+        cols <- DBI::dbGetQuery(conn, glue::glue("DESCRIBE SELECT * FROM {src_sql}"))
+        if (!"geometry" %in% cols$column_name) {
+          stop("No geometry column found in parquet file.")
+        }
 
-      # 3. Handle Geometry
-      col_names <- names(df_raw)
-      geom_col <- col_names[grepl(
-        "^(geometry|geom|wkb_geometry|shape)$",
-        col_names,
-        ignore.case = TRUE
-      )][1]
-      if (is.na(geom_col)) {
-        stop("No geometry column found in parquet file.")
-      }
-      if (geom_col != "geometry") {
-        names(df_raw)[names(df_raw) == geom_col] <- "geometry"
-      }
+        # 3. Read geometry as WKB plus the CRS stored in the file
+        df_raw <- DBI::dbGetQuery(
+          conn,
+          glue::glue(
+            "SELECT * EXCLUDE (geometry), ST_AsWKB(geometry) AS geometry
+             FROM {src_sql} {limit_sql}"
+          )
+        )
+        file_crs <- DBI::dbGetQuery(
+          conn,
+          glue::glue("SELECT ST_CRS(geometry) AS crs FROM {src_sql} LIMIT 1")
+        )$crs
+        if (length(file_crs) == 0 || is.na(file_crs) || !nzchar(file_crs)) {
+          file_crs <- crs
+        }
 
-      # Fix WKB
-      if (!inherits(df_raw$geometry, "sfc")) {
+        if (nrow(df_raw) == 0) {
+          warning("⚠️ Layer is empty: ", basename(file_path))
+          return(NULL)
+        }
+
+        # 4. Create sf with the file's CRS
         df_raw$geometry <- sf::st_as_sfc(df_raw$geometry, crs = file_crs)
-      }
+        sf_obj <- sf::st_as_sf(df_raw)
 
-      # 4. Create SF & Apply CRS
-      sf_obj <- sf::st_as_sf(df_raw)
+        # Flatten list columns for mapgl
+        sf_obj <- sf_obj |>
+          dplyr::mutate(dplyr::across(
+            dplyr::where(is.list) & !dplyr::where(~ inherits(.x, "sfc")),
+            ~ as.character(.)
+          ))
 
-      # Fallback if st_as_sfc didn't attach it (e.g. geometry was already text/sfc)
-      if (is.na(sf::st_crs(sf_obj))) {
-        sf::st_crs(sf_obj) <- file_crs
-      }
-
-      # Flatten list columns for mapgl
-      sf_obj <- sf_obj |>
-        dplyr::mutate(dplyr::across(
-          dplyr::where(is.list) & !dplyr::where(~ inherits(.x, "sfc")),
-          ~ as.character(.)
-        ))
-
-      # 5. Render
-      mapgl::maplibre_view(data = sf_obj, ...)
+        # 5. Render
+        mapgl::maplibre_view(data = sf_obj, ...)
+      })
     },
     error = function(e) {
       message(paste(
         "❌ Preview failed:",
         basename(file_path),
-        "\nReason:",
+        "
+Reason:",
         e$message
       ))
       return(NULL)

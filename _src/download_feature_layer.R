@@ -71,41 +71,15 @@ download_feature_layer <- function(
       # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.
       sf::st_geometry(sf_obj) <- "geometry"
 
-      # Write via DuckDB — produces null CRS in GeoParquet metadata (DuckDB 1.5 compatible)
-      con_write <- DBI::dbConnect(duckdb::duckdb())
-      on.exit(DBI::dbDisconnect(con_write, shutdown = TRUE), add = TRUE)
-      DBI::dbExecute(con_write, "INSTALL spatial; LOAD spatial;")
-      DBI::dbExecute(con_write, "SET geometry_always_xy = true")
+      # Write via DuckDB, which carries the sf object's CRS into the GeoParquet metadata
+      write_sf_parquet(sf_obj, tmp_fp, crs, partitioning)
+      publish_output(tmp_fp, out_fp)
+      message(paste(
+        if (is.null(partitioning)) "💾 Saved Parquet File:" else "💾 Saved Partitioned Dataset:",
+        out_fp
+      ))
 
-      df_out <- sf::st_drop_geometry(sf_obj)
-      df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(sf_obj))
-      duckdb::duckdb_register(con_write, "_write_tmp", df_out)
-
-      if (!is.null(partitioning)) {
-        dir.create(tmp_fp, recursive = TRUE)
-        partition_cols <- paste(partitioning, collapse = ", ")
-        DBI::dbExecute(
-          con_write,
-          glue::glue(
-            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{tmp_fp}' (FORMAT PARQUET, PARTITION_BY ({partition_cols}))"
-          )
-        )
-        publish_output(tmp_fp, out_fp)
-        message(paste("💾 Saved Partitioned Dataset:", out_fp))
-      } else {
-        DBI::dbExecute(
-          con_write,
-          glue::glue(
-            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _write_tmp) TO '{tmp_fp}' (FORMAT PARQUET)"
-          )
-        )
-        publish_output(tmp_fp, out_fp)
-        message(paste("💾 Saved Parquet File:", out_fp))
-      }
-
-      duckdb::duckdb_unregister(con_write, "_write_tmp")
-
-      rm(sf_obj, df_out)
+      rm(sf_obj)
       gc()
 
       return(out_fp)

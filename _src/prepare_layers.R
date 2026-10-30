@@ -35,6 +35,52 @@ with_duckdb <- function(code, h3 = FALSE) {
   code(conn)
 }
 
+#' Write an sf Object to GeoParquet, Carrying Its CRS Natively
+#'
+#' The sf object's geometry goes to DuckDB in memory as WKB. WKB has no CRS, so
+#' it is cast to `GEOMETRY('<the sf object's own CRS>')`, which makes DuckDB
+#' CRS-aware; `ST_Transform(geom, crs)` then reprojects it and DuckDB writes the
+#' CRS into the GeoParquet metadata. An sf object without an EPSG CRS is an
+#' error, so nothing is guessed.
+#'
+#' @param sf_obj An sf object with a CRS.
+#' @param out_tmp Temporary output path (file, or directory when `partitioning` is set).
+#' @param crs Target CRS (EPSG string) for the written geometry.
+#' @param partitioning (Optional) Character vector of columns to partition by.
+#' @return `out_tmp`, invisibly. Call `publish_output()` afterwards.
+write_sf_parquet <- function(sf_obj, out_tmp, crs, partitioning = NULL) {
+  src_crs <- sf::st_crs(sf_obj)$srid
+  if (is.null(src_crs) || is.na(src_crs) || !nzchar(src_crs)) {
+    stop("sf object has no EPSG CRS; refusing to guess one")
+  }
+
+  wkb <- sf::st_as_binary(sf::st_geometry(sf_obj))
+  class(wkb) <- "blob"
+  df_out <- sf::st_drop_geometry(sf_obj)
+  df_out[["geometry"]] <- wkb
+
+  part_sql <- ""
+  if (!is.null(partitioning)) {
+    dir.create(out_tmp, recursive = TRUE, showWarnings = FALSE)
+    part_sql <- paste0(", PARTITION_BY (", paste(partitioning, collapse = ", "), ")")
+  }
+
+  with_duckdb(function(conn) {
+    duckdb::duckdb_register(conn, "_sf_data", df_out)
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "COPY (
+          SELECT * EXCLUDE (geometry),
+                 ST_Transform(ST_GeomFromWKB(geometry)::GEOMETRY('{src_crs}'), '{crs}') AS geometry
+          FROM _sf_data
+        ) TO '{out_tmp}' (FORMAT PARQUET{part_sql})"
+      )
+    )
+  })
+  invisible(out_tmp)
+}
+
 #' Join TAZ Geometry With the Access-to-Opportunity CSV
 #'
 #' Joins TAZ polygons with the ATO CSV inside DuckDB. CSV columns that
@@ -98,7 +144,7 @@ join_taz_ato <- function(base_fp, csv, name, save_dir, overwrite = FALSE) {
 prepare_layers <- function(
   sources,
   sub_dirs,
-  crs = CRS_WGS,
+  crs = CRS_UTM,
   only = NULL,
   overwrite = FALSE
 ) {
