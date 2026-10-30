@@ -21,6 +21,9 @@
 #' @param crs Projected EPSG code for spatial operations (default `CRS_STP`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
 #' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
+#' @param max_retries Attempts per API batch before the layer fails (default 3).
+#'   Completed batches are checkpointed in `<output>.parquet.parts/`, so a
+#'   failed run resumes from the last good batch when re-run.
 #' @param ... Additional arguments passed to \code{openrouteservice::ors_isochrones}.
 #'   Common options include:
 #'   \itemize{
@@ -74,6 +77,7 @@ process_isochrones <- function(
   crs = CRS_STP,
   dry_run = TRUE,
   overwrite = FALSE,
+  max_retries = 3,
   ...
 ) {
   # 1. Dependency Check
@@ -172,12 +176,22 @@ process_isochrones <- function(
 
       DBI::dbExecute(conn, query_view)
 
-      # Count total rows
-      total_rows <- DBI::dbGetQuery(
+      # Fetch the points ONCE, in a stable order, and batch them in R. Batch i
+      # always covers the same points, and the boundary filter runs a single
+      # time instead of once per API batch.
+      pts <- DBI::dbGetQuery(
         conn,
-        "SELECT COUNT(*) as n FROM input_points"
-      )$n
-      num_batches <- ceiling(total_rows / batch_size)
+        "SELECT lon, lat FROM input_points ORDER BY lon, lat"
+      )
+      total_rows <- nrow(pts)
+      batches <- split(
+        seq_len(total_rows),
+        ceiling(seq_len(total_rows) / batch_size)
+      )
+      num_batches <- length(batches)
+      batch_coords <- function(i) {
+        purrr::array_branch(as.matrix(pts[batches[[i]], c("lon", "lat")]), 1)
+      }
 
       # --- DRY RUN ---
       if (dry_run) {
@@ -188,68 +202,69 @@ process_isochrones <- function(
         message(paste("   Batch Size:   ", batch_size))
         message(paste("   Num Batches:  ", num_batches))
 
-        # Sample first batch query
-        sample_batch <- DBI::dbGetQuery(
-          conn,
-          glue::glue(
-            "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET 0"
-          )
-        )
-        # Convert to list of pairs for API
-        sample_list <- purrr::array_branch(as.matrix(sample_batch), 1)
-
-        message("   Sample Batch 1 (Coordinates):")
-        print(sample_list)
+        if (num_batches > 0) {
+          message("   Sample Batch 1 (Coordinates):")
+          print(batch_coords(1))
+        }
         return(invisible(NULL))
       }
 
+      # Checkpoint each batch to disk so a crash or ORS outage resumes where
+      # it stopped. The checkpoint is discarded if the request signature
+      # (profile, range, filter, ...) differs from the one that wrote it.
+      parts_dir <- paste0(out_fp, ".parts")
+      sig_fp <- file.path(parts_dir, "signature.rds")
+      sig <- list(profile, range, input_filter, batch_size, total_rows, list(...))
+      if (dir.exists(parts_dir) && !identical(tryCatch(readRDS(sig_fp), error = function(e) NULL), sig)) {
+        message("   ♻️  Stale checkpoint found, discarding")
+        unlink(parts_dir, recursive = TRUE)
+      }
+      dir.create(parts_dir, recursive = TRUE, showWarnings = FALSE)
+      saveRDS(sig, sig_fp)
+
+      n_done <- length(list.files(parts_dir, pattern = "^batch_"))
+      if (n_done > 0) message("   ▶️  Resuming: ", n_done, "/", num_batches, " batches already done")
       message(paste("   Streaming", num_batches, "batches..."))
 
-      # 4. Process Batches (Streaming Loop)
+      # 4. Process Batches
+      # A batch is retried; if it still fails the whole layer fails, so a
+      # partial isochrone layer is never saved (and then cached as complete).
       results_list <- purrr::map(
-        1:num_batches,
+        seq_len(num_batches),
         function(i) {
-          # Calculate OFFSET
-          offset <- (i - 1) * batch_size
+          part_fp <- file.path(parts_dir, sprintf("batch_%05d.rds", i))
+          if (file.exists(part_fp)) return(readRDS(part_fp))
 
-          # Fetch just this batch from DuckDB
-          # This keeps RAM usage tiny regardless of dataset size
-          batch_df <- DBI::dbGetQuery(
-            conn,
-            glue::glue(
-              "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET {offset}"
-            )
-          )
-
-          # Convert to API format (List of c(lon, lat))
-          batch_coords <- purrr::array_branch(as.matrix(batch_df), 1)
-
-          # Rate Limit Sleep
-          Sys.sleep(0)
-
-          tryCatch(
-            {
+          res <- NULL
+          for (attempt in seq_len(max_retries)) {
+            res <- tryCatch(
               openrouteservice::ors_isochrones(
-                locations = batch_coords,
+                locations = batch_coords(i),
                 profile = profile,
                 range = range,
                 output = "sf",
                 ...
-              )
-            },
-            error = function(e) {
-              warning(paste("   ⚠️ Batch", i, "failed:", e$message))
-              return(NULL)
-            }
-          )
+              ),
+              error = function(e) {
+                message("   ⚠️ Batch ", i, " attempt ", attempt, "/", max_retries, " failed: ", conditionMessage(e))
+                NULL
+              }
+            )
+            if (!is.null(res)) break
+            Sys.sleep(2 * attempt)
+          }
+          if (is.null(res)) {
+            stop("Batch ", i, "/", num_batches, " failed after ", max_retries,
+                 " attempts. Re-run to resume from the saved batches.")
+          }
+          saveRDS(res, part_fp)
+          res
         },
         .progress = TRUE
-      ) # Add progress bar!
+      )
 
       # 5. Save Results
-      final_iso <- results_list |>
-        purrr::discard(is.null) |>
-        dplyr::bind_rows()
+      final_iso <- dplyr::bind_rows(results_list)
 
       if (nrow(final_iso) > 0) {
         # API returns 4326. We simply save it as 4326.
@@ -269,13 +284,17 @@ process_isochrones <- function(
         df_out <- sf::st_drop_geometry(final_iso)
         df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(final_iso))
         duckdb::duckdb_register(conn, "_iso_write", df_out)
+        tmp_fp <- paste0(out_fp, ".tmp")
+        unlink(tmp_fp)
         DBI::dbExecute(
           conn,
           glue::glue(
-            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _iso_write) TO '{out_fp}' (FORMAT PARQUET)"
+            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _iso_write) TO '{tmp_fp}' (FORMAT PARQUET)"
           )
         )
         duckdb::duckdb_unregister(conn, "_iso_write")
+        publish_output(tmp_fp, out_fp)
+        unlink(parts_dir, recursive = TRUE)
         message(paste("💾 Saved:", out_fp))
         return(out_fp)
       } else {

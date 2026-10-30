@@ -16,6 +16,25 @@ publish_output <- function(tmp_fp, out_fp) {
   invisible(out_fp)
 }
 
+#' Run Code With a Short-Lived DuckDB Connection
+#'
+#' Opens an in-memory DuckDB connection with the spatial extension loaded and
+#' `geometry_always_xy` set, runs `code(conn)`, and always closes it. Use this
+#' instead of `on.exit()` in a notebook chunk: `on.exit()` at the top level of a
+#' chunk does not run when the chunk ends, so the connection stays open.
+#'
+#' @param code Function taking the connection as its only argument.
+#' @param h3 Logical. Also load the community H3 extension. Default `FALSE`.
+#' @return Whatever `code(conn)` returns.
+with_duckdb <- function(code, h3 = FALSE) {
+  conn <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(conn, shutdown = TRUE), add = TRUE)
+  DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+  DBI::dbExecute(conn, "SET geometry_always_xy = true")
+  if (h3) DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
+  code(conn)
+}
+
 #' Join TAZ Geometry With the Access-to-Opportunity CSV
 #'
 #' Joins TAZ polygons with the ATO CSV inside DuckDB. CSV columns that
