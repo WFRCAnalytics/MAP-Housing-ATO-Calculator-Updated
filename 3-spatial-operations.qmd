@@ -313,22 +313,25 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
 # into 20 km tiles once and reused for parcels and H3. See tile_polygons().
 COUNTY_TILE_SIZE <- 20000
 
-timed_step(
-  "load + tile county layer",
-  {
-    DBI::dbExecute(
-      conn,
-      glue::glue(
-        "
+timed_step("load + tile county layer", {
+  DBI::dbExecute(
+    conn,
+    glue::glue(
+      "
       CREATE OR REPLACE TEMP TABLE layer_county AS
       SELECT countynbr as COUNTYNBR, geometry as geom
       FROM read_parquet('{here::here(sub_dirs$base, 'UtahCountyBoundaries.parquet')}')
     "
-      )
     )
-    tile_polygons(conn, "layer_county", "county_tiles", "COUNTYNBR", COUNTY_TILE_SIZE)
-  }
-)
+  )
+  tile_polygons(
+    conn,
+    "layer_county",
+    "county_tiles",
+    "COUNTYNBR",
+    COUNTY_TILE_SIZE
+  )
+})
 
 # Pass the pre-calculated point tables we created in Part 1
 timed_step(
@@ -432,27 +435,24 @@ attach_job_access <- function(conn, target_table, point_table, key) {
   )
 
   # 2. RESET COLUMNS (Drop if exists), then 3. Add Columns
-  timed_step(
-    "add AA / AT columns",
-    {
-      DBI::dbExecute(
-        conn,
-        glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AA\"")
-      )
-      DBI::dbExecute(
-        conn,
-        glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AT\"")
-      )
-      DBI::dbExecute(
-        conn,
-        glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AA\" DOUBLE")
-      )
-      DBI::dbExecute(
-        conn,
-        glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AT\" DOUBLE")
-      )
-    }
-  )
+  timed_step("add AA / AT columns", {
+    DBI::dbExecute(
+      conn,
+      glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AA\"")
+    )
+    DBI::dbExecute(
+      conn,
+      glue::glue("ALTER TABLE {target_table} DROP COLUMN IF EXISTS \"AT\"")
+    )
+    DBI::dbExecute(
+      conn,
+      glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AA\" DOUBLE")
+    )
+    DBI::dbExecute(
+      conn,
+      glue::glue("ALTER TABLE {target_table} ADD COLUMN \"AT\" DOUBLE")
+    )
+  })
 
   # 4. Spatial Join
   timed_step(
