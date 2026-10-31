@@ -16,8 +16,10 @@
 #'   (`binary`, `isochrone`, `buffer`), `path`, `filter_sql`, `value_col`.
 #' @param crs CRS of the point tables (EPSG string). Layers are transformed to
 #'   it, which is a no-op for layers already stored in it.
+#' @param simplify_tolerance `ST_Simplify` tolerance in the units of `crs`
+#'   (metres for EPSG:26912). Default 1.0. Use `0` to skip simplification.
 #' @return `NULL`, invisibly.
-prepare_layer <- function(conn, config, crs = "EPSG:26912") {
+prepare_layer <- function(conn, config, crs = "EPSG:26912", simplify_tolerance = 1.0) {
   col <- config$col_name
   type <- config$type
   path <- config$path
@@ -34,13 +36,17 @@ prepare_layer <- function(conn, config, crs = "EPSG:26912") {
 
   # Simplification keeps the polygon joins fast; a polygon that collapses
   # becomes NULL and simply never matches.
+  geom_sql <- glue::glue("ST_Transform(geometry, '{crs}')")
+  if (simplify_tolerance > 0) {
+    geom_sql <- glue::glue("ST_Simplify({geom_sql}, {simplify_tolerance})")
+  }
   val_sql <- if (type == "isochrone") glue::glue(", {config$value_col} AS val") else ""
   DBI::dbExecute(
     conn,
     glue::glue(
       "
       CREATE OR REPLACE TEMP TABLE raw_layer AS
-      SELECT ST_MakeValid(ST_Simplify(ST_Transform(geometry, '{crs}'), 1.0)) AS geom
+      SELECT ST_MakeValid({geom_sql}) AS geom
              {val_sql}
       FROM read_parquet('{path}')
       WHERE {config$filter_sql}
