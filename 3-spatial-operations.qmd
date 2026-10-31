@@ -426,10 +426,11 @@ timed_step("parcels BC (largest building)", DBI::dbExecute(
     FROM points_buildings b
     JOIN bc_map m ON b.building_type = m.full_name
 
-    -- Order by square footage descending to pick the main building
+    -- Order by square footage descending to pick the main building;
+    -- equal footage is broken by code so the result is repeatable
     QUALIFY ROW_NUMBER() OVER (
       PARTITION BY b.parcel_id
-      ORDER BY b.building_sqft DESC
+      ORDER BY b.building_sqft DESC NULLS LAST, m.abbr
     ) = 1
   ) mapped
   WHERE targets_parcels.parcel_id = mapped.parcel_id
@@ -453,12 +454,23 @@ timed_step("H3 BC pass A (buildings in cell)", DBI::dbExecute(
   UPDATE targets_h3
   SET BC = agg.mode_bc
   FROM (
-    SELECT
-      b.h3_index,
-      MODE(COALESCE(m.abbr, 'OT')) as mode_bc
-    FROM points_buildings b
-    LEFT JOIN bc_map m ON b.building_type = m.full_name
-    GROUP BY b.h3_index
+    -- Most common code in the cell. A tie goes to the code with more building
+    -- square footage, then to the alphabetically first code (repeatable result).
+    SELECT h3_index, abbr as mode_bc
+    FROM (
+      SELECT
+        b.h3_index,
+        COALESCE(m.abbr, 'OT') as abbr,
+        COUNT(*) as n,
+        SUM(b.building_sqft) as sqft
+      FROM points_buildings b
+      LEFT JOIN bc_map m ON b.building_type = m.full_name
+      GROUP BY b.h3_index, COALESCE(m.abbr, 'OT')
+    )
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY h3_index
+      ORDER BY n DESC, sqft DESC NULLS LAST, abbr
+    ) = 1
   ) agg
   WHERE targets_h3.h3_index = agg.h3_index
 "
@@ -480,11 +492,12 @@ timed_step("H3 BC pass B (parcel polygon at cell centre)", DBI::dbExecute(
   FROM (
     SELECT
       ph.h3_index,
-      p.BC
+      MIN(p.BC) as BC -- a centre on a shared parcel edge matches two: take the first code
     FROM points_h3 ph
     -- Spatial Join: H3 Center inside Parcel Polygon
     JOIN targets_parcels p ON ST_Intersects(ph.geom, p.geom)
     WHERE p.BC IS NOT NULL
+    GROUP BY ph.h3_index
   ) matched
   WHERE targets_h3.h3_index = matched.h3_index
     AND targets_h3.BC IS NULL -- Only touch rows that failed Pass A
@@ -503,24 +516,30 @@ timed_step("H3 BC pass C (neighbour vote)", DBI::dbExecute(
   UPDATE targets_h3
   SET BC = fill.mode_bc
   FROM (
-    SELECT
-      t.h3_index,
-      MODE(n.BC) as mode_bc
-    FROM targets_h3 t
-    -- 1. Get the 6 immediate neighbors (k=1) for the empty cell
-    CROSS JOIN LATERAL (
-      SELECT unnest(h3_grid_disk(t.h3_index, 1)) as neighbor_h3
-    ) grid
-    -- 2. Join back to the main table to check the neighbor's value
-    JOIN targets_h3 n ON grid.neighbor_h3 = n.h3_index
+    -- Most common neighbor code; a tie goes to the alphabetically first code
+    SELECT h3_index, BC as mode_bc
+    FROM (
+      SELECT
+        t.h3_index,
+        n.BC,
+        COUNT(*) as votes
+      FROM targets_h3 t
+      -- 1. Get the 6 immediate neighbors (k=1) for the empty cell
+      CROSS JOIN LATERAL (
+        SELECT unnest(h3_grid_disk(t.h3_index, 1)) as neighbor_h3
+      ) grid
+      -- 2. Join back to the main table to check the neighbor's value
+      JOIN targets_h3 n ON grid.neighbor_h3 = n.h3_index
 
-    WHERE t.BC IS NULL          -- Target must be empty
-      AND n.BC IS NOT NULL      -- Neighbor must have data
-      AND t.h3_index != n.h3_index -- Exclude the cell itself
+      WHERE t.BC IS NULL          -- Target must be empty
+        AND n.BC IS NOT NULL      -- Neighbor must have data
+        AND t.h3_index != n.h3_index -- Exclude the cell itself
 
-    GROUP BY t.h3_index
+      GROUP BY t.h3_index, n.BC
+    )
     -- 3. THE RULE: Only fill if surrounded by at least 4 valid cells
-    HAVING COUNT(*) >= 4
+    QUALIFY SUM(votes) OVER (PARTITION BY h3_index) >= 4
+        AND ROW_NUMBER() OVER (PARTITION BY h3_index ORDER BY votes DESC, BC) = 1
   ) fill
   WHERE targets_h3.h3_index = fill.h3_index
 "
