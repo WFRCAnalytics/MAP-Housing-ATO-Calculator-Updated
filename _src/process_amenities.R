@@ -1,36 +1,30 @@
-#' Match One Amenity Layer to a Table of Points
+#' Prepare One Amenity Layer for Matching
 #'
-#' Joins every point to one amenity layer and stores the match in a small
-#' result table `res_<point_table>_<col>` with columns (`key`, `val`). Only
-#' matched points get a row. Nothing is written to the (large) point table, so
-#' there are no UPDATEs, no table rewrites and no indexes: DuckDB's spatial join
-#' builds its own R-tree for each join and drops it afterwards.
+#' Loads the layer into the temp table `raw_layer` and, for isochrones,
+#' dissolves each band into one geometry in `band_geom`. Call this once per
+#' layer, then call `process_layers()` for every point table, then
+#' `drop_layer()`. Dissolving once and reusing it for parcels and H3 halves the
+#' single-threaded work.
 #'
-#' Isochrone bands and buffer distances are nested, so they are matched closest
-#' first and each pass only tests the points that no closer pass has matched.
-#' Each isochrone band is dissolved into one geometry before the join. Measured
-#' on this data, that is the difference between seconds and hours for the large
-#' driving isochrones (hundreds of overlapping ~6,000-vertex polygons).
+#' The dissolve is two-level: polygons are first unioned per 10 km grid cell
+#' (parallel across cells), then the cell results are unioned per band. The
+#' result is identical to one big union (checked: zero area difference) and up
+#' to 3-4x faster on the large driving isochrones.
 #'
 #' @param conn DuckDB connection with `spatial` loaded and `geometry_always_xy` set.
-#' @param point_table Table with columns `key` and `geom` (one point per target).
-#' @param key Name of the unique id column in `point_table`.
 #' @param config One row of the amenity config: `col_name`, `type`
-#'   (`binary`, `isochrone`, `buffer`), `path`, `filter_sql`, `value_col`,
-#'   `buffer_opts` (miles, buffer type only).
-#' @param crs CRS of the point table (EPSG string). Layers are transformed to it,
-#'   which is a no-op for layers already stored in it.
-#' @return The name of the result table, invisibly.
-process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
+#'   (`binary`, `isochrone`, `buffer`), `path`, `filter_sql`, `value_col`.
+#' @param crs CRS of the point tables (EPSG string). Layers are transformed to
+#'   it, which is a no-op for layers already stored in it.
+#' @return `NULL`, invisibly.
+prepare_layer <- function(conn, config, crs = "EPSG:26912") {
   col <- config$col_name
   type <- config$type
   path <- config$path
-  res_table <- paste0("res_", point_table, "_", col)
 
   if (!file.exists(path)) stop("Missing amenity layer for ", col, ": ", path)
-  message(glue::glue("🔄 {col} ({type}) on {point_table}..."))
+  message(glue::glue("📥 {col} ({type}): preparing layer..."))
 
-  # Per-phase timing: seconds since the previous lap
   t_lap <- Sys.time()
   lap <- function(label) {
     now <- Sys.time()
@@ -38,8 +32,8 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
     t_lap <<- now
   }
 
-  # 1. Load the layer. Simplification keeps the polygon joins fast; a
-  #    polygon that collapses becomes NULL and simply never matches.
+  # Simplification keeps the polygon joins fast; a polygon that collapses
+  # becomes NULL and simply never matches.
   val_sql <- if (type == "isochrone") glue::glue(", {config$value_col} AS val") else ""
   DBI::dbExecute(
     conn,
@@ -53,8 +47,69 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
     "
     )
   )
-
   lap("load + simplify")
+
+  if (type == "isochrone") {
+    DBI::dbExecute(
+      conn,
+      "
+      CREATE OR REPLACE TEMP TABLE band_geom AS
+      WITH cells AS (
+        SELECT val,
+               ST_Union_Agg(geom) AS geom
+        FROM raw_layer
+        GROUP BY val,
+                 floor(ST_X(ST_Centroid(geom)) / 10000),
+                 floor(ST_Y(ST_Centroid(geom)) / 10000)
+      )
+      SELECT val, ST_MakeValid(ST_Union_Agg(geom)) AS geom
+      FROM cells
+      GROUP BY val
+    "
+    )
+    lap("dissolve bands")
+  }
+  invisible(NULL)
+}
+
+#' Drop the Temp Tables Made by `prepare_layer()`
+#' @param conn DuckDB connection.
+drop_layer <- function(conn) {
+  DBI::dbExecute(conn, "DROP TABLE IF EXISTS raw_layer")
+  DBI::dbExecute(conn, "DROP TABLE IF EXISTS band_geom")
+  invisible(NULL)
+}
+
+#' Match One Prepared Amenity Layer to a Table of Points
+#'
+#' Joins every point to the layer set up by `prepare_layer()` and stores the
+#' match in a small result table `res_<point_table>_<col>` with columns
+#' (`key`, `val`). Only matched points get a row. Nothing is written to the
+#' (large) point table, so there are no UPDATEs, no table rewrites and no
+#' indexes: DuckDB's spatial join builds its own R-tree for each join.
+#'
+#' Isochrone bands and buffer distances are nested, so they are matched closest
+#' first and each pass only tests the points that no closer pass has matched.
+#'
+#' @param conn DuckDB connection with `spatial` loaded and `geometry_always_xy` set.
+#' @param point_table Table with columns `key` and `geom` (one point per target).
+#' @param key Name of the unique id column in `point_table`.
+#' @param config The same config row passed to `prepare_layer()`
+#'   (plus `buffer_opts` in miles for the buffer type).
+#' @return The name of the result table, invisibly.
+process_layers <- function(conn, point_table, key, config) {
+  col <- config$col_name
+  type <- config$type
+  res_table <- paste0("res_", point_table, "_", col)
+
+  message(glue::glue("🔄 {col} ({type}) on {point_table}..."))
+
+  t_lap <- Sys.time()
+  lap <- function(label) {
+    now <- Sys.time()
+    message(glue::glue("   ⏱️ {label}: {round(as.numeric(difftime(now, t_lap, units = 'secs')), 1)} s"))
+    t_lap <<- now
+  }
 
   # 2. Match
   if (type == "binary") {
@@ -81,19 +136,6 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
 
     if (type == "isochrone") {
       # One pass per band (e.g. 300 s, 600 s, ...), smallest first
-      # Each band is dissolved into one geometry first (seconds), because
-      # joining hundreds of overlapping ~6,000-vertex driving polygons one by one
-      # is orders of magnitude slower than testing one dissolved polygon.
-      DBI::dbExecute(
-        conn,
-        "
-        CREATE OR REPLACE TEMP TABLE band_geom AS
-        SELECT val, ST_MakeValid(ST_Union_Agg(geom)) AS geom
-        FROM raw_layer
-        GROUP BY val
-      "
-      )
-      lap("dissolve bands")
       bands <- DBI::dbGetQuery(conn, "SELECT val FROM band_geom ORDER BY val")$val
       passes <- lapply(bands, function(b) {
         list(
@@ -148,8 +190,6 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
   }
 
   if (type == "binary") lap("join")
-  DBI::dbExecute(conn, "DROP TABLE raw_layer")
-  DBI::dbExecute(conn, "DROP TABLE IF EXISTS band_geom")
   invisible(res_table)
 }
 

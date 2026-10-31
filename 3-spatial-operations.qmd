@@ -711,9 +711,12 @@ layer and keeps a small (id, value) result table; nothing is written back to the
 parcel/H3 tables until the single final join. Isochrone bands and buffer distances are matched
 closest-first, so each wider band only tests the points no closer band has matched.
 
-Each isochrone band is dissolved into a single geometry before the join. Benchmarked on this
-data, joining the individual driving isochrones (hundreds of overlapping ~6,000-vertex polygons)
-takes hours, while the dissolved band takes seconds and gives identical matches.
+Each layer is loaded once and each isochrone band is dissolved into a single geometry once,
+then reused for both tables. Benchmarked on this data, joining the individual driving isochrones
+(hundreds of overlapping ~6,000-vertex polygons) takes hours, while the dissolved band takes
+seconds and gives identical matches. The dissolve unions per 10 km cell first and then unions
+the cells; that only sets the order of the unions, and the resulting geometry is identical to
+one big union. The one real simplification is the 1 m `ST_Simplify` tolerance applied on load.
 No indexes are created: DuckDB's spatial join builds its own.
 
 ### Check Inputs
@@ -741,8 +744,10 @@ config_list <- purrr::transpose(amenity_config)
 
 for (cfg in config_list) {
   t0 <- Sys.time()
+  prepare_layer(conn, cfg) # load + dissolve once, shared by both tables
   process_layers(conn, "points_parcels", "parcel_id", cfg)
   process_layers(conn, "points_h3", "h3_index", cfg)
+  drop_layer(conn)
   message(glue::glue("   ⏱️ {cfg$col_name}: {round(difftime(Sys.time(), t0, units = 'secs'))} s"))
 }
 
