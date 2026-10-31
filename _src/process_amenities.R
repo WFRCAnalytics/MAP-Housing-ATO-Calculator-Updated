@@ -1,3 +1,21 @@
+#' Run One Step and Log How Long It Took
+#'
+#' Evaluates `expr`, prints `⏱️ <label>: <seconds> s` (also if it errors), and
+#' returns the value of `expr`. Used to see where the time goes in step 3.
+#'
+#' @param label Text shown in the log line.
+#' @param expr Code to run.
+#' @return The value of `expr`.
+timed_step <- function(label, expr) {
+  t0 <- Sys.time()
+  on.exit(
+    message(glue::glue(
+      "   ⏱️ {label}: {round(as.numeric(difftime(Sys.time(), t0, units = 'secs')), 1)} s"
+    ))
+  )
+  expr
+}
+
 #' Prepare One Amenity Layer for Matching
 #'
 #' Loads the layer into the temp table `raw_layer` and, for isochrones,
