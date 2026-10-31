@@ -30,6 +30,14 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
   if (!file.exists(path)) stop("Missing amenity layer for ", col, ": ", path)
   message(glue::glue("🔄 {col} ({type}) on {point_table}..."))
 
+  # Per-phase timing: seconds since the previous lap
+  t_lap <- Sys.time()
+  lap <- function(label) {
+    now <- Sys.time()
+    message(glue::glue("   ⏱️ {label}: {round(as.numeric(difftime(now, t_lap, units = 'secs')), 1)} s"))
+    t_lap <<- now
+  }
+
   # 1. Load the layer. Simplification keeps the polygon joins fast; a
   #    polygon that collapses becomes NULL and simply never matches.
   val_sql <- if (type == "isochrone") glue::glue(", {config$value_col} AS val") else ""
@@ -45,6 +53,8 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
     "
     )
   )
+
+  lap("load + simplify")
 
   # 2. Match
   if (type == "binary") {
@@ -83,6 +93,7 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
         GROUP BY val
       "
       )
+      lap("dissolve bands")
       bands <- DBI::dbGetQuery(conn, "SELECT val FROM band_geom ORDER BY val")$val
       passes <- lapply(bands, function(b) {
         list(
@@ -131,10 +142,12 @@ process_layers <- function(conn, point_table, key, config, crs = "EPSG:26912") {
         "
         )
       )
+      lap(glue::glue("join {p$label}"))
     }
     DBI::dbExecute(conn, "DROP TABLE todo")
   }
 
+  if (type == "binary") lap("join")
   DBI::dbExecute(conn, "DROP TABLE raw_layer")
   DBI::dbExecute(conn, "DROP TABLE IF EXISTS band_geom")
   invisible(res_table)
