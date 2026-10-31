@@ -79,7 +79,7 @@ import { initMap, setExtentBounds } from './composables/useMap.js'
 import { loadCities, loadMunicipalData } from './composables/useData.js'
 import { computeScores, buildColorExpression, buildExtrusionExpr } from './composables/useScoring.js'
 import { toggleLayer } from './composables/useLayers.js'
-import { buildUgrcLiteStyle, buildUgrcHybridStyle } from './composables/ugrcBasemap.js'
+import { buildUgrcLiteStyle, buildUgrcDarkStyle, buildUgrcHybridStyle } from './composables/ugrcBasemap.js'
 import { SLIDER_DEFS, SCORE_COLS } from './config/sliders.js'
 import { LU_MAPPINGS } from './config/landUse.js'
 import { StyleSwitcherControl } from 'map-gl-style-switcher'
@@ -129,14 +129,15 @@ let allMunicipalities = null // { cities, geojson } from parquet — R Shiny's c
 let roadsMajorLayerIds = []
 let currentBasemapId = 'lite'
 
-const BASEMAP_BUILDERS = { lite: buildUgrcLiteStyle, hybrid: buildUgrcHybridStyle }
+const BASEMAP_BUILDERS = { lite: buildUgrcLiteStyle, dark: buildUgrcDarkStyle, hybrid: buildUgrcHybridStyle }
 
 const CITY_BOUNDS_LAYER_IDS = ['all-mun-fill', 'all-mun-line-halo', 'all-mun-line', 'lay_cities_fill', 'lay_cities_line_halo', 'lay_cities_line']
 
-// Both basemaps' roads share these source-layer names — LiteBase's own
-// naming for the Lite basemap, and Vector_Overlay's (differently named, no
-// "Buildings" layer) for the Hybrid basemap — so Major Roads and the
-// overlay ceiling below work on either. Road *labels* use a "…/label"
+// All three basemaps' roads share these source-layer names — LiteBase's own
+// naming for the Lite and Dark basemaps (Dark is the same tile services, just
+// restyled), and Vector_Overlay's (differently named, no "Buildings" layer)
+// for the Hybrid basemap — so Major Roads and the overlay ceiling below work
+// on any of them. Road *labels* use a "…/label"
 // suffixed variant instead, so they never match here — see setRoadsOnTop.
 const ROAD_SOURCE_LAYERS = [
   'Roads - white version', 'Roads - Interstates and Ramps - white version', // Lite (LiteBase)
@@ -210,6 +211,11 @@ onMounted(async () => {
         description: "UGRC's vector reference basemap",
       },
       {
+        id: 'dark', name: 'Dark', styleUrl: 'ugrc:dark',
+        image: `${import.meta.env.BASE_URL}basemap-dark.png`,
+        description: "UGRC's dark vector basemap",
+      },
+      {
         id: 'hybrid', name: 'Hybrid', styleUrl: 'ugrc:hybrid',
         image: `${import.meta.env.BASE_URL}basemap-hybrid.png`,
         description: 'Aerial imagery with UGRC roads & labels',
@@ -221,7 +227,7 @@ onMounted(async () => {
     design: 'outlined',
     theme: 'light',
     // The control never calls setStyle itself (see map-gl-style-switcher's
-    // docs) — both "styles" here are composed in-memory from several UGRC
+    // docs) — all the "styles" here are composed in-memory from several UGRC
     // vector tile services (see ugrcBasemap.js), not fetchable style.json
     // URLs, so `styleUrl` above is just a required-but-unused placeholder
     // and the actual swap happens here.
@@ -232,11 +238,11 @@ onMounted(async () => {
 // ── Basemap switching ───────────────────────────────────
 // Swapping styles wholesale (map.setStyle) drops every source/layer we add
 // imperatively (h3 hexagons, city boundaries, the Major Roads redraw, any
-// reference layer toggled on) since none of it is declared in either style
+// reference layer toggled on) since none of it is declared in any style
 // document — restoreMapState() (called from the 'style.load' handler above,
 // which fires again after setStyle just like it does on first load) puts it
-// all back once the new style has finished loading. buildUgrcLiteStyle/
-// buildUgrcHybridStyle cache their result, so switching back to a basemap
+// all back once the new style has finished loading. The buildUgrc*Style
+// functions cache their result, so switching back to a basemap
 // already built in this session resolves immediately instead of re-fetching
 // it — see ugrcBasemap.js.
 let basemapSwitchToken = 0
@@ -262,7 +268,7 @@ async function switchBasemap(id) {
   }
 }
 
-// Re-applies everything that isn't part of either basemap's own style
+// Re-applies everything that isn't part of any basemap's own style
 // document — called after every 'style.load', including the very first one
 // (each piece is a no-op then, since state is still at its initial default).
 async function restoreMapState() {

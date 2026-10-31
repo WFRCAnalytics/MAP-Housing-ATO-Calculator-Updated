@@ -1,4 +1,4 @@
-// UGRC's "Lite" and "Hybrid" vector basemaps, each composed from AGRC's
+// UGRC's "Lite", "Dark" and "Hybrid" vector basemaps, each composed from AGRC's
 // hosted ArcGIS vector tile services (Utah's official GIS agency). Every
 // service publishes its own complete MapLibre style document (root.json)
 // with one source, a relative sprite/glyphs URL, and a relative source
@@ -20,6 +20,23 @@ const LITE_LAYERS = [
 // "Overlay" cache their legacy raster Hybrid basemap draws on top of
 // imagery (confirmed against UGRC's own public "Utah Hybrid Base map" web
 // map, which pairs Esri World Imagery with that same overlay cache).
+// UGRC's "Dark" basemap (their public "Utah Vector Dark Basemap" web map,
+// item 00be227f54bf4795953af5d7e9a26cf9) is the SAME three vector tile
+// services as Lite (VectorHillshade, LiteBase, LiteLabels) with dark
+// styling, so every source-layer name Lite relies on (roads, buildings, …)
+// exists here too. Unlike Lite, its three style documents are ArcGIS Online
+// items rather than the services' own resources/styles/root.json. The item
+// ids and the black background are the ones the WFTDM dashboard's
+// `ugrc-vector-dark` preset uses (APP-wftdm-dashboard,
+// src/panels/basemap/registry.ts).
+const UGRC_ITEMS = 'https://www.arcgis.com/sharing/rest/content/items'
+
+const DARK_LAYERS = [
+  { prefix: 'hillshade', styleUrl: `${UGRC_ITEMS}/e91dd08e21f345cd8005ecb85dbe37bf/resources/styles/root.json` },
+  { prefix: 'base', styleUrl: `${UGRC_ITEMS}/a8140cb623c64580b5d6be3c745cc03a/resources/styles/root.json` },
+  { prefix: 'labels', styleUrl: `${UGRC_ITEMS}/d3899e1857de4b4993d9ca05c67d531b/resources/styles/root.json` },
+]
+
 const HYBRID_OVERLAY_STYLE_URL = `${UGRC_TILES}/Vector_Overlay/VectorTileServer/resources/styles/root.json`
 
 // Esri's public World Imagery basemap — the same aerial imagery UGRC's own
@@ -104,21 +121,24 @@ async function fetchVectorService(prefix, styleUrl, { skipFillLayers = false } =
   }
 }
 
-async function buildUgrcLiteStyleUncached() {
+// Merges several of UGRC's vector tile services (bottom layer first) into one
+// MapLibre style. Shared by the Lite and Dark basemaps, which differ only in
+// which style documents they merge and in the background color underneath.
+async function buildLayeredStyle(services, background) {
   // Fetched in parallel — each service is an independent network round trip
   // (its root.json plus its source's TileJSON), so awaiting them one at a
   // time in sequence (as a for-of loop would) needlessly serializes three
   // requests that don't depend on each other. Promise.all still resolves
-  // `results` in LITE_LAYERS' order regardless of which finishes first, so
+  // `results` in `services`' order regardless of which finishes first, so
   // the merge below stays deterministic (layer z-order intact).
-  const results = await Promise.all(LITE_LAYERS.map(({ prefix, styleUrl }) => fetchVectorService(prefix, styleUrl)))
+  const results = await Promise.all(services.map(({ prefix, styleUrl }) => fetchVectorService(prefix, styleUrl)))
 
   const style = {
     version: 8,
     sources: {},
     // MapLibre blends semi-transparent tile edges toward black without an
     // opaque background layer underneath — always add one.
-    layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#ffffff' } }],
+    layers: [{ id: 'background', type: 'background', paint: { 'background-color': background } }],
   }
   const spriteEntries = []
 
@@ -137,6 +157,9 @@ async function buildUgrcLiteStyleUncached() {
   if (spriteEntries.length) style.sprite = spriteEntries
   return style
 }
+
+const buildUgrcLiteStyleUncached = () => buildLayeredStyle(LITE_LAYERS, '#ffffff')
+const buildUgrcDarkStyleUncached = () => buildLayeredStyle(DARK_LAYERS, '#000000')
 
 async function buildUgrcHybridStyleUncached() {
   const style = {
@@ -185,6 +208,10 @@ function cached(id, build) {
 
 export function buildUgrcLiteStyle() {
   return cached('lite', buildUgrcLiteStyleUncached)
+}
+
+export function buildUgrcDarkStyle() {
+  return cached('dark', buildUgrcDarkStyleUncached)
 }
 
 export function buildUgrcHybridStyle() {

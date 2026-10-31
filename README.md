@@ -154,6 +154,8 @@ ORS_API_KEY=your_key_here
 
 `vite-app`'s address geocoder calls UGRC data through AGRC's [masquerade](https://github.com/agrc/masquerade) proxy (`masquerade.ugrc.utah.gov`) — a public, unauthenticated, CORS-enabled Esri-compatible locator, so no API key or config is needed. It falls back to Nominatim for anything UGRC doesn't index (e.g. business/POI names).
 
+`vite-app`'s base maps are also UGRC's: **Lite**, **Dark** and **Hybrid** (Esri aerial imagery under UGRC's road and label overlay), switchable from the map. They are composed in the browser from UGRC's hosted vector tile services (see `vite-app/src/composables/ugrcBasemap.js`), so no key is needed. Dark uses the same services as Lite with UGRC's dark styling.
+
 ## Running the pipeline
 
 Run the four Quarto steps in order — each writes standardized GeoParquet that the next step reads:
