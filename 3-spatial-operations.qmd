@@ -26,16 +26,9 @@ renv::restore()
 #| label: setup-libraries
 #| message: false
 #| warning: false
-library(dplyr)
-library(tidyr)
-library(sf)
-library(openrouteservice)
 library(DBI)
 library(duckdb)
-library(arrow)
-library(geoarrow)
-library(janitor)
-library(mapgl)
+library(glue)
 library(here)
 ```
 
@@ -73,18 +66,6 @@ sub_dirs <- list(
 purrr::walk(sub_dirs, ~ fs::dir_create(., recurse = TRUE))
 ```
 
-```{r}
-#| label: setup-iso-subdirs
-# Define Sub-directories for Isochrones
-iso_dirs <- list(
-  walking = here::here(dirs$isochrones, "foot-walking"),
-  biking = here::here(dirs$isochrones, "cycling-regular"),
-  driving = here::here(dirs$isochrones, "driving-car")
-)
-
-purrr::walk(iso_dirs, ~ fs::dir_create(., recurse = TRUE))
-```
-
 ### Projection Constants
 
 ```{r}
@@ -99,24 +80,39 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 
 ```{r}
 #| label: load-helpers
-source(here::here(dirs$source, "preview_layer.R")) # Preview (geo)parquet files using mapgl
+source(here::here(dirs$source, "process_amenities.R")) # Amenity matching engine
 ```
 
 ## Initialize Database
 
 We use DuckDB for all spatial operations to avoid loading millions of geometries into R memory.
+Every processed layer is already in EPSG:26912 (UTM 12N), so no layer is reprojected here;
+only the H3 lookups need lat/lon, and those use a WGS84 copy of each centroid.
+
+DuckDB is given an explicit budget so it cannot take the whole machine. The values below
+were sized from this workstation (95.7 GB RAM, about 66 GB free at the time, 20 logical
+cores): 40 GB for DuckDB leaves roughly 25 GB for R/Positron, the ORS container and the OS,
+and 12 threads leave cores free. Anything past the memory limit spills to `.tmp/duckdb`
+instead of crashing. Adjust these two numbers on a different machine.
 
 ```{r}
 #| label: init-db
-# File-based connection: table data and RTREE indexes persist across reconnections.
-# This allows periodic conn reset to clear MVCC undo buffers without losing setup work.
-fp_duckdb <- here::here("_data", "pipeline.duckdb")
-conn <- DBI::dbConnect(duckdb::duckdb(dbdir = fp_duckdb))
+DUCKDB_MEMORY <- "40GB"
+DUCKDB_THREADS <- 12L
 
-# Load Spatial Extensions
+# In-memory database: every table is rebuilt from the parquet layers on each run.
+conn <- DBI::dbConnect(duckdb::duckdb())
+
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
 DBI::dbExecute(conn, "SET geometry_always_xy = true")
 DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
+
+fp_spill <- here::here(".tmp", "duckdb")
+fs::dir_create(fp_spill)
+DBI::dbExecute(conn, glue::glue("SET memory_limit = '{DUCKDB_MEMORY}'"))
+DBI::dbExecute(conn, glue::glue("SET threads = {DUCKDB_THREADS}"))
+DBI::dbExecute(conn, glue::glue("SET temp_directory = '{fp_spill}'"))
+DBI::dbExecute(conn, "SET max_temp_directory_size = '200GB'")
 ```
 
 # Part 1: Prepare Targets (The Canvas)
@@ -133,8 +129,7 @@ We load H3 first to get the resolution, then use that resolution to load Parcels
 #| label: load-h3
 fp_h3_grid <- here::here(sub_dirs$base, "Analysis_Boundary_H3_Grid.parquet")
 
-# 1. Load Polygons (UTM)
-#    Note: H3 WKB is usually WGS84, so we must transform to UTM.
+# 1. Load Polygons (already UTM). h3_index is the unique key of this table.
 DBI::dbExecute(
   conn,
   glue::glue(
@@ -142,30 +137,24 @@ DBI::dbExecute(
   CREATE OR REPLACE TABLE targets_h3 AS
   SELECT
     CAST(h3_index AS UBIGINT) as h3_index, -- Strict type safety
-    ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
+    geometry as geom
   FROM read_parquet('{fp_h3_grid}')
 "
   )
 )
-DBI::dbExecute(
-  conn,
-  "CREATE INDEX idx_h3_geom ON targets_h3 USING RTREE (geom)"
-)
 
-# 2. OPTIMIZATION: Create & Index Points
-message("📍 Pre-calculating H3 Points (PointOnSurface)...")
+# 2. One point per cell. No indexes: DuckDB's spatial join builds its own.
+message("📍 Pre-calculating H3 Points (Centroid)...")
 DBI::dbExecute(
   conn,
   "
   CREATE OR REPLACE TABLE points_h3 AS
-  SELECT rowid, h3_index, ST_Centroid(geom) as geom
+  SELECT h3_index, ST_Centroid(geom) as geom
   FROM targets_h3
 "
 )
-DBI::dbExecute(conn, "CREATE INDEX idx_h3_utm ON points_h3 USING RTREE (geom)")
-DBI::dbExecute(conn, "CREATE INDEX idx_h3_id ON points_h3 (h3_index)")
 
-message("✅ H3 Grid loaded & indexed")
+message("✅ H3 Grid loaded")
 ```
 
 ```{r}
@@ -186,7 +175,8 @@ message(glue::glue("ℹ️ Detected Grid Resolution: {res}"))
 #| label: load-parcels
 fp_remm_parcels <- here::here(sub_dirs$parcels, "REMM_BY_parcels.parquet")
 
-# 1. Load Polygons (UTM)
+# 1. Load Polygons (already UTM). parcel_id is the unique key of this table.
+#    H3 needs lat/lon, so the index comes from a WGS84 copy of the centroid.
 DBI::dbExecute(
   conn,
   glue::glue(
@@ -194,40 +184,33 @@ DBI::dbExecute(
   CREATE OR REPLACE TABLE targets_parcels AS
   SELECT
     parcel_id,
-
-    -- 1. Calculate H3 Index DIRECTLY from raw WGS84 Centroid
-    CAST(h3_latlng_to_cell(
-      ST_Y(ST_Centroid(geometry)),
-      ST_X(ST_Centroid(geometry)),
-      {res}
-    ) AS UBIGINT) as h3_index,
-
-    -- 2. Transform to UTM for storage/buffer ops
-    ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}')) as geom
-  FROM read_parquet('{fp_remm_parcels}')
-  WHERE ST_IsValid(geometry)
+    CAST(h3_latlng_to_cell(ST_Y(c), ST_X(c), {res}) AS UBIGINT) as h3_index,
+    geom
+  FROM (
+    SELECT
+      parcel_id,
+      ST_Transform(ST_Centroid(geometry), '{CRS_WGS}') as c,
+      ST_MakeValid(geometry) as geom
+    FROM read_parquet('{fp_remm_parcels}')
+    WHERE ST_IsValid(geometry)
+  )
 "
   )
 )
 
-# 2. OPTIMIZATION: Create & Index Points (Point-On-Surface)
+# 2. One point per parcel (Point-On-Surface).
 #    ST_PointOnSurface guarantees the point is INSIDE the polygon (unlike Centroid).
 #    This handles U-shaped parcels correctly.
 DBI::dbExecute(
   conn,
   "
   CREATE OR REPLACE TABLE points_parcels AS
-  SELECT rowid, h3_index, ST_PointOnSurface(geom) as geom
+  SELECT parcel_id, ST_PointOnSurface(geom) as geom
   FROM targets_parcels
 "
 )
-DBI::dbExecute(
-  conn,
-  "CREATE INDEX idx_pp_utm ON points_parcels USING RTREE (geom)"
-)
-DBI::dbExecute(conn, "CREATE INDEX idx_pp_h3 ON points_parcels (h3_index)")
 
-message("✅ Parcels loaded & indexed")
+message("✅ Parcels loaded")
 ```
 
 # Part 2: Static Attributes (Admin & Land Use)
@@ -238,7 +221,7 @@ A helper function to join City/County codes to any target table (Parcel or H3).
 
 ```{r}
 #| label: func-admin-join
-attach_admin_data <- function(conn, target_table, point_table) {
+attach_admin_data <- function(conn, target_table, point_table, key) {
   message(glue::glue("🏛️ Attaching Admin Data to {target_table}..."))
   fp_municipal_bound <- here::here(
     sub_dirs$base,
@@ -254,7 +237,7 @@ attach_admin_data <- function(conn, target_table, point_table) {
     CREATE OR REPLACE TEMP TABLE layer_muni AS
     SELECT
       ugrcode as CommCode,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
+      geometry as geom
     FROM read_parquet('{fp_municipal_bound}')
   "
     )
@@ -267,7 +250,7 @@ attach_admin_data <- function(conn, target_table, point_table) {
     CREATE OR REPLACE TEMP TABLE layer_county AS
     SELECT
       countynbr as COUNTYNBR,
-      ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
+      geometry as geom
     FROM read_parquet('{fp_county_bound}')
   "
     )
@@ -285,7 +268,8 @@ attach_admin_data <- function(conn, target_table, point_table) {
     )
   }
 
-  # 3. Update City (Spatial Join on Point Table -> Update Target by RowID)
+  # 3. Update City (Spatial Join on Point Table -> Update Target by key)
+  #    GROUP BY keeps one row per point if it sits exactly on a shared border.
   DBI::dbExecute(
     conn,
     glue::glue(
@@ -293,16 +277,17 @@ attach_admin_data <- function(conn, target_table, point_table) {
     UPDATE {target_table}
     SET CommCode = match.CommCode
     FROM (
-        SELECT pt.rowid, m.CommCode
-        FROM {point_table} pt, layer_muni m
-        WHERE ST_Intersects(pt.geom, m.geom)
+        SELECT pt.{key}, MIN(m.CommCode) as CommCode
+        FROM {point_table} pt
+        JOIN layer_muni m ON ST_Intersects(pt.geom, m.geom)
+        GROUP BY pt.{key}
     ) match
-    WHERE {target_table}.rowid = match.rowid
+    WHERE {target_table}.{key} = match.{key}
   "
     )
   )
 
-  # 4. Update County (Spatial Join on Point Table -> Update Target by RowID)
+  # 4. Update County (Spatial Join on Point Table -> Update Target by key)
   DBI::dbExecute(
     conn,
     glue::glue(
@@ -310,11 +295,12 @@ attach_admin_data <- function(conn, target_table, point_table) {
     UPDATE {target_table}
     SET COUNTYNBR = match.COUNTYNBR
     FROM (
-        SELECT pt.rowid, c.COUNTYNBR
-        FROM {point_table} pt, layer_county c
-        WHERE ST_Intersects(pt.geom, c.geom)
+        SELECT pt.{key}, MIN(c.COUNTYNBR) as COUNTYNBR
+        FROM {point_table} pt
+        JOIN layer_county c ON ST_Intersects(pt.geom, c.geom)
+        GROUP BY pt.{key}
     ) match
-    WHERE {target_table}.rowid = match.rowid
+    WHERE {target_table}.{key} = match.{key}
   "
     )
   )
@@ -326,8 +312,8 @@ attach_admin_data <- function(conn, target_table, point_table) {
 ```{r}
 #| label: run-admin-join
 # Pass the pre-calculated point tables we created in Part 1
-attach_admin_data(conn, "targets_parcels", "points_parcels")
-attach_admin_data(conn, "targets_h3", "points_h3")
+attach_admin_data(conn, "targets_parcels", "points_parcels", "parcel_id")
+attach_admin_data(conn, "targets_h3", "points_h3", "h3_index")
 ```
 
 ## Building Codes (BC)
@@ -355,28 +341,24 @@ DBI::dbExecute(
     building_type,
     building_sqft,
 
-    -- 1. H3 Index (Integer Match)
+    -- 1. H3 Index (Integer Match), from a WGS84 copy of the centroid
     CAST(h3_latlng_to_cell(
-      ST_Y(ST_Centroid(geometry)),
-      ST_X(ST_Centroid(geometry)),
+      ST_Y(ST_Transform(geom, '{CRS_WGS}')),
+      ST_X(ST_Transform(geom, '{CRS_WGS}')),
       {res}
     ) AS UBIGINT) as h3_index,
 
-    -- 2. UTM Geometry (Spatial Match)
-    ST_Transform(ST_Centroid(geometry), '{CRS_WGS}', '{CRS_UTM}') as geom
+    -- 2. UTM Geometry
+    geom
 
-  FROM read_parquet('{fp_remm_buildings}')
-  WHERE ST_IsValid(geometry)
+  FROM (
+    SELECT parcel_id, building_type, building_sqft, ST_Centroid(geometry) as geom
+    FROM read_parquet('{fp_remm_buildings}')
+    WHERE ST_IsValid(geometry)
+  )
 "
   )
 )
-
-# Index both columns for speed
-DBI::dbExecute(
-  conn,
-  "CREATE INDEX idx_b_utm ON points_buildings USING RTREE (geom)"
-)
-DBI::dbExecute(conn, "CREATE INDEX idx_b_h3 ON points_buildings (h3_index)")
 
 # Create Mapping Table (Full Name -> Abbreviation)
 bc_mapping <- tibble::tribble(
@@ -471,13 +453,7 @@ DBI::dbExecute(
 
 message("  ↳ Filling gaps using Parcel Polygons...")
 
-# 1. Ensure Polygon Index Exists (Critical for spatial join speed)
-DBI::dbExecute(
-  conn,
-  "CREATE INDEX IF NOT EXISTS idx_tp_geom ON targets_parcels USING RTREE (geom)"
-)
-
-# 2. Update NULLs only
+# Update NULLs only
 DBI::dbExecute(
   conn,
   "
@@ -594,27 +570,23 @@ fp_taz_access <- here::here(
   "TAZ_AccessToOpportunities_OY2023.parquet"
 )
 
-attach_job_access <- function(conn, target_table, point_table) {
+attach_job_access <- function(conn, target_table, point_table, key) {
   message(glue::glue("💼 Attaching Job Access to {target_table}..."))
 
-  # 1. Load TAZ & SAFE Transform
+  # 1. Load TAZ (already UTM)
   DBI::dbExecute(
     conn,
     glue::glue(
       "
     CREATE OR REPLACE TEMP TABLE taz_access AS
     SELECT
-      ST_MakeValid(ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}')) as geom,
+      ST_MakeValid(geometry) as geom,
       Job_byAuto,
       Job_byTran
     FROM read_parquet('{fp_taz_access}')
     WHERE ST_IsValid(geometry)
   "
     )
-  )
-  DBI::dbExecute(
-    conn,
-    "CREATE INDEX idx_taz_geom ON taz_access USING RTREE (geom)"
   )
 
   # 2. RESET COLUMNS (Drop if exists)
@@ -645,11 +617,12 @@ attach_job_access <- function(conn, target_table, point_table) {
     UPDATE {target_table}
     SET \"AA\" = match.Job_byAuto, \"AT\" = match.Job_byTran
     FROM (
-      SELECT tp.rowid, t.Job_byAuto, t.Job_byTran
-      FROM {point_table} tp, taz_access t
-      WHERE ST_Intersects(tp.geom, t.geom)
+      SELECT tp.{key}, MIN(t.Job_byAuto) as Job_byAuto, MIN(t.Job_byTran) as Job_byTran
+      FROM {point_table} tp
+      JOIN taz_access t ON ST_Intersects(tp.geom, t.geom)
+      GROUP BY tp.{key}
     ) match
-    WHERE {target_table}.rowid = match.rowid;
+    WHERE {target_table}.{key} = match.{key};
   "
     )
   )
@@ -661,8 +634,8 @@ attach_job_access <- function(conn, target_table, point_table) {
 ```{r}
 #| label: run-job-join
 # Run with pre-calculated points
-attach_job_access(conn, "targets_parcels", "points_parcels")
-attach_job_access(conn, "targets_h3", "points_h3")
+attach_job_access(conn, "targets_parcels", "points_parcels", "parcel_id")
+attach_job_access(conn, "targets_h3", "points_h3", "h3_index")
 ```
 
 # Part 3: Amenity Operations Engine
@@ -733,265 +706,70 @@ amenity_config <- tibble::tribble(
 
 ## Processing Function
 
-### Helper Function
+The engine lives in `_src/process_amenities.R`. For each layer it joins every point to the
+layer and keeps a small (id, value) result table; nothing is written back to the big
+parcel/H3 tables until the single final join. Isochrone bands and buffer distances are matched
+closest-first, so each wider band only tests the points no closer band has matched.
 
-This function handles the transform, union-by-value optimization, and spatial joins entirely in UTM 12N.
+Each isochrone band is dissolved into a single geometry before the join. Benchmarked on this
+data, joining the individual driving isochrones (hundreds of overlapping ~6,000-vertex polygons)
+takes hours, while the dissolved band takes seconds and gives identical matches.
+No indexes are created: DuckDB's spatial join builds its own.
+
+### Check Inputs
+
+Fail now, not after an hour, if a layer is missing:
 
 ```{r}
-#| label: func-spatial-engine
-process_layers <- function(conn, point_table, config) {
-  col <- config$col_name
-  path <- config$path
-  type <- config$type
-  sql_filter <- config$filter_sql
-  val_col <- config$value_col
-
-  # Simplification Tolerance
-  SIMPLIFICATION_TOLERANCE <- 1.0
-
-  if (!fs::file_exists(path)) {
-    message("⚠️ Missing file: ", path)
-    return(NULL)
-  }
-
-  message(glue::glue("🔄 Processing {col} ({type}) on {point_table}..."))
-
-  # A. Load Raw Data (UTM + Clean)
-  #    We create the index here, which is CRITICAL for ST_DWithin to be fast.
-  DBI::dbExecute(
-    conn,
-    glue::glue(
-      "
-    CREATE OR REPLACE TEMP TABLE raw_layer AS
-    SELECT
-      ST_Simplify(
-        ST_MakeValid(
-          ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}')
-        ),
-        {SIMPLIFICATION_TOLERANCE}
-      ) as geom
-      {if(type=='isochrone') glue::glue(', {val_col} as val') else ''}
-    FROM read_parquet('{path}')
-    WHERE {sql_filter}
-      AND ST_IsValid(geometry)
-  "
-    )
-  )
-  DBI::dbExecute(
-    conn,
-    "CREATE INDEX idx_raw_layer ON raw_layer USING RTREE (geom)"
-  )
-
-  # B. Reset Column (Clean Slate)
-  DBI::dbExecute(
-    conn,
-    glue::glue("ALTER TABLE {point_table} DROP COLUMN IF EXISTS {col}")
-  )
-  # Binary uses DEFAULT 0 — eliminates the full-table null-fill UPDATE that was
-  # the primary source of DuckDB MVCC undo buffer accumulation.
-  default_val <- if (type == "binary") "0" else "NULL"
-  DBI::dbExecute(
-    conn,
-    glue::glue(
-      "ALTER TABLE {point_table} ADD COLUMN {col} DOUBLE DEFAULT {default_val}"
-    )
-  )
-
-  # C. Execute Spatial Logic
-  if (type == "binary") {
-    # BINARY: Simple Intersection (Uses Index)
-    # DEFAULT 0 handles unmatched rows — no null-fill UPDATE needed.
-    DBI::dbExecute(
-      conn,
-      glue::glue(
-        "
-      UPDATE {point_table}
-      SET {col} = 1
-      FROM raw_layer r
-      WHERE ST_Intersects({point_table}.geom, r.geom)
-    "
-      )
-    )
-  } else if (type == "isochrone") {
-    # ISOCHRONE: Single-UPDATE approach via MIN(val) join.
-    # Collapses N band UPDATEs into 1, reducing MVCC undo pressure by ~10x.
-    # MIN(val) picks the innermost (smallest) band, matching the old ascending IS NULL logic.
-
-    DBI::dbExecute(conn, "
-      CREATE OR REPLACE TEMP TABLE grouped_iso AS
-      SELECT val, ST_MakeValid(ST_Union_Agg(geom)) AS geom
-      FROM raw_layer
-      GROUP BY val
-    ")
-
-    DBI::dbExecute(conn, glue::glue("
-      CREATE OR REPLACE TEMP TABLE iso_result AS
-      SELECT pt.rowid, MIN(g.val) AS matched_val
-      FROM {point_table} pt
-      JOIN grouped_iso g ON ST_Intersects(pt.geom, g.geom)
-      GROUP BY pt.rowid
-    "))
-
-    DBI::dbExecute(conn, glue::glue("
-      UPDATE {point_table}
-      SET {col} = r.matched_val
-      FROM iso_result r
-      WHERE {point_table}.rowid = r.rowid
-    "))
-
-    DBI::dbExecute(conn, "DROP TABLE grouped_iso; DROP TABLE iso_result;")
-  } else if (type == "buffer") {
-    # BUFFER: The Ultra-Fast Method (ST_DWithin)
-    # Sorted Distance Loop (Fastest for Nearest Bin)
-    dists <- dists <- sort(unlist(config$buffer_opts), decreasing = FALSE)
-
-    for (miles in dists) {
-      meters <- miles * 1609.34
-
-      message(glue::glue(
-        "   Checking buffer: {miles} miles ({round(meters)}m)"
-      ))
-
-      # ST_DWithin uses the RTREE index on raw_layer.
-      # The 'WHERE {col} IS NULL' ensures we don't re-calculate points
-      # that already matched a closer distance.
-      DBI::dbExecute(
-        conn,
-        glue::glue(
-          "
-        UPDATE {point_table}
-        SET {col} = {miles}
-        WHERE {col} IS NULL
-          AND EXISTS (
-             SELECT 1 FROM raw_layer r
-             WHERE ST_DWithin({point_table}.geom, r.geom, {meters})
-          )
-      "
-        )
-      )
-    }
-  }
-
-  DBI::dbExecute(conn, "DROP TABLE raw_layer;")
+#| label: check-inputs
+missing_layers <- amenity_config$path[!file.exists(amenity_config$path)]
+if (length(missing_layers) > 0) {
+  stop("Missing amenity layers:\n", paste(unique(missing_layers), collapse = "\n"))
 }
 ```
 
 ### Spatial Join
 
-We iterate through the config and apply logic to both tables.
+We run every layer against both point tables, then join all results onto the targets at once.
 
 ```{r}
 #| label: run-engine
-message("🚀 Starting Staged Processing on Points...")
-
+message("🚀 Starting Processing on Points...")
 t_total_start <- Sys.time()
 
-reconnect_conn <- function(fp_duckdb) {
-  conn <- DBI::dbConnect(duckdb::duckdb(dbdir = fp_duckdb))
-  DBI::dbExecute(conn, "LOAD spatial;")
-  DBI::dbExecute(conn, "LOAD h3;")
-  DBI::dbExecute(conn, "SET geometry_always_xy = true")
-  conn
-}
-
 config_list <- purrr::transpose(amenity_config)
-RECONNECT_EVERY <- 1L # Reconnect after every layer — one isochrone alone fills the buffer
 
-for (i in seq_along(config_list)) {
-  cfg <- config_list[[i]]
-
-  process_layers(conn, "points_parcels", cfg)
-  process_layers(conn, "points_h3", cfg)
-
-  # CHECKPOINT flushes the WAL before disconnect so committed versions don't
-  # linger in memory. Closing the connection then destroys all MVCC undo buffers.
-  # Table data and RTREE indexes persist in pipeline.duckdb across reconnections.
-  if (i %% RECONNECT_EVERY == 0L && i < length(config_list)) {
-    message(glue::glue("🔄 Checkpoint + reconnect after layer {i}/{length(config_list)}..."))
-    DBI::dbExecute(conn, "CHECKPOINT")
-    DBI::dbDisconnect(conn, shutdown = TRUE)
-    conn <- reconnect_conn(fp_duckdb)
-    message("✅ Reconnected. Tables and indexes intact.")
-  }
+for (cfg in config_list) {
+  t0 <- Sys.time()
+  process_layers(conn, "points_parcels", "parcel_id", cfg)
+  process_layers(conn, "points_h3", "h3_index", cfg)
+  message(glue::glue("   ⏱️ {cfg$col_name}: {round(difftime(Sys.time(), t0, units = 'secs'))} s"))
 }
 
-t_total_end <- Sys.time()
-total_duration <- round(difftime(t_total_end, t_total_start, units = "mins"), 2)
+join_amenities(conn, "targets_parcels", "points_parcels", "parcel_id", amenity_config)
+join_amenities(conn, "targets_h3", "points_h3", "h3_index", amenity_config)
 
-message(glue::glue(
-  "✅ Points enriched successfully. Total Time: {total_duration} mins."
-))
-```
-
-```{r}
-#| label: transfer-attributes
-message("📦 Transferring attributes from Points to Polygons...")
-
-transfer_columns <- function(conn, target_poly, source_point, config) {
-  # Single CTAS swap: zero MVCC undo entries vs. N full-table UPDATEs.
-  cols <- config$col_name
-  col_select  <- paste(glue::glue('src."{cols}"'), collapse = ",\n    ")
-  col_exclude <- paste(paste0('"', cols, '"'), collapse = ", ")
-
-  message(glue::glue("📦 Rebuilding {target_poly} with {length(cols)} amenity columns..."))
-
-  DBI::dbExecute(conn, glue::glue("
-    CREATE OR REPLACE TABLE {target_poly}_new AS
-    SELECT poly.* EXCLUDE ({col_exclude}),
-           {col_select}
-    FROM {target_poly} poly
-    LEFT JOIN {source_point} src ON poly.rowid = src.rowid
-  "))
-
-  DBI::dbExecute(conn, glue::glue("DROP TABLE {target_poly};"))
-  DBI::dbExecute(conn, glue::glue("ALTER TABLE {target_poly}_new RENAME TO {target_poly};"))
-
-  message(glue::glue("  ✅ {target_poly} rebuilt."))
-}
-
-# Run Transfer
-transfer_columns(conn, "targets_parcels", "points_parcels", amenity_config)
-transfer_columns(conn, "targets_h3", "points_h3", amenity_config)
-
-message("🏁 All Data Transferred. Processing Complete.")
+total_duration <- round(difftime(Sys.time(), t_total_start, units = "mins"), 2)
+message(glue::glue("✅ Targets enriched. Total Time: {total_duration} mins."))
 ```
 
 # Export
 
-We export the "Wide" tables (ID + all amenity times). We exclude the geometry to keep the files lightweight for the next scoring step.
+We export the "Wide" tables (ID + all amenity values, with the geometry as `geom`) in EPSG:26912.
+DuckDB writes the CRS into the GeoParquet metadata because `geom` is a CRS-typed geometry.
 
 ```{r}
 #| label: export
-# 1. Parcels
 fp_out_parcels <- here::here(dirs$results, "parcels_enriched.parquet")
-
-# Transform geom from UTM to WGS84 before export
-DBI::dbExecute(
-  conn,
-  glue::glue(
-    "
-  COPY (
-    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
-    FROM targets_parcels
-  ) TO '{fp_out_parcels}' (FORMAT PARQUET)
-"
-  )
-)
-
-# 2. H3
 fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
 
-# Transform geom from UTM to WGS84 before export
 DBI::dbExecute(
   conn,
-  glue::glue(
-    "
-  COPY (
-    SELECT * EXCLUDE(geom), ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') AS geom
-    FROM targets_h3
-  ) TO '{fp_out_h3}' (FORMAT PARQUET)
-"
-  )
+  glue::glue("COPY targets_parcels TO '{fp_out_parcels}' (FORMAT PARQUET)")
+)
+DBI::dbExecute(
+  conn,
+  glue::glue("COPY targets_h3 TO '{fp_out_h3}' (FORMAT PARQUET)")
 )
 
 message("🚀 Processing Complete!")
@@ -1002,7 +780,6 @@ message("🚀 Processing Complete!")
 ```{r}
 #| label: cleanup
 DBI::dbDisconnect(conn, shutdown = TRUE)
-# pipeline.duckdb is retained for inspection via the DuckDB CLI or R.
-# To start completely fresh on the next run, delete it:
-# fs::file_delete(fp_duckdb)
+# The database is in memory, so there is nothing to delete. DuckDB's spill files
+# in .tmp/duckdb are removed automatically when the connection closes.
 ```
