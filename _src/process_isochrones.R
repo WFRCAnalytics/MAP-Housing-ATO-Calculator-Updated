@@ -12,13 +12,12 @@
 #'   If `range_type = "time"` (default), values are in **seconds**.
 #'   If `range_type = "distance"`, values are in **meters**.
 #' @param input_filter A SQL WHERE clause to filter input points (e.g., "type = 'Grocery'").
-#' @param boundary_path Path to the regional boundary parquet (optional).
-#' @param boundary_crs The EPSG code of the boundary file (e.g., "EPSG:26912").
-#'   Defaults to "EPSG:4326" (which matches your new boundary generation).
+#' @param boundary_path Path to the regional boundary parquet (optional). It must
+#'   be in the same CRS as `path` (the processed layers are all EPSG:26912).
 #' @param batch_size An integer number of coordinates to send per API call (default 5).
 #' @param save_dir A string path to the isochrone profile directory.
 #'   Defaults to `dirs$isochrones`.
-#' @param crs Projected EPSG code for spatial operations (default `CRS_STP`).
+#' @param crs Target EPSG code of the saved isochrones (default `CRS_WGS`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
 #' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
 #' @param max_retries Attempts per API batch before the layer fails (default 3).
@@ -39,7 +38,8 @@
 #'   or NULL if dry_run is TRUE or generation fails.
 #'
 #' @section Dependencies:
-#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `janitor`, `duckdb`, `DBI`, `glue`.
+#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `janitor`, `duckdb`, `DBI`, `glue`,
+#' and `write_sf_parquet()` from `prepare_layers.R`.
 #'
 #' @examples
 #' \dontrun{
@@ -71,10 +71,9 @@ process_isochrones <- function(
   range,
   input_filter = "1=1",
   boundary_path = NULL,
-  boundary_crs = "EPSG:4326",
   batch_size = 5,
   save_dir = dirs$isochrones,
-  crs = CRS_STP,
+  crs = CRS_WGS,
   dry_run = TRUE,
   overwrite = FALSE,
   max_retries = 3,
@@ -121,33 +120,25 @@ process_isochrones <- function(
     {
       DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
       DBI::dbExecute(conn, "SET geometry_always_xy = true")
-      # DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 
       # --- QUERY CONSTRUCTION ---
       if (!is.null(boundary_path)) {
-        # Project boundary into analysis CRS; transform points at ST_Intersects time.
-        # ST_X/ST_Y are extracted from the original EPSG:4326 geometry for the ORS API.
+        # Points and boundary share a CRS, so they intersect directly. The ORS API
+        # wants lon/lat, so the coordinates are taken from a WGS84 copy of each point.
         query_view <- glue::glue(
           "
           CREATE OR REPLACE VIEW input_points AS
-          WITH region_source AS (
-            SELECT ST_Transform(geometry, '{boundary_crs}', '{crs}') as geom
+          WITH region_unified AS (
+            SELECT ST_Union_Agg(geometry) as geom
             FROM read_parquet('{boundary_path}')
-          ),
-          region_unified AS (
-            SELECT ST_Union_Agg(geom) as geom
-            FROM region_source
           )
           SELECT
-            ST_X(pts.geometry) as lon,
-            ST_Y(pts.geometry) as lat
+            ST_X(ST_Transform(pts.geometry, 'EPSG:4326')) as lon,
+            ST_Y(ST_Transform(pts.geometry, 'EPSG:4326')) as lat
           FROM read_parquet('{path}') pts, region_unified
           WHERE
             {input_filter}
-            AND ST_Intersects(
-              ST_Transform(pts.geometry, 'EPSG:4326', '{crs}'),
-              region_unified.geom
-            )
+            AND ST_Intersects(pts.geometry, region_unified.geom)
         "
         )
         message(
@@ -155,8 +146,6 @@ process_isochrones <- function(
           input_filter,
           "] | Boundary: [",
           basename(boundary_path),
-          "] | Analysis CRS: [",
-          crs,
           "]"
         )
       } else {
@@ -165,8 +154,8 @@ process_isochrones <- function(
           "
           CREATE OR REPLACE VIEW input_points AS
           SELECT
-            ST_X(geometry) as lon,
-            ST_Y(geometry) as lat
+            ST_X(ST_Transform(geometry, 'EPSG:4326')) as lon,
+            ST_Y(ST_Transform(geometry, 'EPSG:4326')) as lat
           FROM read_parquet('{path}')
           WHERE {input_filter}
         "
@@ -254,8 +243,36 @@ process_isochrones <- function(
             Sys.sleep(2 * attempt)
           }
           if (is.null(res)) {
-            stop("Batch ", i, "/", num_batches, " failed after ", max_retries,
-                 " attempts. Re-run to resume from the saved batches.")
+            # A batch fails as a whole when any point in it cannot be routed
+            # (e.g. ORS 3099: no road within snapping distance for this profile).
+            # Retry point by point and drop only the points ORS rejects.
+            message("   🔎 Batch ", i, ": retrying point by point")
+            locs <- batch_coords(i)
+            singles <- lapply(seq_along(locs), function(j) {
+              tryCatch(
+                openrouteservice::ors_isochrones(
+                  locations = list(locs[[j]]),
+                  profile = profile,
+                  range = range,
+                  output = "sf",
+                  ...
+                ),
+                error = function(e) {
+                  warning(
+                    "Skipped unroutable point (lon, lat) = (",
+                    paste(round(locs[[j]], 6), collapse = ", "), "): ",
+                    conditionMessage(e),
+                    call. = FALSE
+                  )
+                  NULL
+                }
+              )
+            })
+            if (all(vapply(singles, is.null, logical(1)))) {
+              res <- NULL
+            } else {
+              res <- dplyr::bind_rows(singles)
+            }
           }
           saveRDS(res, part_fp)
           res
@@ -267,7 +284,7 @@ process_isochrones <- function(
       final_iso <- dplyr::bind_rows(results_list)
 
       if (nrow(final_iso) > 0) {
-        # API returns 4326. We simply save it as 4326.
+        # ORS returns EPSG:4326; write_sf_parquet() projects it to `crs`.
         final_iso <- final_iso |>
           janitor::clean_names() |>
           sf::st_cast("MULTIPOLYGON")
@@ -279,20 +296,10 @@ process_isochrones <- function(
           sf::st_crs(final_iso) <- 4326
         }
 
-        # Write via DuckDB so the output uses null CRS (DuckDB-readable) instead
-        # of the WKT-string CRS that geoarrow writes, which DuckDB 1.5 rejects.
-        df_out <- sf::st_drop_geometry(final_iso)
-        df_out[["geometry"]] <- sf::st_as_binary(sf::st_geometry(final_iso))
-        duckdb::duckdb_register(conn, "_iso_write", df_out)
+        # DuckDB writes the parquet with the CRS in its metadata
         tmp_fp <- paste0(out_fp, ".tmp")
         unlink(tmp_fp)
-        DBI::dbExecute(
-          conn,
-          glue::glue(
-            "COPY (SELECT * EXCLUDE geometry, ST_GeomFromWKB(geometry) AS geometry FROM _iso_write) TO '{tmp_fp}' (FORMAT PARQUET)"
-          )
-        )
-        duckdb::duckdb_unregister(conn, "_iso_write")
+        write_sf_parquet(final_iso, tmp_fp, crs)
         publish_output(tmp_fp, out_fp)
         unlink(parts_dir, recursive = TRUE)
         message(paste("💾 Saved:", out_fp))

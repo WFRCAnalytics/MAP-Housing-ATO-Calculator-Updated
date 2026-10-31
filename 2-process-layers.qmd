@@ -32,8 +32,6 @@ library(sf)
 library(openrouteservice)
 library(DBI)
 library(duckdb)
-library(arrow)
-library(geoarrow)
 library(janitor)
 library(mapgl)
 library(here)
@@ -179,10 +177,6 @@ fp_boundary_wftdm <- here::here(
   "Analysis_Boundary_WFRC_MAG.parquet"
 )
 
-# Define the CRS of your INPUT file 'RegionalBoundaryComponents.parquet'
-# Common Utah CRSs: "EPSG:26912" (UTM 12N) or "EPSG:3566" (Utah Central State Plane)
-SOURCE_CRS <- CRS_WGS
-
 # --- Conditional Processing Block ---
 if (file.exists(fp_boundary_wftdm)) {
   # File exists, skip processing
@@ -218,8 +212,8 @@ if (file.exists(fp_boundary_wftdm)) {
         FROM filled_polys
       )
 
-      -- 5. Final output (session SET geometry_always_xy = true handles axis order)
-      SELECT ST_Transform(geom, '{SOURCE_CRS}', 'EPSG:4326') as geometry
+      -- 5. Final output (input is EPSG:26912, so the CRS carries through)
+      SELECT geom as geometry
       FROM final_union
 
     ) TO '{fp_boundary_wftdm}' (FORMAT PARQUET)
@@ -233,9 +227,7 @@ if (file.exists(fp_boundary_wftdm)) {
 
 ```{r}
 #| eval: false
-arrow::open_dataset(fp_boundary_wftdm) |>
-  sf::st_as_sf(crs = CRS_WGS) |>
-  mapgl::maplibre_view()
+preview_layer(fp_boundary_wftdm)
 ```
 
 ## Generate H3 Hexagons
@@ -258,21 +250,24 @@ if (file.exists(fp_h3_grid)) {
     "
     COPY (
       WITH boundary_parts AS (
-        -- 1. Read boundary (already EPSG:4326 from prep-boundary)
+        -- 1. Read boundary (EPSG:26912) and split into parts
         SELECT unnest(ST_Dump(geometry)) as d
         FROM read_parquet('{fp_boundary_wftdm}')
       ),
 
       h3_indices AS (
         -- 2. Polyfill: convert each polygon part to H3 cell indices
-        SELECT unnest(h3_polygon_wkt_to_cells(ST_AsText(d.geom), {H3_RES})) as h3_index
+        SELECT unnest(h3_polygon_wkt_to_cells(ST_AsText(ST_Transform(d.geom, 'EPSG:4326')), {H3_RES})) as h3_index
         FROM boundary_parts
       )
 
       SELECT DISTINCT
         h3_index,
         -- 3. Convert index back to geometry (H3 boundaries are natively 4326)
-        ST_GeomFromWKB(h3_cell_to_boundary_wkb(h3_index)) as geometry
+        ST_Transform(
+          ST_GeomFromWKB(h3_cell_to_boundary_wkb(h3_index))::GEOMETRY('EPSG:4326'),
+          '{CRS_UTM}'
+        ) as geometry
       FROM h3_indices
 
     ) TO '{fp_h3_grid}' (FORMAT PARQUET)
@@ -293,9 +288,7 @@ if (file.exists(fp_h3_grid)) {
 
 ```{r}
 #| eval: false
-arrow::read_parquet(fp_h3_grid) |>
-  sf::st_as_sf(crs = CRS_WGS) |>
-  mapgl::maplibre_view()
+preview_layer(fp_h3_grid, limit = 5000)
 ```
 
 ## Set Isochrone Inputs and Configuration
@@ -344,7 +337,8 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$walking,
-      dry_run = FALSE,
+      crs = CRS_UTM,
+      dry_run = FALSE
     )
   })
 ```
@@ -365,6 +359,7 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$biking,
+      crs = CRS_UTM,
       dry_run = FALSE
     )
   })
@@ -386,6 +381,7 @@ layer_config |>
       input_filter = filter,
       boundary_path = fp_boundary_wftdm,
       save_dir = iso_dirs$driving,
+      crs = CRS_UTM,
       dry_run = FALSE
     )
   })
@@ -434,15 +430,13 @@ if (file.exists(fp_parks_graded)) {
       WITH
       -- 1. Load 5-Min Layer (Inner Core)
       layer_5min AS (
-        SELECT 300 as value,
-               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
+        SELECT 300 as value, geometry as geom
         FROM read_parquet('{fp_park_5_in}')
       ),
 
       -- 2. Load 10-Min Layer (Base for Buffering)
       layer_10min AS (
-        SELECT 600 as value,
-               ST_Transform(geometry, '{CRS_WGS}', '{CRS_UTM}') as geom
+        SELECT 600 as value, geometry as geom
         FROM read_parquet('{fp_park_10_in}')
       ),
 
@@ -475,10 +469,8 @@ if (file.exists(fp_parks_graded)) {
         FROM layer_10min
       )
 
-      -- 4. Final Transform back to WGS84
-      SELECT
-        value,
-        ST_Transform(geom, '{CRS_UTM}', '{CRS_WGS}') as geometry
+      -- 4. Output stays in EPSG:26912 (inputs are already UTM meters)
+      SELECT value, geom as geometry
       FROM tiers
       WHERE NOT ST_IsEmpty(geom)
 
