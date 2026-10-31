@@ -2,3 +2,4 @@ _site/
 _output/
 vite-app/
 .quarto/
+.vdoc.*
