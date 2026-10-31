@@ -224,38 +224,23 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
     sub_dirs$base,
     "UtahMunicipalBoundaries.parquet"
   )
-  fp_county_bound <- here::here(sub_dirs$base, "UtahCountyBoundaries.parquet")
 
-  # 1. Load Admin Layers (Fixed Geometry)
+  # 1. Load the municipal layer. The county layer (`county_tiles`) is loaded
+  #    and tiled once in the run chunk below and shared by both targets.
   timed_step(
-    "load municipal + county layers",
-    {
-      DBI::dbExecute(
-        conn,
-        glue::glue(
-          "
-        CREATE OR REPLACE TEMP TABLE layer_muni AS
-        SELECT
-          ugrcode as CommCode,
-          geometry as geom
-        FROM read_parquet('{fp_municipal_bound}')
-      "
-        )
+    "load municipal layer",
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "
+      CREATE OR REPLACE TEMP TABLE layer_muni AS
+      SELECT
+        ugrcode as CommCode,
+        geometry as geom
+      FROM read_parquet('{fp_municipal_bound}')
+    "
       )
-
-      DBI::dbExecute(
-        conn,
-        glue::glue(
-          "
-        CREATE OR REPLACE TEMP TABLE layer_county AS
-        SELECT
-          countynbr as COUNTYNBR,
-          geometry as geom
-        FROM read_parquet('{fp_county_bound}')
-      "
-        )
-      )
-    }
+    )
   )
 
   # 2. Add Columns
@@ -296,6 +281,7 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
   )
 
   # 4. Update County (Spatial Join on Point Table -> Update Target by key)
+  #    GROUP BY also collapses a point that sits on a tile seam.
   timed_step(
     "county join (COUNTYNBR)",
     DBI::dbExecute(
@@ -307,7 +293,7 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
       FROM (
           SELECT pt.{key}, MIN(c.COUNTYNBR) as COUNTYNBR
           FROM {point_table} pt
-          JOIN layer_county c ON ST_Intersects(pt.geom, c.geom)
+          JOIN county_tiles c ON ST_Intersects(pt.geom, c.geom)
           GROUP BY pt.{key}
       ) match
       WHERE {target_table}.{key} = match.{key}
@@ -316,12 +302,33 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
     )
   )
 
-  DBI::dbExecute(conn, "DROP TABLE layer_muni; DROP TABLE layer_county;")
+  DBI::dbExecute(conn, "DROP TABLE layer_muni;")
 }
 ```
 
 ```{r}
 #| label: run-admin-join
+# The 29 county polygons are large (up to ~13,600 vertices), so they are clipped
+# into 20 km tiles once and reused for parcels and H3. See tile_polygons().
+COUNTY_TILE_SIZE <- 20000
+
+timed_step(
+  "load + tile county layer",
+  {
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "
+      CREATE OR REPLACE TEMP TABLE layer_county AS
+      SELECT countynbr as COUNTYNBR, geometry as geom
+      FROM read_parquet('{here::here(sub_dirs$base, 'UtahCountyBoundaries.parquet')}')
+    "
+      )
+    )
+    tile_polygons(conn, "layer_county", "county_tiles", "COUNTYNBR", COUNTY_TILE_SIZE)
+  }
+)
+
 # Pass the pre-calculated point tables we created in Part 1
 timed_step(
   "admin total (parcels)",
@@ -331,6 +338,8 @@ timed_step(
   "admin total (H3)",
   attach_admin_data(conn, "targets_h3", "points_h3", "h3_index")
 )
+
+DBI::dbExecute(conn, "DROP TABLE county_tiles; DROP TABLE layer_county;")
 ```
 
 ## Building Codes (BC)
@@ -794,8 +803,9 @@ if (length(missing_layers) > 0) {
 ::: {.callout-warning}
 ## Revisit: tiling is a workaround for the missing `ST_Subdivide`
 
-`prepare_layer()` clips each dissolved isochrone band into 5 km tiles (`band_tiles`) so the
-spatial join can use its index. This is a hand-rolled stand-in for PostGIS's `ST_Subdivide`,
+`tile_polygons()` clips large polygons into square tiles so the spatial join can use its index:
+each dissolved isochrone band into 5 km tiles (`prepare_layer()`), and the county layer into
+20 km tiles (admin join above). This is a hand-rolled stand-in for PostGIS's `ST_Subdivide`,
 which DuckDB's spatial extension does not have yet. **When it does, replace the tiling with
 it.** Tracking issue: <https://github.com/duckdb/duckdb-spatial/issues/905>
 
