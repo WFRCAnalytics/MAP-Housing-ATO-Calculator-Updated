@@ -81,6 +81,7 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```{r}
 #| label: load-helpers
 source(here::here(dirs$source, "process_amenities.R")) # Amenity matching engine
+source(here::here(dirs$source, "building_codes.R")) # Building code assignment
 ```
 
 ## Initialize Database
@@ -344,237 +345,26 @@ DBI::dbExecute(conn, "DROP TABLE county_tiles; DROP TABLE layer_county;")
 
 ## Building Codes (BC)
 
-We join the REMM buildings table. Since `building_type` contains full strings (e.g., "Single Family Res"), we create a mapping table to translate them to abbreviations (e.g., "SF").
+`assign_building_codes()` (in `_src/building_codes.R`) adds a `BC` column to both targets.
+The `building_type` names are mapped to two-letter codes in `BUILDING_CODE_MAP` at the top of
+that file. Anything without a code (a parcel with no buildings, a NULL or unmapped building
+type, a cell nothing can be inferred for) is `OT` (other).
+
+- **Parcels:** the code of the largest building; equal footage is broken alphabetically.
+- **H3 cells**, each step only for cells the previous one left empty:
+  1. the most common code among the buildings in the cell (ties: more total square footage,
+     then alphabetical);
+  2. the code of the parcel under the cell centre;
+  3. the most common code among the six neighbours, if at least four have one (ties:
+     alphabetical).
 
 ```{r}
 #| label: building-codes
-# -----------------------------------------------------------------------------
-# 1. Load Buildings & Store as UTM (Projected)
-# -----------------------------------------------------------------------------
-message("🏗️ Loading Building Centroids (Spatial)...")
-t_bc_total <- Sys.time()
-
-fp_remm_buildings <- here::here(sub_dirs$parcels, "REMM_BY_buildings.parquet")
-
-# Create Temp Table with BOTH UTM Geom and H3 Index
-# Load -> Centroid -> Transform (UTM) -> Index
-timed_step("load building centroids + H3 index", DBI::dbExecute(
+assign_building_codes(
   conn,
-  glue::glue(
-    "
-  CREATE OR REPLACE TEMP TABLE points_buildings AS
-  SELECT
-    parcel_id,
-    building_type,
-    building_sqft,
-
-    -- 1. H3 Index (Integer Match), from a WGS84 copy of the centroid
-    CAST(h3_latlng_to_cell(
-      ST_Y(ST_Transform(geom, '{CRS_WGS}')),
-      ST_X(ST_Transform(geom, '{CRS_WGS}')),
-      {res}
-    ) AS UBIGINT) as h3_index,
-
-    -- 2. UTM Geometry
-    geom
-
-  FROM (
-    SELECT parcel_id, building_type, building_sqft, ST_Centroid(geometry) as geom
-    FROM read_parquet('{fp_remm_buildings}')
-    WHERE ST_IsValid(geometry)
-  )
-"
-  )
-))
-
-# Create Mapping Table (Full Name -> Abbreviation)
-bc_mapping <- tibble::tribble(
-  ~full_name                 , ~abbr ,
-  "Agriculture"              , "AG"  ,
-  "Church"                   , "CH"  ,
-  "Commons"                  , "OS"  ,
-  "Educational"              , "ED"  ,
-  "Empty - Buildable"        , "EM"  ,
-  "Empty Buildable"          , "EM"  ,
-  "Governmental"             , "GO"  ,
-  "Group Quarters"           , "GQ"  ,
-  "Healthcare"               , "HE"  ,
-  "Industrial"               , "IN"  ,
-  "Mixed Use"                , "MU"  ,
-  "Multi Family Res"         , "MF"  ,
-  "No Build"                 , "NB"  ,
-  "Office"                   , "OF"  ,
-  "Open Space Non-Buildable" , "OS"  ,
-  "Other"                    , "OT"  ,
-  "Retail"                   , "RE"  ,
-  "Single Family Res"        , "SF"  ,
-  "Utilities"                , "UT"
-  # Note: NA values are handled in the join below
+  fp_buildings = here::here(sub_dirs$parcels, "REMM_BY_buildings.parquet"),
+  res = res
 )
-DBI::dbWriteTable(conn, "bc_map", bc_mapping, overwrite = TRUE)
-
-# -----------------------------------------------------------------------------
-# 2. PARCELS: Attribute Join (Parcel ID Match)
-# -----------------------------------------------------------------------------
-message("🏗️ Attaching Building Codes to Parcels (Attribute Match)...")
-
-# Join Abbreviation to Parcels
-# Note: QUALIFY ROW_NUMBER() handles cases where a parcel has multiple buildings
-# Note: We prioritize the LARGEST building on the parcel using building_sqft
-timed_step("parcels BC (largest building)", DBI::dbExecute(
-  conn,
-  "
-  ALTER TABLE targets_parcels ADD COLUMN BC VARCHAR;
-
-  UPDATE targets_parcels
-  SET BC = COALESCE(mapped.abbr, 'OT') -- Handle NA/Unknown as 'OT'
-  FROM (
-    SELECT
-      b.parcel_id,
-      m.abbr
-    FROM points_buildings b
-    JOIN bc_map m ON b.building_type = m.full_name
-
-    -- Order by square footage descending to pick the main building;
-    -- equal footage is broken by code so the result is repeatable
-    QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY b.parcel_id
-      ORDER BY b.building_sqft DESC NULLS LAST, m.abbr
-    ) = 1
-  ) mapped
-  WHERE targets_parcels.parcel_id = mapped.parcel_id
-"
-))
-
-# -----------------------------------------------------------------------------
-# 3. H3: Hybrid Approach
-#    Pass A: Building Aggregation (Handles small parcels / mixed use)
-#    Pass B: Spatial Backfill (Handles large parcels / empty lots)
-# -----------------------------------------------------------------------------
-message("🏗️ Aggregating Building Codes to H3 (Index Match)...")
-
-# --- Pass A: Aggregation via Index Match (Existing Logic) ---
-timed_step("H3 BC pass A (buildings in cell)", DBI::dbExecute(
-  conn,
-  glue::glue(
-    "
-  ALTER TABLE targets_h3 ADD COLUMN IF NOT EXISTS BC VARCHAR;
-
-  UPDATE targets_h3
-  SET BC = agg.mode_bc
-  FROM (
-    -- Most common code in the cell. A tie goes to the code with more building
-    -- square footage, then to the alphabetically first code (repeatable result).
-    SELECT h3_index, abbr as mode_bc
-    FROM (
-      SELECT
-        b.h3_index,
-        COALESCE(m.abbr, 'OT') as abbr,
-        COUNT(*) as n,
-        SUM(b.building_sqft) as sqft
-      FROM points_buildings b
-      LEFT JOIN bc_map m ON b.building_type = m.full_name
-      GROUP BY b.h3_index, COALESCE(m.abbr, 'OT')
-    )
-    QUALIFY ROW_NUMBER() OVER (
-      PARTITION BY h3_index
-      ORDER BY n DESC, sqft DESC NULLS LAST, abbr
-    ) = 1
-  ) agg
-  WHERE targets_h3.h3_index = agg.h3_index
-"
-  )
-))
-
-# --- Pass B: Spatial Backfill (Gap Filling) ---
-# Check: If BC is still NULL, sample the Parcel Polygon at the H3 Center.
-# This fixes large parcels where the H3 cell is far from the building centroid.
-
-message("  ↳ Filling gaps using Parcel Polygons...")
-
-# Update NULLs only
-timed_step("H3 BC pass B (parcel polygon at cell centre)", DBI::dbExecute(
-  conn,
-  "
-  UPDATE targets_h3
-  SET BC = matched.BC
-  FROM (
-    SELECT
-      ph.h3_index,
-      MIN(p.BC) as BC -- a centre on a shared parcel edge matches two: take the first code
-    FROM points_h3 ph
-    -- Spatial Join: H3 Center inside Parcel Polygon
-    JOIN targets_parcels p ON ST_Intersects(ph.geom, p.geom)
-    WHERE p.BC IS NOT NULL
-    GROUP BY ph.h3_index
-  ) matched
-  WHERE targets_h3.h3_index = matched.h3_index
-    AND targets_h3.BC IS NULL -- Only touch rows that failed Pass A
-"
-))
-
-# --- Pass C: Spatial Voting (KNN Mode) ---
-# Logic: If a cell is empty, look at its 6 immediate neighbors.
-# If 4 or more neighbors have data, we assume this is a "glitch" or hole -> FILL IT.
-# If 3 or fewer neighbors have data, we assume this is a coastline/edge -> LEAVE IT.
-message("  ↳ Pass C: Filling holes using Grid Adjacency (Threshold >= 4)...")
-
-timed_step("H3 BC pass C (neighbour vote)", DBI::dbExecute(
-  conn,
-  "
-  UPDATE targets_h3
-  SET BC = fill.mode_bc
-  FROM (
-    -- Most common neighbor code; a tie goes to the alphabetically first code
-    SELECT h3_index, BC as mode_bc
-    FROM (
-      SELECT
-        t.h3_index,
-        n.BC,
-        COUNT(*) as votes
-      FROM targets_h3 t
-      -- 1. Get the 6 immediate neighbors (k=1) for the empty cell
-      CROSS JOIN LATERAL (
-        SELECT unnest(h3_grid_disk(t.h3_index, 1)) as neighbor_h3
-      ) grid
-      -- 2. Join back to the main table to check the neighbor's value
-      JOIN targets_h3 n ON grid.neighbor_h3 = n.h3_index
-
-      WHERE t.BC IS NULL          -- Target must be empty
-        AND n.BC IS NOT NULL      -- Neighbor must have data
-        AND t.h3_index != n.h3_index -- Exclude the cell itself
-
-      GROUP BY t.h3_index, n.BC
-    )
-    -- 3. THE RULE: Only fill if surrounded by at least 4 valid cells
-    QUALIFY SUM(votes) OVER (PARTITION BY h3_index) >= 4
-        AND ROW_NUMBER() OVER (PARTITION BY h3_index ORDER BY votes DESC, BC) = 1
-  ) fill
-  WHERE targets_h3.h3_index = fill.h3_index
-"
-))
-
-# --- Pass D: Final Cleanup (Catch-All) ---
-# Logic: If it is STILL null after Pass C, it means it is either:
-# 1. Genuinely empty (surrounded by < 4 valid neighbors)
-# 2. A remote area with no data
-# We force these to 'OT' (Other).
-message("  ↳ Pass D: Setting remaining NULLs to 'OT'...")
-
-timed_step("H3 BC pass D (rest = OT)", DBI::dbExecute(
-  conn,
-  "
-  UPDATE targets_h3
-  SET BC = 'OT'
-  WHERE BC IS NULL
-"
-))
-
-# Cleanup
-DBI::dbExecute(conn, "DROP TABLE points_buildings; DROP TABLE bc_map;")
-message(glue::glue(
-  "   ⏱️ building codes total: {round(as.numeric(difftime(Sys.time(), t_bc_total, units = 'secs')), 1)} s"
-))
 ```
 
 ```{r}

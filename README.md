@@ -47,10 +47,10 @@ Two target geometries carry every score: **REMM parcels** (WFRC's Real Estate Ma
 
 Each parcel/hexagon is tagged with a **building code** (`BC` — e.g. `SF` single-family, `MF` multi-family, `RE` retail, `IN` industrial, `OS` open space; see [Output columns](#output-columns) for the full list) via a four-pass hybrid approach, since neither building points nor parcel polygons alone cover every case cleanly:
 
-1. **Aggregation** — join REMM buildings to parcels/hexes by spatial index, prioritizing the largest building by square footage where multiple buildings share a cell (handles mixed-use and multi-building parcels).
+1. **Aggregation** — join REMM buildings to parcels/hexes. A parcel takes the code of its largest building (by square footage); a hexagon takes the most common code among the buildings in it, with ties going to the code with more total square footage, then alphabetically (handles mixed-use and multi-building parcels).
 2. **Spatial backfill** — for cells still missing a code (typically large parcels where the H3 cell center falls far from any building centroid), sample the parcel polygon directly at the H3 cell center.
 3. **Spatial voting (KNN)** — for cells still empty, check the 6 immediate H3 neighbors; if 4+ have a value, treat the gap as a data glitch and fill it from the neighborhood majority. Fewer than 4 is treated as a genuine edge (e.g. coastline) and left alone.
-4. **Catch-all** — anything still null is forced to `OT` (Other) rather than left as a silent gap.
+4. **Catch-all** — anything still without a code (including parcels with no buildings and buildings with a missing or unmapped `building_type`) is `OT` (Other) rather than left as a silent gap. The logic is in `_src/building_codes.R`.
 
 ### Job access (`AA`, `AT`)
 
