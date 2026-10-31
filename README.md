@@ -37,6 +37,8 @@ Each proximity factor is computed one of two ways:
 
 Both are computed via `ST_Intersects`/`ST_DWithin` in DuckDB, iterating bands smallest-first and only updating rows that haven't already matched a closer band.
 
+> **Revisit when DuckDB adds `ST_Subdivide`.** To keep the isochrone join fast, `_src/process_amenities.R` merges each band into one polygon and clips it into 5 km tiles. That tiling is a workaround for DuckDB spatial having no `ST_Subdivide` ([duckdb-spatial#905](https://github.com/duckdb/duckdb-spatial/issues/905)); replace it when that lands. The untiled version gives identical results but took about 13.6 min instead of 0.6 min for step 3 on a 96 GB workstation. It is commit `b338f99` (`git show b338f99:_src/process_amenities.R`).
+
 ### The canvas: parcels and H3 grid
 
 Two target geometries carry every score: **REMM parcels** (WFRC's Real Estate Market Model, parcel-level) and an **H3 hexagon grid at resolution 10** covering the region, built from the WFRC/MAG regional boundary. Each parcel is represented by an interior point (`ST_PointOnSurface`, not centroid — this keeps the sample point inside U-shaped or non-convex parcels) for the spatial joins; H3 cells use the true polygon.
