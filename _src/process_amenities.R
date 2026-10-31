@@ -18,8 +18,17 @@
 #'   it, which is a no-op for layers already stored in it.
 #' @param simplify_tolerance `ST_Simplify` tolerance in the units of `crs`
 #'   (metres for EPSG:26912). Default 1.0. Use `0` to skip simplification.
+#' @param tile_size Edge length, in the units of `crs`, of the square tiles the
+#'   dissolved isochrone bands are clipped into before joining (`band_tiles`).
+#'   Tiling does not change which points match. Default 5000.
 #' @return `NULL`, invisibly.
-prepare_layer <- function(conn, config, crs = "EPSG:26912", simplify_tolerance = 1.0) {
+prepare_layer <- function(
+  conn,
+  config,
+  crs = "EPSG:26912",
+  simplify_tolerance = 1.0,
+  tile_size = 5000
+) {
   col <- config$col_name
   type <- config$type
   path <- config$path
@@ -74,6 +83,40 @@ prepare_layer <- function(conn, config, crs = "EPSG:26912", simplify_tolerance =
     "
     )
     lap("dissolve bands")
+
+    # TODO(ST_Subdivide): this tiling is a workaround for DuckDB spatial having no
+    # ST_Subdivide. Replace it when that exists:
+    # https://github.com/duckdb/duckdb-spatial/issues/905
+    # The untiled version (same results, ~13.6 min instead of ~0.6 min for the
+    # whole step) is commit b338f99: git show b338f99:_src/process_amenities.R
+    #
+    # Clip each dissolved band into square tiles. A point is then tested only
+    # against the few small tiles near it instead of one polygon with tens of
+    # thousands of vertices: a 3599 s driving band went from 20 s to 0.1 s per
+    # table with identical matches. Points on a tile seam match both tiles,
+    # which the later GROUP BY collapses.
+    DBI::dbExecute(
+      conn,
+      glue::glue(
+        "
+        CREATE OR REPLACE TEMP TABLE band_tiles AS
+        WITH g AS (
+          SELECT val, geom,
+                 floor(ST_XMin(geom) / {tile_size})::INT AS x0, floor(ST_XMax(geom) / {tile_size})::INT AS x1,
+                 floor(ST_YMin(geom) / {tile_size})::INT AS y0, floor(ST_YMax(geom) / {tile_size})::INT AS y1
+          FROM band_geom
+        ),
+        gx AS (SELECT val, geom, unnest(range(x0, x1 + 1)) AS cx, y0, y1 FROM g),
+        gxy AS (SELECT val, geom, cx, unnest(range(y0, y1 + 1)) AS cy FROM gx)
+        SELECT val,
+               ST_Intersection(geom, ST_MakeEnvelope(cx * {tile_size}, cy * {tile_size},
+                                                     (cx + 1) * {tile_size}, (cy + 1) * {tile_size})) AS geom
+        FROM gxy
+      "
+      )
+    )
+    DBI::dbExecute(conn, "DELETE FROM band_tiles WHERE geom IS NULL OR ST_IsEmpty(geom)")
+    lap("tile bands")
   }
   invisible(NULL)
 }
@@ -83,6 +126,7 @@ prepare_layer <- function(conn, config, crs = "EPSG:26912", simplify_tolerance =
 drop_layer <- function(conn) {
   DBI::dbExecute(conn, "DROP TABLE IF EXISTS raw_layer")
   DBI::dbExecute(conn, "DROP TABLE IF EXISTS band_geom")
+  DBI::dbExecute(conn, "DROP TABLE IF EXISTS band_tiles")
   invisible(NULL)
 }
 
@@ -147,7 +191,7 @@ process_layers <- function(conn, point_table, key, config) {
         list(
           label = glue::glue("band {b}"),
           val = b,
-          layer = glue::glue("(SELECT geom FROM band_geom WHERE val = {b})"),
+          layer = glue::glue("(SELECT geom FROM band_tiles WHERE val = {b})"),
           on = "ST_Intersects(t.geom, r.geom)"
         )
       })
