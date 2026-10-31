@@ -89,17 +89,13 @@ We use DuckDB for all spatial operations to avoid loading millions of geometries
 Every processed layer is already in EPSG:26912 (UTM 12N), so no layer is reprojected here;
 only the H3 lookups need lat/lon, and those use a WGS84 copy of each centroid.
 
-DuckDB is given an explicit budget so it cannot take the whole machine. The values below
-were sized from this workstation (95.7 GB RAM, about 66 GB free at the time, 20 logical
-cores): 40 GB for DuckDB leaves roughly 25 GB for R/Positron, the ORS container and the OS,
-and 12 threads leave cores free. Anything past the memory limit spills to `.tmp/duckdb`
-instead of crashing. Adjust these two numbers on a different machine.
+DuckDB uses its own defaults for memory (80% of the machine's RAM) and threads (all cores).
+Anything past the memory limit spills to `.tmp/duckdb` instead of crashing, so a smaller
+machine runs slower, not out of memory. The two limits below are optional: uncomment them
+to cap DuckDB, for example when R, Positron and the ORS container share the machine.
 
 ```{r}
 #| label: init-db
-DUCKDB_MEMORY <- "40GB"
-DUCKDB_THREADS <- 12L
-
 # In-memory database: every table is rebuilt from the parquet layers on each run.
 conn <- DBI::dbConnect(duckdb::duckdb())
 
@@ -109,10 +105,11 @@ DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
 
 fp_spill <- here::here(".tmp", "duckdb")
 fs::dir_create(fp_spill)
-DBI::dbExecute(conn, glue::glue("SET memory_limit = '{DUCKDB_MEMORY}'"))
-DBI::dbExecute(conn, glue::glue("SET threads = {DUCKDB_THREADS}"))
 DBI::dbExecute(conn, glue::glue("SET temp_directory = '{fp_spill}'"))
-DBI::dbExecute(conn, "SET max_temp_directory_size = '200GB'")
+
+# Optional caps (off by default):
+# DBI::dbExecute(conn, "SET memory_limit = '16GB'")
+# DBI::dbExecute(conn, "SET threads = 8")
 ```
 
 # Part 1: Prepare Targets (The Canvas)
@@ -727,11 +724,26 @@ Fail now, not after an hour, if a layer is missing:
 #| label: check-inputs
 missing_layers <- amenity_config$path[!file.exists(amenity_config$path)]
 if (length(missing_layers) > 0) {
-  stop("Missing amenity layers:\n", paste(unique(missing_layers), collapse = "\n"))
+  stop(
+    "Missing amenity layers:\n",
+    paste(unique(missing_layers), collapse = "\n")
+  )
 }
 ```
 
 ### Spatial Join
+
+::: {.callout-warning}
+## Revisit: tiling is a workaround for the missing `ST_Subdivide`
+
+`prepare_layer()` clips each dissolved isochrone band into 5 km tiles (`band_tiles`) so the
+spatial join can use its index. This is a hand-rolled stand-in for PostGIS's `ST_Subdivide`,
+which DuckDB's spatial extension does not have yet. **When it does, replace the tiling with
+it.** Tracking issue: <https://github.com/duckdb/duckdb-spatial/issues/905>
+
+The untiled version (same results, about 13.6 min instead of 0.6 min on a 96 GB workstation)
+is at commit `b338f99` (`git show b338f99:_src/process_amenities.R`).
+:::
 
 We run every layer against both point tables, then join all results onto the targets at once.
 
@@ -751,10 +763,18 @@ for (cfg in config_list) {
   process_layers(conn, "points_parcels", "parcel_id", cfg)
   process_layers(conn, "points_h3", "h3_index", cfg)
   drop_layer(conn)
-  message(glue::glue("   ⏱️ {cfg$col_name}: {round(difftime(Sys.time(), t0, units = 'secs'))} s"))
+  message(glue::glue(
+    "   ⏱️ {cfg$col_name}: {round(difftime(Sys.time(), t0, units = 'secs'))} s"
+  ))
 }
 
-join_amenities(conn, "targets_parcels", "points_parcels", "parcel_id", amenity_config)
+join_amenities(
+  conn,
+  "targets_parcels",
+  "points_parcels",
+  "parcel_id",
+  amenity_config
+)
 join_amenities(conn, "targets_h3", "points_h3", "h3_index", amenity_config)
 
 total_duration <- round(difftime(Sys.time(), t_total_start, units = "mins"), 2)
@@ -781,6 +801,10 @@ DBI::dbExecute(
 )
 
 message("🚀 Processing Complete!")
+```
+
+```{r}
+DBI::dbGetQuery(conn, "SELECT current_setting('threads')")
 ```
 
 ## Cleanup
