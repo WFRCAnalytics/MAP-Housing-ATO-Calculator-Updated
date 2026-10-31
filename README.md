@@ -163,7 +163,7 @@ Run the four Quarto steps in order — each writes standardized GeoParquet that 
 3. **`3-spatial-operations.qmd`** — builds the parcel/H3 canvas, assigns building codes and job access, spatially joins every isochrone/buffer to produce raw metric columns.
 4. **`4-ato-scoring.qmd`** — normalizes raw metrics to 0–1 scores (see [Normalization](#normalization)), exports final Parquet + a zipped File Geodatabase, and syncs scored data into both apps' `data/` directories.
 
-> Run chunks manually inside Positron/RStudio rather than via `Rscript` — `renv` resolves its packages inside the IDE's R session. The four pipeline steps use DuckDB (plus `sf` in steps 1–2 for the ArcGIS download and the ORS responses); `arrow`/`geoarrow` are now needed only by the Shiny app (`_app/app.R`).
+> Run chunks manually inside Positron/RStudio rather than via `Rscript` — `renv` resolves its packages inside the IDE's R session. The four pipeline steps and the Shiny app use DuckDB (plus `sf` in steps 1–2 for the ArcGIS download and the ORS responses, and in the app to parse geometry); `arrow` and `geoarrow` are no longer used anywhere.
 >
 > Step 4 writes the app data (`_app/data`, `vite-app/public/data`) as standard GeoParquet in WGS84: geometry is WKB, and the municipal file also carries a `geojson` text column that the Vite app reads.
 
