@@ -716,7 +716,7 @@ then reused for both tables. Benchmarked on this data, joining the individual dr
 (hundreds of overlapping ~6,000-vertex polygons) takes hours, while the dissolved band takes
 seconds and gives identical matches. The dissolve unions per 10 km cell first and then unions
 the cells; that only sets the order of the unions, and the resulting geometry is identical to
-one big union. The one real simplification is the 1 m `ST_Simplify` tolerance applied on load.
+one big union. The one real simplification is the `ST_Simplify` tolerance applied on load (`SIMPLIFY_TOLERANCE`, 1 m by default).
 No indexes are created: DuckDB's spatial join builds its own.
 
 ### Check Inputs
@@ -740,11 +740,14 @@ We run every layer against both point tables, then join all results onto the tar
 message("🚀 Starting Processing on Points...")
 t_total_start <- Sys.time()
 
+# Edge simplification of every amenity layer, in metres (EPSG:26912). 0 = off.
+SIMPLIFY_TOLERANCE <- 1.0
+
 config_list <- purrr::transpose(amenity_config)
 
 for (cfg in config_list) {
   t0 <- Sys.time()
-  prepare_layer(conn, cfg) # load + dissolve once, shared by both tables
+  prepare_layer(conn, cfg, simplify_tolerance = SIMPLIFY_TOLERANCE) # load + dissolve once, shared by both tables
   process_layers(conn, "points_parcels", "parcel_id", cfg)
   process_layers(conn, "points_h3", "h3_index", cfg)
   drop_layer(conn)
