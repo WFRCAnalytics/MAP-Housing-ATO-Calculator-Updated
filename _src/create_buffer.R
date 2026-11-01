@@ -14,7 +14,7 @@ create_buffer <- function(
   processed_dir = dirs$processed
 ) {
   # 1. Dependency Check
-  required_pkgs <- c("duckdb", "duckspatial", "glue", "DBI")
+  required_pkgs <- c("duckdb", "glue", "DBI")
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
   ]
@@ -42,14 +42,15 @@ create_buffer <- function(
 
   tryCatch(
     {
-      duckspatial::ddbs_load(con)
+      DBI::dbExecute(con, "INSTALL spatial; LOAD spatial;")
+      DBI::dbExecute(con, "SET geometry_always_xy = true")
 
       query <- glue::glue(
         "
       COPY (
         SELECT
           *,
-          ST_AsWKB(ST_Buffer(ST_GeomFromWKB(geometry), {dist_meters})) as geometry
+          ST_Buffer(geometry, {dist_meters}) as geometry
         FROM read_parquet('{input_parquet}')
       ) TO '{output_fp}' (FORMAT PARQUET)
     "

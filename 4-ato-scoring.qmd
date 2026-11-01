@@ -18,36 +18,7 @@ execute:
 ## Libraries
 
 ```r
-install.packages("pak") # https://github.com/r-lib/pak
-
-pak::pak(
-  c(
-    "tidyverse",   # https://github.com/tidyverse/tidyverse/
-    "sf",          # https://github.com/r-spatial/sf/
-    "openrouteservice", # https://github.com/GIScience/openrouteservice-r/
-    "DBI",         # https://github.com/r-dbi/DBI/
-    "duckdb",      # https://github.com/duckdb/duckdb-r/
-    "duckplyr",    # https://github.com/tidyverse/duckplyr/
-    "duckspatial", # https://github.com/Cidree/duckspatial/
-    "arrow",       # https://github.com/apache/arrow/tree/main/r
-    "geoarrow",    # https://github.com/geoarrow/geoarrow-r/
-    "janitor",     # https://github.com/sfirke/janitor/
-    "mapgl",       # https://github.com/walkerke/mapgl/
-    "here",        # https://github.com/r-lib/here/
-    "fs",          # https://github.com/r-lib/fs/
-    "zip"          # https://github.com/r-lib/zip
-    ),
-    dependencies = TRUE
-  )
-```
-
-OR,
-
-```r
-install.packages("pak") # https://github.com/r-lib/pak
-
-pak::pak("renv", dependencies = TRUE) # https://github.com/rstudio/renv/
-
+install.packages("renv")
 renv::restore()
 ```
 
@@ -55,12 +26,8 @@ renv::restore()
 #| label: setup-libraries
 #| message: false
 #| warning: false
-library(dplyr)
 library(DBI)
 library(duckdb)
-library(arrow)
-library(geoarrow)
-library(sf)
 library(glue)
 library(here)
 library(fs)
@@ -71,6 +38,7 @@ library(fs)
 ```{r}
 #| label: setup-dirs
 dirs <- list(
+  source = here::here("_src"), # Source custom functions
   results = here::here("_output")
 )
 
@@ -93,6 +61,13 @@ CRS_UTM <- "EPSG:26912" # NAD83 / UTM zone 12N (Projected - meters)
 CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 ```
 
+## Helper Functions
+
+```{r}
+#| label: load-helpers
+source(here::here(dirs$source, "export_layers.R")) # File geodatabase + app data exports
+```
+
 ## Initialize Database
 
 ```{r}
@@ -100,8 +75,8 @@ CRS_WGS <- "EPSG:4326" # WGS84 (Geographic - Lat/Lon)
 conn <- DBI::dbConnect(duckdb::duckdb())
 
 DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
+DBI::dbExecute(conn, "SET geometry_always_xy = true")
 DBI::dbExecute(conn, "INSTALL h3 FROM community; LOAD h3;")
-DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
 ```
 
 # Scoring & Weighting
@@ -333,43 +308,16 @@ score_and_export(
 
 ### Export to GDB
 
+The scored H3 layer is streamed through GDAL inside DuckDB (nothing is loaded into R) and written
+as one `H3_Scored` layer, reprojected to WGS84. `export_gdb()` replaces the whole geodatabase,
+so it holds a single layer. Pass `crs = CRS_UTM` to keep the layer in UTM instead.
+
 ```{r}
 #| label: export-gdb
-message("🌍 Converting Parquets to File Geodatabase...")
+message("🌍 Converting scored H3 parquet to File Geodatabase...")
 
-# 1. Configuration
 gdb_path <- here::here(dirs$results, "HousingSuitability_Centers202512.gdb")
-
-# Define inputs: Layer Name -> File Path
-to_export <- list(
-  # "Parcels_Enriched" = fp_parcels_enriched,
-  # "H3_Enriched" = fp_h3_enriched,
-  # "Parcels_Scored" = fp_parcels_scored,
-  "H3_Scored" = fp_h3_scored
-)
-
-# 2. Execution
-purrr::iwalk(to_export, function(path, layer_name) {
-  if (!fs::file_exists(path)) {
-    return(message(glue::glue("⚠️ Skipping {layer_name} (Not found)")))
-  }
-
-  message(glue::glue("  ↳ Processing {layer_name}..."))
-
-  # Streamlined Approach: Open -> Convert to SF -> Write
-  arrow::open_dataset(path) |>
-    sf::st_as_sf(crs = CRS_WGS) |> # WGS84
-    sf::st_cast("MULTIPOLYGON") |>
-    # Optional: Uncomment next line if you need the GDB in UTM
-    # sf::st_transform(CRS_UTM) |>
-    sf::st_write(
-      dsn = gdb_path,
-      layer = layer_name,
-      driver = "OpenFileGDB",
-      append = FALSE,
-      quiet = TRUE
-    )
-})
+export_gdb(conn, fp_h3_scored, gdb_path, layer = "H3_Scored", crs = CRS_WGS)
 
 message("✅ GDB Export Complete!")
 ```
@@ -399,7 +347,12 @@ Check a few records to ensure scores make sense (e.g., scores shouldn't be > 1.0
 ```{r}
 #| label: validate
 #| echo: false
-arrow::open_dataset(fp_parcels_scored) |> head() |> collect()
+DBI::dbGetQuery(
+  conn,
+  glue::glue(
+    "SELECT * EXCLUDE (geom) FROM read_parquet('{fp_parcels_scored}') LIMIT 6"
+  )
+)
 ```
 
 ## Sync Data to App Directories
@@ -436,7 +389,12 @@ dst_bnd_vite <- here::here(
   "Analysis_Boundary_WFRC_MAG.parquet"
 )
 
-mun_api_url <- "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0"
+src_mun <- here::here(
+  "_data",
+  "processed",
+  "base_layers",
+  "UtahMunicipalBoundaries.parquet"
+)
 dst_mun_shiny <- here::here("_app", "data", "UtahMunicipalBoundaries.parquet")
 dst_mun_vite <- here::here(
   "vite-app",
@@ -445,63 +403,26 @@ dst_mun_vite <- here::here(
   "UtahMunicipalBoundaries.parquet"
 )
 
-write_h3_partitioned <- function(conn, table_name, dst) {
-  if (fs::dir_exists(dst)) {
-    fs::dir_delete(dst)
-  }
-  DBI::dbGetQuery(
-    conn,
-    glue::glue(
-      "SELECT * EXCLUDE geometry, ST_AsText(geometry) AS geometry
-       FROM {table_name}
-       WHERE CommCode IS NOT NULL"
-    )
-  ) |>
-    sf::st_as_sf(wkt = "geometry", crs = 4326) |>
-    arrow::write_dataset(path = dst, partitioning = "CommCode")
-  message(glue::glue("  ✅ H3 scored → {dst}"))
-}
-
-write_municipalities <- function(conn, table_name, out_path) {
-  mun_codes <- DBI::dbGetQuery(
-    conn,
-    glue::glue(
-      "SELECT DISTINCT CommCode FROM {table_name} WHERE CommCode IS NOT NULL"
-    )
-  )$CommCode
-
-  where_clause <- paste0(
-    "UGRCODE IN ('",
-    paste(mun_codes, collapse = "','"),
-    "')"
-  )
-  query_url <- URLencode(paste0(
-    mun_api_url,
-    "/query?where=",
-    where_clause,
-    "&outFields=UGRCODE,NAME&f=geojson&outSR=4326"
-  ))
-  sf::st_read(query_url, quiet = TRUE) |>
-    sf::st_transform(4326) |>
-    arrow::write_parquet(out_path)
-  message(glue::glue("  ✅ Municipalities → {out_path}"))
-}
-
 # Ensure destination directories exist
 fs::dir_create(here::here("_app", "data"))
 fs::dir_create(here::here("vite-app", "public", "data"))
 
+# All app files are WGS84 (lon/lat). See _src/export_layers.R.
+
 # 1. H3 scored partitions -> both apps (from DuckDB memory, no disk re-read)
 write_h3_partitioned(conn, h3_table, dst_h3_shiny)
 write_h3_partitioned(conn, h3_table, dst_h3_vite)
+message("  ✅ H3 scored partitions written")
 
-# 2. Municipal boundaries -> both apps (CommCodes from DuckDB, download once, copy)
-write_municipalities(conn, h3_table, dst_mun_shiny)
+# 2. Municipal boundaries -> both apps (from the processed layer, no download)
+write_municipalities(conn, h3_table, src_mun, dst_mun_shiny)
 fs::file_copy(dst_mun_shiny, dst_mun_vite, overwrite = TRUE)
+message("  ✅ Municipal boundaries written")
 
 # 3. Regional boundary -> both apps
-fs::file_copy(src_bnd, dst_bnd_shiny, overwrite = TRUE)
-fs::file_copy(src_bnd, dst_bnd_vite, overwrite = TRUE)
+write_boundary(conn, src_bnd, dst_bnd_shiny)
+fs::file_copy(dst_bnd_shiny, dst_bnd_vite, overwrite = TRUE)
+message("  ✅ Regional boundary written")
 
 message("✅ Data sync complete!")
 ```

@@ -80,7 +80,7 @@ function tableToRows(table) {
 const cityCache = new Map()
 
 // Quote all identifiers to avoid DuckDB reserved-word conflicts (AT, AA, etc.)
-// Excludes the geometry/WKB column added by st_as_sf() in R.
+// Excludes the `geom` (WKB) column of the H3 partitions; hexagons are built from h3_index.
 const CITY_COLS = '"h3_index","CommCode","BC","OZ","AA","AT","TT","TF","TA","AC","AH","AE","AG","AM","AP"'
 
 export async function fetchCityData(commCode) {
@@ -147,20 +147,15 @@ export async function loadCities(commCodes, weights) {
   return { geojson, rows, minScore, maxScore }
 }
 
-// ── GeoArrow struct → GeoJSON geometry ──────────────────
-// arrow::write_parquet() on an sf object stores geometry as GeoArrow native:
-// STRUCT(x DOUBLE, y DOUBLE)[][][] = [polygon][ring][point].
-// DuckDB's to_json() serializes this as [[[{x,y},...],...],...] for JS parsing.
-function structToGeoJSON(jsonStr) {
+// ── Geometry text → GeoJSON geometry ────────────────────
+// Step 4 (_src/export_layers.R) writes each municipality as WKB in `geometry`
+// and the same boundary as GeoJSON text in `geojson`, in lon/lat. The WKB is
+// for R/QGIS; this app only parses the text.
+function parseGeoJSON(jsonStr) {
   if (!jsonStr) return null
   try {
-    const data = JSON.parse(jsonStr)
-    if (!Array.isArray(data) || data.length === 0) return null
-    const rings2d = rings => rings.map(ring => ring.map(pt => [pt.x, pt.y]))
-    if (data.length === 1) {
-      return { type: 'Polygon', coordinates: rings2d(data[0]) }
-    }
-    return { type: 'MultiPolygon', coordinates: data.map(poly => rings2d(poly)) }
+    const geom = JSON.parse(jsonStr)
+    return geom?.coordinates?.length ? geom : null
   } catch { return null }
 }
 
@@ -171,12 +166,12 @@ export async function loadMunicipalData() {
   if (_munCache) return _munCache
   const url = `${DATA_BASE_URL}/UtahMunicipalBoundaries.parquet`
   const table = await runQuery(
-    `SELECT "UGRCODE", "NAME", CAST(to_json("geometry") AS VARCHAR) AS geom_json FROM read_parquet('${url}') ORDER BY "NAME"`
+    `SELECT "UGRCODE", "NAME", "geojson" FROM read_parquet('${url}') ORDER BY "NAME"`
   )
   const rows = tableToRows(table)
   const features = rows
     .map(r => {
-      const geom = structToGeoJSON(r.geom_json)
+      const geom = parseGeoJSON(r.geojson)
       return geom
         ? { type: 'Feature', geometry: geom, properties: { UGRCODE: String(r.UGRCODE), NAME: String(r.NAME) } }
         : null

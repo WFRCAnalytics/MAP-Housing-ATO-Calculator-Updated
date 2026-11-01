@@ -1,0 +1,199 @@
+# Data sources for 1-prepare-data-layers.qmd
+#
+# Each entry under `layers:` becomes one parquet file in `_data/processed/<save_dir>/`.
+# Entries run top to bottom; a `join` entry must come after the layer it uses.
+#
+# Common fields
+#   type         arcgis | local | join
+#   name         Output filename (without .parquet)
+#   save_dir     Key of sub_dirs in the qmd: base, parcels, landuse, transport, access, amenities
+#   description  Human-readable label
+#   partitioning (optional) Columns to partition the parquet by
+#   preview      (optional) Options passed to preview_layer(): column, limit
+#
+# type: arcgis
+#   url          ArcGIS FeatureServer / MapServer layer URL
+#   where        (optional) Server-side SQL where clause, default "1=1"
+#
+# type: local   (paths are relative to _data/raw/)
+#   path         File, .zip or .gdb
+#   layer        (optional) Layer name for multi-layer sources
+#   query        (optional) WHERE clause or "SELECT * FROM <layer> WHERE ..."
+#   read_mode    (optional) auto | standard | zip | url | remote_zip
+#
+# type: join    (TAZ geometry + Access-to-Opportunity CSV)
+#   base         Key of the TAZ layer to join onto
+#   csv          CSV path relative to _data/raw/
+
+layers:
+  # --- Base layers -----------------------------------------------------------
+  municipal_bounds:
+    type: arcgis
+    name: UtahMunicipalBoundaries
+    save_dir: base
+    url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0
+    description: Utah municipal boundaries
+
+  county_bounds:
+    type: arcgis
+    name: UtahCountyBoundaries
+    save_dir: base
+    url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahCountyBoundaries/FeatureServer/0
+    description: Utah county boundaries
+
+  regional_bounds:
+    type: arcgis
+    name: RegionalBoundaryComponents
+    save_dir: base
+    url: https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/RegionalBoundaryComponents/FeatureServer/0
+    description: WFRC / MAG regional boundary components
+
+  # --- Parcels and TAZ -------------------------------------------------------
+  remm_parcels:
+    type: local
+    name: REMM_BY_parcels
+    save_dir: parcels
+    path: remm_base_year_20221003/remm_base_year.gdb
+    layer: parcels
+    description: REMM base-year parcels
+    preview: {limit: 1000}
+
+  remm_buildings:
+    type: local
+    name: REMM_BY_buildings
+    save_dir: parcels
+    path: remm_base_year_20221003/remm_base_year.gdb
+    layer: buildings
+    description: REMM base-year buildings
+    preview: {limit: 1000}
+
+  wf_taz:
+    type: local
+    name: WFv920_TAZ
+    save_dir: parcels
+    path: WFv920_TAZ.zip
+    description: Wasatch Front travel demand model TAZs (v9.2.0)
+
+  ustm_taz:
+    type: local
+    name: Statewide_TAZ
+    save_dir: parcels
+    path: Statewide_TAZ.zip
+    description: Utah statewide travel demand model TAZs
+
+  # --- Land use and zones ----------------------------------------------------
+  wcv_centers:
+    type: arcgis
+    name: WCV_Centers_and_Regional_Land_Uses
+    save_dir: landuse
+    url: https://services1.arcgis.com/taguadKoI1XFwivx/arcgis/rest/services/WCV_Centers_and_Regional_Land_Uses/FeatureServer/0
+    description: Wasatch Choice Vision centers and regional land uses
+    preview: {column: center_type}
+
+  utah_qoz:
+    type: arcgis
+    name: Utah_Qualified_Opportunity_Zones
+    save_dir: landuse
+    url: https://services3.arcgis.com/GlpLTbxq481k9lgs/arcgis/rest/services/omidgley_OZ_Map_layers/FeatureServer/10
+    description: Utah OZ 2.0 eligible tracts (all 147; GOEO's recommended subset is filtered in 3-spatial-operations.qmd)
+
+  # --- Transportation --------------------------------------------------------
+  transit_routes:
+    type: arcgis
+    name: UTA_Routes_and_Most_Recent_Ridership
+    save_dir: transport
+    url: https://maps.rideuta.com/server/rest/services/Hosted/UTA_Routes_and_Most_Recent_Ridership/FeatureServer/0
+    description: UTA routes with most recent ridership
+    preview: {column: routetype}
+
+  transit_stops:
+    type: arcgis
+    name: UTA_Stops_and_Most_Recent_Ridership
+    save_dir: transport
+    url: https://maps.rideuta.com/server/rest/services/Hosted/UTA_Stops_and_Most_Recent_Ridership/FeatureServer/0
+    description: UTA stops with most recent ridership
+
+  bikeways:
+    type: arcgis
+    name: Bikeways
+    save_dir: transport
+    url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Bikeways/FeatureServer/0
+    description: Utah bikeways
+    preview: {column: facility1, limit: 1000}
+
+  freeway_exits:
+    type: arcgis
+    name: Freeway_Exit_Locations
+    save_dir: transport
+    url: https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services/Freeway_Exit_Locations/FeatureServer/0
+    description: Freeway exit locations
+
+  # --- Access to Opportunity -------------------------------------------------
+  # CSV source: \\ModelAce\ModelAce-E\1 - TDM\1 - Official Release (full run)\v9x\v9.2\v9.2.0\Scenarios\OY_2023\5_AssignHwy\4_Summaries\WFv920_OY_2023_Access_to_Opportunity.csv
+  taz_ato:
+    type: join
+    name: TAZ_AccessToOpportunities_OY2023
+    save_dir: access
+    base: wf_taz
+    csv: WFv920_OY_2023_Access_to_Opportunity.csv
+    description: WF TAZs joined with 2023 Access to Opportunity results
+    preview: {column: job_by_auto}
+
+  # --- Community amenities ---------------------------------------------------
+  edu_k12:
+    type: arcgis
+    name: Schools_PreKto12
+    save_dir: amenities
+    url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_PreKto12/FeatureServer/0
+    description: K-12 schools (public and charter)
+
+  edu_higher:
+    type: arcgis
+    name: Schools_HigherEducation
+    save_dir: amenities
+    url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/Schools_HigherEducation/FeatureServer/0
+    description: Higher education institutions
+
+  health_fac:
+    type: arcgis
+    name: LicensedHealthCareFacilities
+    save_dir: amenities
+    url: https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/LicensedHealthCareFacilities/FeatureServer/0
+    description: Licensed healthcare facilities and hospitals
+
+  child_care:
+    type: local
+    name: ChildCareFacilities
+    save_dir: amenities
+    path: HIFLD OPEN Child Care Centers/child-care-centers-geojson.zip
+    read_mode: zip
+    query: "SELECT * FROM Child_Care_Centers WHERE STATE = 'UT'"
+    description: HIFLD child care centers, Utah only
+
+  grocery_store:
+    type: arcgis
+    name: UtahGroceryAndFoodStores_DAF
+    save_dir: amenities
+    url: https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/UtahGroceryAndFoodStores_DAF/FeatureServer/0
+    description: Utah grocery and food stores
+
+  community_center:
+    type: arcgis
+    name: Community_Centers
+    save_dir: amenities
+    url: https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/Residential_Accessibility_WFL1/FeatureServer/412 # TODO: use UGRC
+    description: Community centers
+
+  park_5min:
+    type: arcgis
+    name: Parks_5min_ServiceArea
+    save_dir: amenities
+    url: https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/0
+    description: Park walk access, 5-minute (300 s) service area
+
+  park_10min:
+    type: arcgis
+    name: Parks_10min_ServiceArea
+    save_dir: amenities
+    url: https://services1.arcgis.com/taguadKoI1XFwivx/ArcGIS/rest/services/AccessToParks_082024_gdb/FeatureServer/1
+    description: Park walk access, 10-minute (600 s) service area

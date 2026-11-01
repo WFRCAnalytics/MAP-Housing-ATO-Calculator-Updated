@@ -1,7 +1,7 @@
 library(shiny)
 library(bslib)
-library(arrow)
-library(geoarrow)
+library(DBI)
+library(duckdb)
 library(dplyr)
 library(sf)
 library(mapgl)
@@ -21,22 +21,45 @@ data_path <- "data/h3_scored"
 cities_path <- "data/UtahMunicipalBoundaries.parquet"
 boundary_path <- "data/Analysis_Boundary_WFRC_MAG.parquet"
 
-# Load H3 Data (LAZY CONNECTION)
+# DuckDB reads the GeoParquet files written by 4-ato-scoring.qmd (WGS84, geometry
+# as WKB). The spatial extension is not needed: geometry comes back as raw WKB
+# bytes and sf parses it.
+con <- DBI::dbConnect(duckdb::duckdb())
+shiny::onStop(function() DBI::dbDisconnect(con, shutdown = TRUE))
+
+# Query -> sf. `geom` names the WKB column in the query result.
+query_sf <- function(sql, geom = "geom", params = list()) {
+  df <- DBI::dbGetQuery(con, sql, params = params)
+  sf::st_sf(
+    df[setdiff(names(df), geom)],
+    geometry = sf::st_as_sfc(structure(as.list(df[[geom]]), class = "WKB"), crs = 4326)
+  )
+}
+
+# Load H3 Data (LAZY: only the selected cities are read, see filtered_data())
 message("Connecting to H3 dataset...")
-# Do NOT call st_as_sf() here. It triggers a full load.
-ds_h3 <- arrow::open_dataset(data_path)
+h3_source <- sprintf(
+  "read_parquet('%s', hive_partitioning = true)",
+  file.path(data_path, "*", "part-0.parquet")
+)
 
 message("H3 Dataset connected.")
 
 # Store column names available in H3 for strict score validation in client-side expression
-available_h3_cols <- names(ds_h3)
+available_h3_cols <- DBI::dbGetQuery(
+  con,
+  sprintf("SELECT column_name FROM (DESCRIBE SELECT * FROM %s)", h3_source)
+)$column_name
 
-# Load City Boundaries (Arrow -> sf pipeline)
+# Load City Boundaries
 message("Loading City Boundaries...")
 if (file.exists(cities_path)) {
-  # CORRECTED: Read with arrow, then convert to sf
-  cities_sf <- arrow::open_dataset(cities_path) |>
-    sf::st_as_sf(crs = 4326)
+  # Only the columns the map needs: the file also holds a `geojson` text copy
+  # of each boundary for the Vite app, which must not travel to the browser.
+  cities_sf <- query_sf(
+    sprintf("SELECT UGRCODE, NAME, geometry FROM read_parquet('%s')", cities_path),
+    geom = "geometry"
+  )
 
   # Prepare Lookup Map
   cities_sf <- cities_sf[order(cities_sf$NAME), ]
@@ -47,12 +70,13 @@ if (file.exists(cities_path)) {
   city_choices <- character(0)
 }
 
-# Load Regional Boundary (Arrow -> sf pipeline)
+# Load Regional Boundary
 message("Loading Regional Boundary...")
 if (file.exists(boundary_path)) {
-  # CORRECTED: Read with arrow, then convert to sf
-  bound_sf <- arrow::open_dataset(boundary_path) |>
-    sf::st_as_sf(crs = 4326)
+  bound_sf <- query_sf(
+    sprintf("SELECT * FROM read_parquet('%s')", boundary_path),
+    geom = "geometry"
+  )
 } else {
   message("Warning: Regional boundary file not found.")
   bound_sf <- NULL
@@ -1554,32 +1578,24 @@ gdf.to_file(os.path.join(folder_path, "HousingSiteEvaluator_Filtered_Data.geojso
 
     total_weight <- sum(weights)
 
-    # --------------------------------------------------------
-    # NEW: Lazy Filtering Pipeline
-    # --------------------------------------------------------
-    # 1. Start with the arrow dataset connection
-    # 2. Apply filters (Arrow pushes these down to the file system)
-    # 3. Collect() to load only result into R memory
-    # 4. Convert to sf (geoarrow handles the binary geometry column)
-
-    df <- ds_h3 |>
-      dplyr::filter(CommCode %in% !!input$comm_code)
+    # Read only the selected cities. The CommCode filter is pushed down to the
+    # hive partition folders, so other cities' files are never opened.
+    codes <- as.character(input$comm_code)
+    df <- query_sf(
+      sprintf(
+        "SELECT * FROM %s WHERE CommCode IN (%s)",
+        h3_source,
+        paste(rep("?", length(codes)), collapse = ", ")
+      ),
+      params = as.list(codes)
+    )
 
     # --- OZ Filter is now client-side via set_filter() (see apply_h3_filters) ---
-
-    # Execute the query and load to memory
-    df <- df |>
-      # dplyr::collect() |>
-      sf::st_as_sf(crs = 4326)
-    # Note: Since geoarrow is loaded, st_as_sf usually detects
-    # the WKB geometry column automatically.
 
     if (nrow(df) > 0) {
       cols <- names(weights)
 
       # Ensure columns exist (handling potential schema mismatches)
-      # In arrow, selecting non-existent columns usually errors,
-      # but if they exist in schema but are null, this handles it.
       missing_cols <- setdiff(cols, names(df))
       if (length(missing_cols) > 0) {
         df[missing_cols] <- 0

@@ -37,6 +37,8 @@ Each proximity factor is computed one of two ways:
 
 Both are computed via `ST_Intersects`/`ST_DWithin` in DuckDB, iterating bands smallest-first and only updating rows that haven't already matched a closer band.
 
+> **Revisit when DuckDB adds `ST_Subdivide`.** To keep the isochrone join fast, `_src/process_amenities.R` merges each band into one polygon and clips it into 5 km tiles (`tile_polygons()`, also used for the 20 km county tiles in the admin join). That tiling is a workaround for DuckDB spatial having no `ST_Subdivide` ([duckdb-spatial#905](https://github.com/duckdb/duckdb-spatial/issues/905)); replace it when that lands. The untiled version gives identical results but took about 13.6 min instead of 0.6 min for step 3 on a 96 GB workstation. It is commit `b338f99` (`git show b338f99:_src/process_amenities.R`).
+
 ### The canvas: parcels and H3 grid
 
 Two target geometries carry every score: **REMM parcels** (WFRC's Real Estate Market Model, parcel-level) and an **H3 hexagon grid at resolution 10** covering the region, built from the WFRC/MAG regional boundary. Each parcel is represented by an interior point (`ST_PointOnSurface`, not centroid — this keeps the sample point inside U-shaped or non-convex parcels) for the spatial joins; H3 cells use the true polygon.
@@ -45,10 +47,10 @@ Two target geometries carry every score: **REMM parcels** (WFRC's Real Estate Ma
 
 Each parcel/hexagon is tagged with a **building code** (`BC` — e.g. `SF` single-family, `MF` multi-family, `RE` retail, `IN` industrial, `OS` open space; see [Output columns](#output-columns) for the full list) via a four-pass hybrid approach, since neither building points nor parcel polygons alone cover every case cleanly:
 
-1. **Aggregation** — join REMM buildings to parcels/hexes by spatial index, prioritizing the largest building by square footage where multiple buildings share a cell (handles mixed-use and multi-building parcels).
+1. **Aggregation** — join REMM buildings to parcels/hexes. A parcel takes the code of its largest building (by square footage); a hexagon takes the most common code among the buildings in it, with ties going to the code with more total square footage, then alphabetically (handles mixed-use and multi-building parcels).
 2. **Spatial backfill** — for cells still missing a code (typically large parcels where the H3 cell center falls far from any building centroid), sample the parcel polygon directly at the H3 cell center.
 3. **Spatial voting (KNN)** — for cells still empty, check the 6 immediate H3 neighbors; if 4+ have a value, treat the gap as a data glitch and fill it from the neighborhood majority. Fewer than 4 is treated as a genuine edge (e.g. coastline) and left alone.
-4. **Catch-all** — anything still null is forced to `OT` (Other) rather than left as a silent gap.
+4. **Catch-all** — anything still without a code (including parcels with no buildings and buildings with a missing or unmapped `building_type`) is `OT` (Other) rather than left as a silent gap. The logic is in `_src/building_codes.R`.
 
 ### Job access (`AA`, `AT`)
 
@@ -152,6 +154,8 @@ ORS_API_KEY=your_key_here
 
 `vite-app`'s address geocoder calls UGRC data through AGRC's [masquerade](https://github.com/agrc/masquerade) proxy (`masquerade.ugrc.utah.gov`) — a public, unauthenticated, CORS-enabled Esri-compatible locator, so no API key or config is needed. It falls back to Nominatim for anything UGRC doesn't index (e.g. business/POI names).
 
+`vite-app`'s base maps are also UGRC's: **Lite**, **Dark** and **Hybrid** (Esri aerial imagery under UGRC's road and label overlay), switchable from the map. They are composed in the browser from UGRC's hosted vector tile services (see `vite-app/src/composables/ugrcBasemap.js`), so no key is needed. Dark uses the same services as Lite with UGRC's dark styling.
+
 ## Running the pipeline
 
 Run the four Quarto steps in order — each writes standardized GeoParquet that the next step reads:
@@ -161,7 +165,9 @@ Run the four Quarto steps in order — each writes standardized GeoParquet that 
 3. **`3-spatial-operations.qmd`** — builds the parcel/H3 canvas, assigns building codes and job access, spatially joins every isochrone/buffer to produce raw metric columns.
 4. **`4-ato-scoring.qmd`** — normalizes raw metrics to 0–1 scores (see [Normalization](#normalization)), exports final Parquet + a zipped File Geodatabase, and syncs scored data into both apps' `data/` directories.
 
-> Run chunks manually inside Positron/RStudio rather than via `Rscript` — some dependencies (`geoarrow`, `renv`) only resolve correctly inside the IDE's R session.
+> Run chunks manually inside Positron/RStudio rather than via `Rscript` — `renv` resolves its packages inside the IDE's R session. The four pipeline steps and the Shiny app use DuckDB (plus `sf` in steps 1–2 for the ArcGIS download and the ORS responses, and in the app to parse geometry); `arrow` and `geoarrow` are no longer used anywhere.
+>
+> Step 4 writes the app data (`_app/data`, `vite-app/public/data`) as standard GeoParquet in WGS84: geometry is WKB, and the municipal file also carries a `geojson` text column that the Vite app reads.
 
 ## Project Structure
 

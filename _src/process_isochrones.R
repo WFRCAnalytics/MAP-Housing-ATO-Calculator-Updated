@@ -12,15 +12,17 @@
 #'   If `range_type = "time"` (default), values are in **seconds**.
 #'   If `range_type = "distance"`, values are in **meters**.
 #' @param input_filter A SQL WHERE clause to filter input points (e.g., "type = 'Grocery'").
-#' @param boundary_path Path to the regional boundary parquet (optional).
-#' @param boundary_crs The EPSG code of the boundary file (e.g., "EPSG:26912").
-#'   Defaults to "EPSG:4326" (which matches your new boundary generation).
+#' @param boundary_path Path to the regional boundary parquet (optional). It must
+#'   be in the same CRS as `path` (the processed layers are all EPSG:26912).
 #' @param batch_size An integer number of coordinates to send per API call (default 5).
 #' @param save_dir A string path to the isochrone profile directory.
 #'   Defaults to `dirs$isochrones`.
-#' @param crs Projected EPSG code for spatial operations (default `CRS_STP`).
+#' @param crs Target EPSG code of the saved isochrones (default `CRS_WGS`).
 #' @param dry_run Logical. If `TRUE`, prints batch details without calling the API.
 #' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
+#' @param max_retries Attempts per API batch before the layer fails (default 3).
+#'   Completed batches are checkpointed in `<output>.parquet.parts/`, so a
+#'   failed run resumes from the last good batch when re-run.
 #' @param ... Additional arguments passed to \code{openrouteservice::ors_isochrones}.
 #'   Common options include:
 #'   \itemize{
@@ -36,7 +38,8 @@
 #'   or NULL if dry_run is TRUE or generation fails.
 #'
 #' @section Dependencies:
-#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `arrow`, `geoarrow`, `janitor`, `duckdb`, `DBI`.
+#' Requires `openrouteservice`, `sf`, `dplyr`, `purrr`, `janitor`, `duckdb`, `DBI`, `glue`,
+#' and `write_sf_parquet()` from `prepare_layers.R`.
 #'
 #' @examples
 #' \dontrun{
@@ -68,12 +71,12 @@ process_isochrones <- function(
   range,
   input_filter = "1=1",
   boundary_path = NULL,
-  boundary_crs = "EPSG:4326",
   batch_size = 5,
   save_dir = dirs$isochrones,
-  crs = CRS_STP,
+  crs = CRS_WGS,
   dry_run = TRUE,
   overwrite = FALSE,
+  max_retries = 3,
   ...
 ) {
   # 1. Dependency Check
@@ -82,8 +85,6 @@ process_isochrones <- function(
     "sf",
     "dplyr",
     "purrr",
-    "arrow",
-    "geoarrow",
     "janitor",
     "duckdb",
     "DBI",
@@ -118,29 +119,22 @@ process_isochrones <- function(
   tryCatch(
     {
       DBI::dbExecute(conn, "INSTALL spatial; LOAD spatial;")
-      # DBI::dbExecute(conn, "CALL register_geoarrow_extensions()")
+      DBI::dbExecute(conn, "SET geometry_always_xy = true")
 
       # --- QUERY CONSTRUCTION ---
       if (!is.null(boundary_path)) {
-        transform_logic <- if (boundary_crs != "EPSG:4326") {
-          glue::glue("ST_Transform(geom, '{boundary_crs}', 'EPSG:4326')")
-        } else {
-          "geom"
-        }
-        # 1. Read ANY boundary file -> 2. Dissolve All Features -> 3. Spatial Join
+        # Points and boundary share a CRS, so they intersect directly. The ORS API
+        # wants lon/lat, so the coordinates are taken from a WGS84 copy of each point.
         query_view <- glue::glue(
           "
           CREATE OR REPLACE VIEW input_points AS
-          WITH region_source AS (
-            SELECT geometry as geom FROM read_parquet('{boundary_path}')
-          ),
-          region_unified AS (
-            SELECT ST_Union_Agg({transform_logic}) as geom
-            FROM region_source
+          WITH region_unified AS (
+            SELECT ST_Union_Agg(geometry) as geom
+            FROM read_parquet('{boundary_path}')
           )
           SELECT
-            ST_X(pts.geometry) as lon,
-            ST_Y(pts.geometry) as lat
+            ST_X(ST_Transform(pts.geometry, 'EPSG:4326')) as lon,
+            ST_Y(ST_Transform(pts.geometry, 'EPSG:4326')) as lat
           FROM read_parquet('{path}') pts, region_unified
           WHERE
             {input_filter}
@@ -160,8 +154,8 @@ process_isochrones <- function(
           "
           CREATE OR REPLACE VIEW input_points AS
           SELECT
-            ST_X(geometry) as lon,
-            ST_Y(geometry) as lat
+            ST_X(ST_Transform(geometry, 'EPSG:4326')) as lon,
+            ST_Y(ST_Transform(geometry, 'EPSG:4326')) as lat
           FROM read_parquet('{path}')
           WHERE {input_filter}
         "
@@ -171,12 +165,22 @@ process_isochrones <- function(
 
       DBI::dbExecute(conn, query_view)
 
-      # Count total rows
-      total_rows <- DBI::dbGetQuery(
+      # Fetch the points ONCE, in a stable order, and batch them in R. Batch i
+      # always covers the same points, and the boundary filter runs a single
+      # time instead of once per API batch.
+      pts <- DBI::dbGetQuery(
         conn,
-        "SELECT COUNT(*) as n FROM input_points"
-      )$n
-      num_batches <- ceiling(total_rows / batch_size)
+        "SELECT lon, lat FROM input_points ORDER BY lon, lat"
+      )
+      total_rows <- nrow(pts)
+      batches <- split(
+        seq_len(total_rows),
+        ceiling(seq_len(total_rows) / batch_size)
+      )
+      num_batches <- length(batches)
+      batch_coords <- function(i) {
+        purrr::array_branch(as.matrix(pts[batches[[i]], c("lon", "lat")]), 1)
+      }
 
       # --- DRY RUN ---
       if (dry_run) {
@@ -187,71 +191,100 @@ process_isochrones <- function(
         message(paste("   Batch Size:   ", batch_size))
         message(paste("   Num Batches:  ", num_batches))
 
-        # Sample first batch query
-        sample_batch <- DBI::dbGetQuery(
-          conn,
-          glue::glue(
-            "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET 0"
-          )
-        )
-        # Convert to list of pairs for API
-        sample_list <- purrr::array_branch(as.matrix(sample_batch), 1)
-
-        message("   Sample Batch 1 (Coordinates):")
-        print(sample_list)
+        if (num_batches > 0) {
+          message("   Sample Batch 1 (Coordinates):")
+          print(batch_coords(1))
+        }
         return(invisible(NULL))
       }
 
+      # Checkpoint each batch to disk so a crash or ORS outage resumes where
+      # it stopped. The checkpoint is discarded if the request signature
+      # (profile, range, filter, ...) differs from the one that wrote it.
+      parts_dir <- paste0(out_fp, ".parts")
+      sig_fp <- file.path(parts_dir, "signature.rds")
+      sig <- list(profile, range, input_filter, batch_size, total_rows, list(...))
+      if (dir.exists(parts_dir) && !identical(tryCatch(readRDS(sig_fp), error = function(e) NULL), sig)) {
+        message("   ♻️  Stale checkpoint found, discarding")
+        unlink(parts_dir, recursive = TRUE)
+      }
+      dir.create(parts_dir, recursive = TRUE, showWarnings = FALSE)
+      saveRDS(sig, sig_fp)
+
+      n_done <- length(list.files(parts_dir, pattern = "^batch_"))
+      if (n_done > 0) message("   ▶️  Resuming: ", n_done, "/", num_batches, " batches already done")
       message(paste("   Streaming", num_batches, "batches..."))
 
-      # 4. Process Batches (Streaming Loop)
+      # 4. Process Batches
+      # A batch is retried; if it still fails the whole layer fails, so a
+      # partial isochrone layer is never saved (and then cached as complete).
       results_list <- purrr::map(
-        1:num_batches,
+        seq_len(num_batches),
         function(i) {
-          # Calculate OFFSET
-          offset <- (i - 1) * batch_size
+          part_fp <- file.path(parts_dir, sprintf("batch_%05d.rds", i))
+          if (file.exists(part_fp)) return(readRDS(part_fp))
 
-          # Fetch just this batch from DuckDB
-          # This keeps RAM usage tiny regardless of dataset size
-          batch_df <- DBI::dbGetQuery(
-            conn,
-            glue::glue(
-              "SELECT lon, lat FROM input_points LIMIT {batch_size} OFFSET {offset}"
-            )
-          )
-
-          # Convert to API format (List of c(lon, lat))
-          batch_coords <- purrr::array_branch(as.matrix(batch_df), 1)
-
-          # Rate Limit Sleep
-          Sys.sleep(0)
-
-          tryCatch(
-            {
+          res <- NULL
+          for (attempt in seq_len(max_retries)) {
+            res <- tryCatch(
               openrouteservice::ors_isochrones(
-                locations = batch_coords,
+                locations = batch_coords(i),
                 profile = profile,
                 range = range,
                 output = "sf",
                 ...
+              ),
+              error = function(e) {
+                message("   ⚠️ Batch ", i, " attempt ", attempt, "/", max_retries, " failed: ", conditionMessage(e))
+                NULL
+              }
+            )
+            if (!is.null(res)) break
+            Sys.sleep(2 * attempt)
+          }
+          if (is.null(res)) {
+            # A batch fails as a whole when any point in it cannot be routed
+            # (e.g. ORS 3099: no road within snapping distance for this profile).
+            # Retry point by point and drop only the points ORS rejects.
+            message("   🔎 Batch ", i, ": retrying point by point")
+            locs <- batch_coords(i)
+            singles <- lapply(seq_along(locs), function(j) {
+              tryCatch(
+                openrouteservice::ors_isochrones(
+                  locations = list(locs[[j]]),
+                  profile = profile,
+                  range = range,
+                  output = "sf",
+                  ...
+                ),
+                error = function(e) {
+                  warning(
+                    "Skipped unroutable point (lon, lat) = (",
+                    paste(round(locs[[j]], 6), collapse = ", "), "): ",
+                    conditionMessage(e),
+                    call. = FALSE
+                  )
+                  NULL
+                }
               )
-            },
-            error = function(e) {
-              warning(paste("   ⚠️ Batch", i, "failed:", e$message))
-              return(NULL)
+            })
+            if (all(vapply(singles, is.null, logical(1)))) {
+              res <- NULL
+            } else {
+              res <- dplyr::bind_rows(singles)
             }
-          )
+          }
+          saveRDS(res, part_fp)
+          res
         },
         .progress = TRUE
-      ) # Add progress bar!
+      )
 
       # 5. Save Results
-      final_iso <- results_list |>
-        purrr::discard(is.null) |>
-        dplyr::bind_rows()
+      final_iso <- dplyr::bind_rows(results_list)
 
       if (nrow(final_iso) > 0) {
-        # API returns 4326. We simply save it as 4326.
+        # ORS returns EPSG:4326; write_sf_parquet() projects it to `crs`.
         final_iso <- final_iso |>
           janitor::clean_names() |>
           sf::st_cast("MULTIPOLYGON")
@@ -263,14 +296,14 @@ process_isochrones <- function(
           sf::st_crs(final_iso) <- 4326
         }
 
-        arrow_table <- as_geoparquet_table(final_iso)
-
-        arrow::write_parquet(arrow_table, out_fp)
+        # DuckDB writes the parquet with the CRS in its metadata
+        tmp_fp <- paste0(out_fp, ".tmp")
+        unlink(tmp_fp)
+        write_sf_parquet(final_iso, tmp_fp, crs)
+        publish_output(tmp_fp, out_fp)
+        unlink(parts_dir, recursive = TRUE)
         message(paste("💾 Saved:", out_fp))
         return(out_fp)
-
-        rm(final_iso, arrow_table)
-        gc()
       } else {
         warning("❌ No isochrones generated.")
         return(NULL)

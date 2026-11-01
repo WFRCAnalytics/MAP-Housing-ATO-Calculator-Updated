@@ -12,9 +12,6 @@
 #' @param crs Target EPSG code (default `CRS_WGS`).
 #' @param partitioning Character vector of columns to partition by (e.g. "co_name").
 #' @param overwrite Logical. If \code{TRUE}, overwrites existing files. Default \code{FALSE}.
-#' @param ... Additional arguments passed to \code{arrow::write_dataset} or \code{arrow::write_parquet}
-#'   (e.g., \code{compression = "snappy"}, \code{hive_style = FALSE}).
-#'
 #' @return A string containing the full path to the saved file or directory.
 #' @export
 download_feature_layer <- function(
@@ -24,11 +21,10 @@ download_feature_layer <- function(
   where = "1=1",
   crs = CRS_WGS,
   partitioning = NULL,
-  overwrite = FALSE,
-  ...
+  overwrite = FALSE
 ) {
   # 1. Dependency Check
-  required_pkgs <- c("arcgislayers", "janitor", "arrow", "sf", "dplyr")
+  required_pkgs <- c("arcgislayers", "janitor", "sf", "dplyr", "duckdb", "DBI", "glue")
   missing_pkgs <- required_pkgs[
     !sapply(required_pkgs, requireNamespace, quietly = TRUE)
   ]
@@ -53,6 +49,11 @@ download_feature_layer <- function(
     return(out_fp)
   }
 
+  # Write to a temp path and publish only on success (see publish_output()),
+  # so an interrupted write is never mistaken for a cached layer.
+  tmp_fp <- paste0(out_fp, ".tmp")
+  unlink(tmp_fp, recursive = TRUE)
+
   message(paste("⬇️ Downloading:", name))
 
   # 4. Execution
@@ -70,31 +71,15 @@ download_feature_layer <- function(
       # ArcGIS often returns 'shape', 'Shape', or 'esrigeometry'.
       sf::st_geometry(sf_obj) <- "geometry"
 
-      # Prepare GeoParquet
-      arrow_table <- as_geoparquet_table(sf_obj)
+      # Write via DuckDB, which carries the sf object's CRS into the GeoParquet metadata
+      write_sf_parquet(sf_obj, tmp_fp, crs, partitioning)
+      publish_output(tmp_fp, out_fp)
+      message(paste(
+        if (is.null(partitioning)) "💾 Saved Parquet File:" else "💾 Saved Partitioned Dataset:",
+        out_fp
+      ))
 
-      # 6. Write (Conditional with Ellipsis)
-      if (!is.null(partitioning)) {
-        arrow::write_dataset(
-          dataset = arrow_table,
-          path = out_fp,
-          format = "parquet",
-          partitioning = partitioning,
-          existing_data_behavior = "overwrite",
-          ...
-        )
-        message(paste("💾 Saved Partitioned Dataset:", out_fp))
-      } else {
-        arrow::write_parquet(
-          x = arrow_table,
-          sink = out_fp,
-          ...
-        )
-        message(paste("💾 Saved Parquet File:", out_fp))
-      }
-
-      # MEMORY OPTIMIZATION
-      rm(sf_obj, arrow_table)
+      rm(sf_obj)
       gc()
 
       return(out_fp)
