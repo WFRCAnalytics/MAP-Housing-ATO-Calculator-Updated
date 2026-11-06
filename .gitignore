@@ -81,3 +81,7 @@ _output/*.gdb
 _app/data/*.parquet
 _app/data/*.geojson
 shinyapps.txt
+
+# Quarto cache
+/.quarto/
+**/*.quarto_ipynb
