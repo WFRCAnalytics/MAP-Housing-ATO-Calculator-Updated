@@ -643,11 +643,11 @@ fp_out_h3 <- here::here(dirs$results, "h3_enriched.parquet")
 
 DBI::dbExecute(
   conn,
-  glue::glue("COPY targets_parcels TO '{fp_out_parcels}' (FORMAT PARQUET)")
+  glue::glue("COPY (SELECT * FROM targets_parcels ORDER BY parcel_id) TO '{fp_out_parcels}' (FORMAT PARQUET)")
 )
 DBI::dbExecute(
   conn,
-  glue::glue("COPY targets_h3 TO '{fp_out_h3}' (FORMAT PARQUET)")
+  glue::glue("COPY (SELECT * FROM targets_h3 ORDER BY h3_index) TO '{fp_out_h3}' (FORMAT PARQUET)")
 )
 
 message("🚀 Processing Complete!")
