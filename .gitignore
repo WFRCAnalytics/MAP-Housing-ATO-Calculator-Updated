@@ -84,3 +84,4 @@ shinyapps.txt
 
 # Quarto cache
 /.quarto/
+**/*.quarto_ipynb
