@@ -227,7 +227,7 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
   )
 
   # 1. Load the municipal layer. The county layer (`county_tiles`) is loaded
-  #    and tiled once in the run chunk below and shared by both targets.
+  #    and subdivided once in the run chunk below and shared by both targets.
   timed_step(
     "load municipal layer",
     DBI::dbExecute(
@@ -282,7 +282,7 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
   )
 
   # 4. Update County (Spatial Join on Point Table -> Update Target by key)
-  #    GROUP BY also collapses a point that sits on a tile seam.
+  #    GROUP BY also collapses a point that sits on a seam between pieces.
   timed_step(
     "county join (COUNTYNBR)",
     DBI::dbExecute(
@@ -309,11 +309,10 @@ attach_admin_data <- function(conn, target_table, point_table, key) {
 
 ```{r}
 #| label: run-admin-join
-# The 29 county polygons are large (up to ~13,600 vertices), so they are clipped
-# into 20 km tiles once and reused for parcels and H3. See tile_polygons().
-COUNTY_TILE_SIZE <- 20000
+# The 29 county polygons are large (up to ~13,600 vertices), so they are subdivided
+# once and reused for parcels and H3. See subdivide_polygons().
 
-timed_step("load + tile county layer", {
+timed_step("load + subdivide county layer", {
   DBI::dbExecute(
     conn,
     glue::glue(
@@ -324,13 +323,7 @@ timed_step("load + tile county layer", {
     "
     )
   )
-  tile_polygons(
-    conn,
-    "layer_county",
-    "county_tiles",
-    "COUNTYNBR",
-    COUNTY_TILE_SIZE
-  )
+  subdivide_polygons(conn, "layer_county", "county_tiles", "COUNTYNBR")
 })
 
 # Pass the pre-calculated point tables we created in Part 1
@@ -590,16 +583,15 @@ if (length(missing_layers) > 0) {
 
 ### Spatial Join
 
-::: {.callout-warning}
-## Revisit: tiling is a workaround for the missing `ST_Subdivide`
+::: {.callout-note}
+## Large polygons are subdivided
 
-`tile_polygons()` clips large polygons into square tiles so the spatial join can use its index:
-each dissolved isochrone band into 5 km tiles (`prepare_layer()`), and the county layer into
-20 km tiles (admin join above). This is a hand-rolled stand-in for PostGIS's `ST_Subdivide`,
-which DuckDB's spatial extension does not have yet. **When it does, replace the tiling with
-it.** Tracking issue: <https://github.com/duckdb/duckdb-spatial/issues/905>
+`subdivide_polygons()` cuts large polygons into pieces of at most 256 vertices with `ST_Subdivide`
+so the spatial join can use its index: each dissolved isochrone band (`prepare_layer()`) and the
+county layer (admin join above). This needs DuckDB 1.5.6 or later
+([duckdb-spatial#719](https://github.com/duckdb/duckdb-spatial/pull/719)).
 
-The untiled version (same results, about 13.6 min instead of 0.6 min on a 96 GB workstation)
+The undivided version (same results, about 13.6 min instead of 0.6 min on a 96 GB workstation)
 is at commit `b338f99` (`git show b338f99:_src/process_amenities.R`).
 :::
 

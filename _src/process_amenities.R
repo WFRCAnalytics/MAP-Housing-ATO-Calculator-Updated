@@ -16,46 +16,34 @@ timed_step <- function(label, expr) {
   expr
 }
 
-#' Clip Polygons Into Square Tiles
+#' Subdivide Polygons Into Small Pieces
 #'
-#' Creates the temp table `dest` with one row per (`id_col`, tile) holding the
-#' part of each polygon of `src` that falls in a `tile_size` square. A point is
-#' then tested only against the few small tiles near it instead of one polygon
-#' with tens of thousands of vertices: a 3599 s driving band went from 20 s to
-#' 0.1 s per table, and the county layer from 8.5 s to under 1 s, with
-#' identical matches. A point on a tile seam matches both tiles, so join
-#' results must be grouped by the point's key.
+#' Creates the temp table `dest` with one row per (`id_col`, piece) holding the
+#' pieces `ST_Subdivide` cuts each polygon of `src` into, each with at most
+#' `max_vertices` vertices. A point is then tested only against the few small
+#' pieces near it instead of one polygon with tens of thousands of vertices.
+#' A point on a seam between pieces matches both, so join results must be
+#' grouped by the point's key.
 #'
-#' TODO(ST_Subdivide): this tiling is a workaround for DuckDB spatial having no
-#' ST_Subdivide. Replace it when that exists:
-#' https://github.com/duckdb/duckdb-spatial/issues/905
-#' The untiled version (same results, ~13.6 min instead of ~0.6 min for the
-#' whole of step 3) is commit b338f99: git show b338f99:_src/process_amenities.R
+#' Needs DuckDB >= 1.5.6 (`ST_Subdivide` was added to spatial in
+#' https://github.com/duckdb/duckdb-spatial/pull/719). It does not accept a
+#' GeometryCollection, and degenerate input can leave a piece above
+#' `max_vertices`.
 #'
 #' @param conn DuckDB connection with `spatial` loaded.
 #' @param src Table with columns `id_col` and `geom`.
 #' @param dest Name of the temp table to create (columns `id_col`, `geom`).
 #' @param id_col Name of the column that identifies each polygon (kept as is).
-#' @param tile_size Tile edge length in the units of the geometry's CRS.
+#' @param max_vertices Vertex limit per piece. Default 256 (PostGIS's usual choice).
 #' @return `dest`, invisibly.
-tile_polygons <- function(conn, src, dest, id_col, tile_size) {
+subdivide_polygons <- function(conn, src, dest, id_col, max_vertices = 256) {
   DBI::dbExecute(
     conn,
     glue::glue(
       "
       CREATE OR REPLACE TEMP TABLE {dest} AS
-      WITH g AS (
-        SELECT {id_col}, geom,
-               floor(ST_XMin(geom) / {tile_size})::INT AS x0, floor(ST_XMax(geom) / {tile_size})::INT AS x1,
-               floor(ST_YMin(geom) / {tile_size})::INT AS y0, floor(ST_YMax(geom) / {tile_size})::INT AS y1
-        FROM {src}
-      ),
-      gx AS (SELECT {id_col}, geom, unnest(range(x0, x1 + 1)) AS cx, y0, y1 FROM g),
-      gxy AS (SELECT {id_col}, geom, cx, unnest(range(y0, y1 + 1)) AS cy FROM gx)
-      SELECT {id_col},
-             ST_Intersection(geom, ST_MakeEnvelope(cx * {tile_size}, cy * {tile_size},
-                                                   (cx + 1) * {tile_size}, (cy + 1) * {tile_size})) AS geom
-      FROM gxy
+      SELECT {id_col}, unnest(ST_Dump(ST_Subdivide(geom, {max_vertices}))).geom AS geom
+      FROM {src}
     "
     )
   )
@@ -83,16 +71,16 @@ tile_polygons <- function(conn, src, dest, id_col, tile_size) {
 #'   it, which is a no-op for layers already stored in it.
 #' @param simplify_tolerance `ST_Simplify` tolerance in the units of `crs`
 #'   (metres for EPSG:26912). Default 1.0. Use `0` to skip simplification.
-#' @param tile_size Edge length, in the units of `crs`, of the square tiles the
-#'   dissolved isochrone bands are clipped into before joining (`band_tiles`).
-#'   Tiling does not change which points match. Default 5000.
+#' @param max_vertices Vertex limit of the pieces the dissolved isochrone bands
+#'   are subdivided into before joining (`band_tiles`). Subdividing does not
+#'   change which points match. Default 256.
 #' @return `NULL`, invisibly.
 prepare_layer <- function(
   conn,
   config,
   crs = "EPSG:26912",
   simplify_tolerance = 1.0,
-  tile_size = 5000
+  max_vertices = 256
 ) {
   col <- config$col_name
   type <- config$type
@@ -149,10 +137,10 @@ prepare_layer <- function(
     )
     lap("dissolve bands")
 
-    # Clip the dissolved bands into tiles so the join can use its index
-    # (see tile_polygons()).
-    tile_polygons(conn, "band_geom", "band_tiles", "val", tile_size)
-    lap("tile bands")
+    # Subdivide the dissolved bands so the join can use its index
+    # (see subdivide_polygons()).
+    subdivide_polygons(conn, "band_geom", "band_tiles", "val", max_vertices)
+    lap("subdivide bands")
   }
   invisible(NULL)
 }

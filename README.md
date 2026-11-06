@@ -37,7 +37,7 @@ Each proximity factor is computed one of two ways:
 
 Both are computed via `ST_Intersects`/`ST_DWithin` in DuckDB, iterating bands smallest-first and only updating rows that haven't already matched a closer band.
 
-> **Revisit when DuckDB adds `ST_Subdivide`.** To keep the isochrone join fast, `_src/process_amenities.R` merges each band into one polygon and clips it into 5 km tiles (`tile_polygons()`, also used for the 20 km county tiles in the admin join). That tiling is a workaround for DuckDB spatial having no `ST_Subdivide` ([duckdb-spatial#905](https://github.com/duckdb/duckdb-spatial/issues/905)); replace it when that lands. The untiled version gives identical results but took about 13.6 min instead of 0.6 min for step 3 on a 96 GB workstation. It is commit `b338f99` (`git show b338f99:_src/process_amenities.R`).
+> To keep the isochrone join fast, `_src/process_amenities.R` merges each band into one polygon and cuts it into pieces of at most 256 vertices with `ST_Subdivide` (`subdivide_polygons()`, also used for the county layer in the admin join). This needs DuckDB 1.5.6 or later ([duckdb-spatial#719](https://github.com/duckdb/duckdb-spatial/pull/719)). Without it the join gives identical results but took about 13.6 min instead of 0.6 min for step 3 on a 96 GB workstation. That version is commit `b338f99` (`git show b338f99:_src/process_amenities.R`).
 
 ### The canvas: parcels and H3 grid
 
